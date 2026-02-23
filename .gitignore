@@ -1,0 +1,11 @@
+# Gradle
+.gradle/
+build/
+
+# Common JVM/IDE outputs
+out/
+*.class
+
+# Local logs and temp artifacts
+*.log
+*.tmp

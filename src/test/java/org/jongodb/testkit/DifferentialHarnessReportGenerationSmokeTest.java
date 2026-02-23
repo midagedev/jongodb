@@ -1,13 +1,19 @@
 package org.jongodb.testkit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Test;
 
-public final class DifferentialHarnessReportGenerationSmokeTest {
-    public static void main(String[] args) {
+class DifferentialHarnessReportGenerationSmokeTest {
+    @Test
+    void generatesMismatchReportWithStableDiffPathAndStatus() {
         Scenario scenario = new Scenario(
             "find-mismatch",
             "find should report count mismatch",
@@ -30,30 +36,33 @@ public final class DifferentialHarnessReportGenerationSmokeTest {
         );
 
         DifferentialReport report = harness.run(List.of(scenario));
-        expect(report.totalScenarios() == 1, "expected one scenario");
-        expect(report.mismatchCount() == 1, "expected one mismatch");
+        assertEquals(1, report.totalScenarios());
+        assertEquals(1, report.mismatchCount());
 
         DiffResult result = report.results().get(0);
-        expect(result.status() == DiffStatus.MISMATCH, "expected mismatch status");
-        expect(!result.entries().isEmpty(), "expected diff entries");
+        assertEquals(DiffStatus.MISMATCH, result.status());
+        assertEquals("find-mismatch", result.scenarioId());
+        assertEquals("mongod", result.leftBackend());
+        assertEquals("jongodb", result.rightBackend());
+        assertFalse(result.entries().isEmpty());
+
+        DiffEntry entry = result.entries().get(0);
+        assertEquals("$.commandResults[0].count", entry.path());
+        assertEquals(2, entry.leftValue());
+        assertEquals(1, entry.rightValue());
+        assertEquals("value mismatch", entry.note());
 
         DiffSummaryGenerator generator = new DiffSummaryGenerator();
         String markdown = generator.toMarkdown(report);
         String json = generator.toJson(report);
 
-        expect(markdown.contains("find-mismatch"), "markdown missing scenario id");
-        expect(markdown.contains("MISMATCH"), "markdown missing mismatch status");
-        expect(markdown.contains("$.commandResults[0].count"), "markdown missing diff path");
+        assertTrue(markdown.contains("find-mismatch"));
+        assertTrue(markdown.contains("MISMATCH"));
+        assertTrue(markdown.contains("$.commandResults[0].count"));
 
-        expect(json.contains("\"status\":\"MISMATCH\""), "json missing mismatch status");
-        expect(json.contains("\"scenarioId\":\"find-mismatch\""), "json missing scenario id");
-        expect(json.contains("\"path\":\"$.commandResults[0].count\""), "json missing diff path");
-    }
-
-    private static void expect(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
-        }
+        assertTrue(json.contains("\"status\":\"MISMATCH\""));
+        assertTrue(json.contains("\"scenarioId\":\"find-mismatch\""));
+        assertTrue(json.contains("\"path\":\"$.commandResults[0].count\""));
     }
 
     private static final class StaticBackend implements DifferentialBackend {
