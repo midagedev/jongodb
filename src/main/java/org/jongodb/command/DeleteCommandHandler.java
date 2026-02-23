@@ -11,8 +11,6 @@ import org.bson.BsonString;
 import org.bson.BsonValue;
 
 public final class DeleteCommandHandler implements CommandHandler {
-    private static final int CODE_INVALID_ARGUMENT = 14;
-
     private final CommandStore store;
 
     public DeleteCommandHandler(final CommandStore store) {
@@ -24,44 +22,65 @@ public final class DeleteCommandHandler implements CommandHandler {
         final String database = readDatabase(command);
         final String collection = readRequiredString(command, "delete");
         if (collection == null) {
-            return CommandDispatcher.error("delete must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("delete must be a string");
+        }
+
+        BsonDocument optionError = CrudCommandOptionValidator.validateOrdered(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateWriteConcern(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateReadConcern(command);
+        if (optionError != null) {
+            return optionError;
         }
 
         final BsonValue deletesValue = command.get("deletes");
         if (deletesValue == null || !deletesValue.isArray()) {
-            return CommandDispatcher.error("deletes must be an array", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("deletes must be an array");
         }
 
         final BsonArray deletesArray = deletesValue.asArray();
         if (deletesArray.isEmpty()) {
-            return CommandDispatcher.error("deletes must not be empty", CODE_INVALID_ARGUMENT, "BadValue");
+            return CommandErrors.badValue("deletes must not be empty");
         }
 
         final List<CommandStore.DeleteRequest> deletes = new ArrayList<>(deletesArray.size());
         for (final BsonValue value : deletesArray) {
             if (!value.isDocument()) {
-                return CommandDispatcher.error(
-                        "all entries in deletes must be BSON documents", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("all entries in deletes must be BSON documents");
             }
 
             final BsonDocument deleteSpec = value.asDocument();
             final BsonDocument query = readRequiredDocument(deleteSpec, "q");
             if (query == null) {
-                return CommandDispatcher.error("q must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("q must be a document");
+            }
+
+            optionError = CrudCommandOptionValidator.validateHint(deleteSpec, "hint");
+            if (optionError != null) {
+                return optionError;
+            }
+            optionError = CrudCommandOptionValidator.validateCollation(deleteSpec, "collation");
+            if (optionError != null) {
+                return optionError;
             }
 
             final BsonValue limitValue = deleteSpec.get("limit");
             if (limitValue == null) {
-                return CommandDispatcher.error("limit must be an integer", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("limit must be an integer");
             }
 
             final Integer limit = readLimit(limitValue);
             if (limit == null) {
-                return CommandDispatcher.error("limit must be an integer", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("limit must be an integer");
             }
 
             if (limit != 0 && limit != 1) {
-                return CommandDispatcher.error("limit must be 0 or 1", CODE_INVALID_ARGUMENT, "BadValue");
+                return CommandErrors.badValue("limit must be 0 or 1");
             }
 
             deletes.add(new CommandStore.DeleteRequest(query, limit));

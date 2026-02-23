@@ -12,8 +12,6 @@ import org.bson.BsonValue;
 import org.jongodb.engine.DuplicateKeyException;
 
 public final class CreateIndexesCommandHandler implements CommandHandler {
-    private static final int CODE_INVALID_ARGUMENT = 14;
-
     private final CommandStore store;
 
     public CreateIndexesCommandHandler(final CommandStore store) {
@@ -25,38 +23,37 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
         final String database = readDatabase(command);
         final String collection = readRequiredString(command, "createIndexes");
         if (collection == null) {
-            return CommandDispatcher.error("createIndexes must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("createIndexes must be a string");
         }
 
         final BsonValue indexesValue = command.get("indexes");
         if (indexesValue == null || !indexesValue.isArray()) {
-            return CommandDispatcher.error("indexes must be an array", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("indexes must be an array");
         }
 
         final BsonArray indexesArray = indexesValue.asArray();
         if (indexesArray.isEmpty()) {
-            return CommandDispatcher.error("indexes must not be empty", CODE_INVALID_ARGUMENT, "BadValue");
+            return CommandErrors.badValue("indexes must not be empty");
         }
 
         final List<CommandStore.IndexRequest> indexes = new ArrayList<>(indexesArray.size());
         for (final BsonValue value : indexesArray) {
             if (!value.isDocument()) {
-                return CommandDispatcher.error(
-                        "all entries in indexes must be BSON documents", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("all entries in indexes must be BSON documents");
             }
 
             final BsonDocument indexSpec = value.asDocument();
             final String name = readRequiredString(indexSpec, "name");
             if (name == null) {
-                return CommandDispatcher.error("name must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("name must be a string");
             }
 
             final BsonDocument key = readRequiredDocument(indexSpec, "key");
             if (key == null) {
-                return CommandDispatcher.error("key must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("key must be a document");
             }
             if (key.isEmpty()) {
-                return CommandDispatcher.error("key must not be empty", CODE_INVALID_ARGUMENT, "BadValue");
+                return CommandErrors.badValue("key must not be empty");
             }
 
             final BsonValue uniqueValue = indexSpec.get("unique");
@@ -64,7 +61,7 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
             if (uniqueValue == null) {
                 unique = false;
             } else if (!uniqueValue.isBoolean()) {
-                return CommandDispatcher.error("unique must be a boolean", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("unique must be a boolean");
             } else {
                 unique = uniqueValue.asBoolean().getValue();
             }
@@ -76,7 +73,7 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
         try {
             result = store.createIndexes(database, collection, List.copyOf(indexes));
         } catch (final DuplicateKeyException exception) {
-            return CommandDispatcher.duplicateKeyError(exception.getMessage());
+            return CommandErrors.duplicateKey(exception.getMessage());
         }
 
         return new BsonDocument()

@@ -11,8 +11,10 @@ import org.jongodb.command.CommandDispatcher;
 import org.jongodb.command.EngineBackedCommandStore;
 import org.jongodb.engine.InMemoryEngineStore;
 import org.jongodb.obs.CommandJournal;
+import org.jongodb.obs.CommandJournalInvariantChecker;
 import org.jongodb.obs.CorrelationContext;
 import org.jongodb.obs.DiagnosticSnapshotDumper;
+import org.jongodb.obs.DiagnosticTriageReporter;
 import org.jongodb.obs.JsonLinesLogger;
 import org.jongodb.obs.ReproExporter;
 import org.jongodb.wire.OpMsg;
@@ -39,6 +41,8 @@ public final class WireCommandIngress {
     private final JsonLinesLogger logger;
     private final CommandJournal commandJournal;
     private final DiagnosticSnapshotDumper snapshotDumper;
+    private final CommandJournalInvariantChecker invariantChecker;
+    private final DiagnosticTriageReporter triageReporter;
     private final ReproExporter reproExporter;
 
     public WireCommandIngress(final CommandDispatcher dispatcher) {
@@ -75,6 +79,8 @@ public final class WireCommandIngress {
         this.logger = Objects.requireNonNull(logger, "logger");
         this.commandJournal = Objects.requireNonNull(commandJournal, "commandJournal");
         this.snapshotDumper = new DiagnosticSnapshotDumper();
+        this.invariantChecker = new CommandJournalInvariantChecker();
+        this.triageReporter = new DiagnosticTriageReporter();
         this.reproExporter = new ReproExporter();
     }
 
@@ -102,6 +108,23 @@ public final class WireCommandIngress {
 
     public String dumpDiagnosticSnapshotJson() {
         return snapshotDumper.dumpJson(commandJournal);
+    }
+
+    public BsonDocument dumpInvariantReportDocument() {
+        return invariantChecker.check(commandJournal).toDocument();
+    }
+
+    public String dumpInvariantReportJson() {
+        return dumpInvariantReportDocument().toJson();
+    }
+
+    public BsonDocument dumpFailureTriageReportDocument() {
+        final CommandJournalInvariantChecker.InvariantReport invariantReport = invariantChecker.check(commandJournal);
+        return triageReporter.report(commandJournal, invariantReport);
+    }
+
+    public String dumpFailureTriageReportJson() {
+        return dumpFailureTriageReportDocument().toJson();
     }
 
     public String exportReproJsonLines() {

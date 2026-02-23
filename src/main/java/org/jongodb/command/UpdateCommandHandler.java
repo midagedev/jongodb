@@ -12,7 +12,6 @@ import org.bson.BsonValue;
 import org.jongodb.engine.DuplicateKeyException;
 
 public final class UpdateCommandHandler implements CommandHandler {
-    private static final int CODE_INVALID_ARGUMENT = 14;
     private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$inc", "$unset");
 
     private final CommandStore store;
@@ -26,35 +25,56 @@ public final class UpdateCommandHandler implements CommandHandler {
         final String database = readDatabase(command);
         final String collection = readRequiredString(command, "update");
         if (collection == null) {
-            return CommandDispatcher.error("update must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("update must be a string");
+        }
+
+        BsonDocument optionError = CrudCommandOptionValidator.validateOrdered(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateWriteConcern(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateReadConcern(command);
+        if (optionError != null) {
+            return optionError;
         }
 
         final BsonValue updatesValue = command.get("updates");
         if (updatesValue == null || !updatesValue.isArray()) {
-            return CommandDispatcher.error("updates must be an array", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("updates must be an array");
         }
 
         final BsonArray updatesArray = updatesValue.asArray();
         if (updatesArray.isEmpty()) {
-            return CommandDispatcher.error("updates must not be empty", CODE_INVALID_ARGUMENT, "BadValue");
+            return CommandErrors.badValue("updates must not be empty");
         }
 
         final List<CommandStore.UpdateRequest> updates = new ArrayList<>(updatesArray.size());
         for (final BsonValue value : updatesArray) {
             if (!value.isDocument()) {
-                return CommandDispatcher.error(
-                        "all entries in updates must be BSON documents", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("all entries in updates must be BSON documents");
             }
 
             final BsonDocument updateSpec = value.asDocument();
             final BsonDocument query = readRequiredDocument(updateSpec, "q");
             if (query == null) {
-                return CommandDispatcher.error("q must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("q must be a document");
             }
 
             final BsonDocument updateDocument = readRequiredDocument(updateSpec, "u");
             if (updateDocument == null) {
-                return CommandDispatcher.error("u must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("u must be a document");
+            }
+
+            optionError = CrudCommandOptionValidator.validateHint(updateSpec, "hint");
+            if (optionError != null) {
+                return optionError;
+            }
+            optionError = CrudCommandOptionValidator.validateCollation(updateSpec, "collation");
+            if (optionError != null) {
+                return optionError;
             }
 
             final BsonValue multiValue = updateSpec.get("multi");
@@ -62,14 +82,14 @@ public final class UpdateCommandHandler implements CommandHandler {
             if (multiValue == null) {
                 multi = false;
             } else if (!multiValue.isBoolean()) {
-                return CommandDispatcher.error("multi must be a boolean", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("multi must be a boolean");
             } else {
                 multi = multiValue.asBoolean().getValue();
             }
 
             final BsonValue upsertValue = updateSpec.get("upsert");
             if (upsertValue != null && !upsertValue.isBoolean()) {
-                return CommandDispatcher.error("upsert must be a boolean", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("upsert must be a boolean");
             }
 
             final BsonDocument updateValidationError = validateUpdateDocument(updateDocument);
@@ -84,7 +104,7 @@ public final class UpdateCommandHandler implements CommandHandler {
         try {
             result = store.update(database, collection, List.copyOf(updates));
         } catch (final DuplicateKeyException exception) {
-            return CommandDispatcher.duplicateKeyError(exception.getMessage());
+            return CommandErrors.duplicateKey(exception.getMessage());
         }
         return new BsonDocument()
                 .append("n", new BsonInt32(result.matchedCount()))
@@ -94,17 +114,14 @@ public final class UpdateCommandHandler implements CommandHandler {
 
     private static BsonDocument validateUpdateDocument(final BsonDocument updateDocument) {
         if (updateDocument.isEmpty()) {
-            return CommandDispatcher.error("u must not be empty", CODE_INVALID_ARGUMENT, "BadValue");
+            return CommandErrors.badValue("u must not be empty");
         }
 
         final boolean operatorStyle = updateDocument.getFirstKey().startsWith("$");
         for (final String key : updateDocument.keySet()) {
             final boolean currentOperatorStyle = key.startsWith("$");
             if (currentOperatorStyle != operatorStyle) {
-                return CommandDispatcher.error(
-                        "u must either be an operator document or a replacement document",
-                        CODE_INVALID_ARGUMENT,
-                        "BadValue");
+                return CommandErrors.badValue("u must either be an operator document or a replacement document");
             }
         }
 
@@ -114,22 +131,21 @@ public final class UpdateCommandHandler implements CommandHandler {
 
         for (final String key : updateDocument.keySet()) {
             if (!SUPPORTED_OPERATORS.contains(key)) {
-                return CommandDispatcher.error(
-                        "unsupported update operator: " + key, CODE_INVALID_ARGUMENT, "BadValue");
+                return CommandErrors.badValue("unsupported update operator: " + key);
             }
         }
 
         final BsonValue setValue = updateDocument.get("$set");
         if (setValue != null && !setValue.isDocument()) {
-            return CommandDispatcher.error("$set must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("$set must be a document");
         }
         final BsonValue incValue = updateDocument.get("$inc");
         if (incValue != null && !incValue.isDocument()) {
-            return CommandDispatcher.error("$inc must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("$inc must be a document");
         }
         final BsonValue unsetValue = updateDocument.get("$unset");
         if (unsetValue != null && !unsetValue.isDocument()) {
-            return CommandDispatcher.error("$unset must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("$unset must be a document");
         }
         return null;
     }

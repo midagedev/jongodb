@@ -10,6 +10,7 @@ public final class HelloCommandHandler implements CommandHandler {
     public BsonDocument handle(final BsonDocument command) {
         return new BsonDocument()
                 .append("isWritablePrimary", BsonBoolean.TRUE)
+                .append("ismaster", BsonBoolean.TRUE)
                 .append("helloOk", BsonBoolean.TRUE)
                 .append("minWireVersion", new BsonInt32(0))
                 .append("maxWireVersion", new BsonInt32(17))

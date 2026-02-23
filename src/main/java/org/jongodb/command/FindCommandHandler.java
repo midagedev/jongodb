@@ -9,8 +9,6 @@ import org.bson.BsonString;
 import org.bson.BsonValue;
 
 public final class FindCommandHandler implements CommandHandler {
-    private static final int CODE_INVALID_ARGUMENT = 14;
-
     private final CommandStore store;
 
     public FindCommandHandler(final CommandStore store) {
@@ -22,7 +20,20 @@ public final class FindCommandHandler implements CommandHandler {
         final String database = readDatabase(command);
         final String collection = readRequiredString(command, "find");
         if (collection == null) {
-            return CommandDispatcher.error("find must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("find must be a string");
+        }
+
+        BsonDocument optionError = CrudCommandOptionValidator.validateReadConcern(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateHint(command, "hint");
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateCollation(command, "collation");
+        if (optionError != null) {
+            return optionError;
         }
 
         final BsonValue filterValue = command.get("filter");
@@ -32,7 +43,7 @@ public final class FindCommandHandler implements CommandHandler {
         } else if (filterValue.isDocument()) {
             filter = filterValue.asDocument();
         } else {
-            return CommandDispatcher.error("filter must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("filter must be a document");
         }
 
         final List<BsonDocument> foundDocuments = store.find(database, collection, filter);

@@ -6,19 +6,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 import org.bson.BsonDocument;
-import org.bson.BsonDouble;
-import org.bson.BsonInt32;
-import org.bson.BsonString;
 import org.jongodb.txn.SessionTransactionPool;
 import org.jongodb.txn.TransactionCommandValidator;
 import org.jongodb.txn.TransactionCommandValidator.ValidationResult;
 
 public final class CommandDispatcher {
-    private static final int CODE_COMMAND_NOT_FOUND = 59;
-    private static final int CODE_INVALID_ARGUMENT = 14;
-    private static final int CODE_NO_SUCH_TRANSACTION = 251;
-    private static final int CODE_DUPLICATE_KEY = 11000;
-
     private final Map<String, CommandHandler> handlers;
     private final CommandStore globalStore;
     private final SessionTransactionPool sessionPool;
@@ -36,7 +28,10 @@ public final class CommandDispatcher {
 
         final Map<String, CommandHandler> configuredHandlers = new HashMap<>();
         configuredHandlers.put("hello", new HelloCommandHandler());
+        configuredHandlers.put("ismaster", new HelloCommandHandler());
         configuredHandlers.put("ping", new PingCommandHandler());
+        configuredHandlers.put("buildinfo", new BuildInfoCommandHandler());
+        configuredHandlers.put("getparameter", new GetParameterCommandHandler());
         configuredHandlers.put("insert", new InsertCommandHandler(routedStore));
         configuredHandlers.put("find", new FindCommandHandler(routedStore));
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(routedStore));
@@ -49,13 +44,13 @@ public final class CommandDispatcher {
 
     public BsonDocument dispatch(final BsonDocument command) {
         if (command == null || command.isEmpty()) {
-            return error("command document must not be empty", CODE_INVALID_ARGUMENT, "BadValue");
+            return CommandErrors.badValue("command document must not be empty");
         }
 
         final String commandName = command.getFirstKey().toLowerCase(Locale.ROOT);
         final CommandHandler handler = handlers.get(commandName);
         if (handler == null) {
-            return error("no such command: " + commandName, CODE_COMMAND_NOT_FOUND, "CommandNotFound");
+            return CommandErrors.commandNotFound(commandName);
         }
 
         final ValidationResult validation = transactionValidator.validate(commandName, command);
@@ -72,7 +67,7 @@ public final class CommandDispatcher {
             final boolean started =
                     sessionPool.startTransaction(validation.sessionId(), validation.txnNumber(), transactionStore);
             if (!started) {
-                return error("transaction already in progress for this session", CODE_INVALID_ARGUMENT, "BadValue");
+                return CommandErrors.badValue("transaction already in progress for this session");
             }
         }
 
@@ -104,20 +99,8 @@ public final class CommandDispatcher {
         return dispatchWithStore(transactionStore, handler, command);
     }
 
-    static BsonDocument error(final String message, final int code, final String codeName) {
-        return new BsonDocument()
-                .append("ok", new BsonDouble(0.0))
-                .append("errmsg", new BsonString(message))
-                .append("code", new BsonInt32(code))
-                .append("codeName", new BsonString(codeName));
-    }
-
-    static BsonDocument duplicateKeyError(final String message) {
-        return error(message, CODE_DUPLICATE_KEY, "DuplicateKey");
-    }
-
     private static BsonDocument noSuchTransactionError(final String commandName) {
-        return error(commandName + " requires an active transaction", CODE_NO_SUCH_TRANSACTION, "NoSuchTransaction");
+        return CommandErrors.noSuchTransaction(commandName);
     }
 
     private BsonDocument dispatchWithStore(

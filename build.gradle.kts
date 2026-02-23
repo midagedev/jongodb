@@ -16,6 +16,7 @@ java {
 
 dependencies {
     implementation("org.mongodb:bson:4.11.2")
+    implementation("org.mongodb:mongodb-driver-sync:4.11.2")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -42,4 +43,25 @@ tasks.register<JavaExec>("m3GateEvidence") {
         "--repro-samples=$reproSamples",
         if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
     )
+}
+
+tasks.register<JavaExec>("realMongodDifferentialBaseline") {
+    group = "verification"
+    description = "Runs differential corpus against wire backend vs real mongod and writes JSON/MD artifacts."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.RealMongodCorpusRunner")
+
+    val outputDir = (findProperty("realMongodOutputDir") as String?) ?: "build/reports/real-mongod-baseline"
+    val seed = (findProperty("realMongodSeed") as String?) ?: "wire-vs-real-mongod-baseline-v1"
+    val topRegressions = (findProperty("realMongodTopRegressions") as String?) ?: "10"
+    val mongoUri = (findProperty("realMongodUri") as String?) ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
+
+    args(
+        "--output-dir=$outputDir",
+        "--seed=$seed",
+        "--top-regressions=$topRegressions"
+    )
+    if (mongoUri.isNotBlank()) {
+        args("--mongo-uri=$mongoUri")
+    }
 }

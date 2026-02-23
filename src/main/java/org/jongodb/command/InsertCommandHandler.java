@@ -11,8 +11,6 @@ import org.bson.BsonValue;
 import org.jongodb.engine.DuplicateKeyException;
 
 public final class InsertCommandHandler implements CommandHandler {
-    private static final int CODE_INVALID_ARGUMENT = 14;
-
     private final CommandStore store;
 
     public InsertCommandHandler(final CommandStore store) {
@@ -24,20 +22,32 @@ public final class InsertCommandHandler implements CommandHandler {
         final String database = readDatabase(command);
         final String collection = readRequiredString(command, "insert");
         if (collection == null) {
-            return CommandDispatcher.error("insert must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("insert must be a string");
+        }
+
+        BsonDocument optionError = CrudCommandOptionValidator.validateOrdered(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateWriteConcern(command);
+        if (optionError != null) {
+            return optionError;
+        }
+        optionError = CrudCommandOptionValidator.validateReadConcern(command);
+        if (optionError != null) {
+            return optionError;
         }
 
         final BsonValue documentsValue = command.get("documents");
         if (documentsValue == null || !documentsValue.isArray()) {
-            return CommandDispatcher.error("documents must be an array", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            return CommandErrors.typeMismatch("documents must be an array");
         }
 
         final BsonArray documentsArray = documentsValue.asArray();
         final List<BsonDocument> documents = new ArrayList<>(documentsArray.size());
         for (final BsonValue value : documentsArray) {
             if (!value.isDocument()) {
-                return CommandDispatcher.error(
-                        "all entries in documents must be BSON documents", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                return CommandErrors.typeMismatch("all entries in documents must be BSON documents");
             }
             documents.add(value.asDocument());
         }
@@ -46,7 +56,7 @@ public final class InsertCommandHandler implements CommandHandler {
         try {
             insertedCount = store.insert(database, collection, List.copyOf(documents));
         } catch (final DuplicateKeyException exception) {
-            return CommandDispatcher.duplicateKeyError(exception.getMessage());
+            return CommandErrors.duplicateKey(exception.getMessage());
         }
         return new BsonDocument()
                 .append("n", new BsonInt32(insertedCount))

@@ -13,6 +13,19 @@ import org.bson.BsonString;
  * Serializes diagnostics state into deterministic BSON/JSON snapshot payloads.
  */
 public final class DiagnosticSnapshotDumper {
+    private final CommandJournalInvariantChecker invariantChecker;
+    private final DiagnosticTriageReporter triageReporter;
+
+    public DiagnosticSnapshotDumper() {
+        this(new CommandJournalInvariantChecker(), new DiagnosticTriageReporter());
+    }
+
+    DiagnosticSnapshotDumper(
+            final CommandJournalInvariantChecker invariantChecker, final DiagnosticTriageReporter triageReporter) {
+        this.invariantChecker = Objects.requireNonNull(invariantChecker, "invariantChecker");
+        this.triageReporter = Objects.requireNonNull(triageReporter, "triageReporter");
+    }
+
     public BsonDocument dumpDocument(final CommandJournal journal) {
         Objects.requireNonNull(journal, "journal");
 
@@ -22,6 +35,8 @@ public final class DiagnosticSnapshotDumper {
             encodedEntries.add(toDocument(entry));
         }
 
+        final CommandJournalInvariantChecker.InvariantReport invariantReport = invariantChecker.check(journal);
+
         return new BsonDocument()
                 .append(
                         "journal",
@@ -29,7 +44,9 @@ public final class DiagnosticSnapshotDumper {
                                 .append("capacity", new BsonInt32(journal.capacity()))
                                 .append("size", new BsonInt32(entries.size()))
                                 .append("dropped", new BsonInt64(journal.droppedCount()))
-                                .append("entries", encodedEntries));
+                                .append("entries", encodedEntries))
+                .append("invariants", invariantReport.toDocument())
+                .append("triage", triageReporter.report(journal, invariantReport));
     }
 
     public String dumpJson(final CommandJournal journal) {

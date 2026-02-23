@@ -37,6 +37,59 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void isMasterAliasReturnsHandshakeShape() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse("{\"isMaster\": 1, \"$db\": \"admin\"}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertTrue(response.getBoolean("ismaster").getValue());
+        assertTrue(response.getBoolean("isWritablePrimary").getValue());
+    }
+
+    @Test
+    void buildInfoCommandReturnsCompatibilityFields() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse("{\"buildInfo\": 1, \"$db\": \"admin\"}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals("8.0.0-jongodb", response.getString("version").getValue());
+        assertEquals(4, response.getArray("versionArray").size());
+        assertEquals(16 * 1024 * 1024, response.getInt32("maxBsonObjectSize").getValue());
+    }
+
+    @Test
+    void getParameterCommandReturnsRequestedSupportedFields() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"getParameter\": 1, \"$db\": \"admin\", \"featureCompatibilityVersion\": 1, \"transactionLifetimeLimitSeconds\": 1}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(
+                "8.0",
+                response.getDocument("featureCompatibilityVersion")
+                        .getString("version")
+                        .getValue());
+        assertEquals(60, response.getInt32("transactionLifetimeLimitSeconds").getValue());
+    }
+
+    @Test
+    void getParameterCommandRejectsUnsupportedOption() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(
+                BsonDocument.parse("{\"getParameter\": 1, \"$db\": \"admin\", \"unknownParameter\": 1}"));
+
+        assertCommandError(response, "BadValue");
+    }
+
+    @Test
     void insertCommandCallsStoreAndReturnsCount() {
         final RecordingStore store = new RecordingStore();
         final CommandDispatcher dispatcher = new CommandDispatcher(store);
@@ -219,6 +272,55 @@ class CommandDispatcherE2ETest {
         final BsonDocument badValueResponse = dispatcher.dispatch(
                 BsonDocument.parse("{\"delete\":\"users\",\"deletes\":[{\"q\":{},\"limit\":2}]}"));
         assertCommandError(badValueResponse, "BadValue");
+    }
+
+    @Test
+    void crudCommandsAcceptCompatibleOptionShapes() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument insertResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"ordered\":true,\"writeConcern\":{\"w\":\"majority\",\"j\":true,\"wtimeout\":1000},\"readConcern\":{\"level\":\"local\"},\"documents\":[{\"_id\":1,\"name\":\"a\"}]}"));
+        assertEquals(1.0, insertResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument updateResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"ordered\":false,\"writeConcern\":{\"w\":1},\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"$set\":{\"name\":\"b\"}},\"hint\":{\"_id\":1},\"collation\":{\"locale\":\"en\"}}]}"));
+        assertEquals(1.0, updateResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument deleteResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"delete\":\"users\",\"$db\":\"app\",\"ordered\":true,\"writeConcern\":{\"w\":1,\"wtimeout\":0},\"deletes\":[{\"q\":{\"_id\":1},\"limit\":1,\"hint\":\"_id_\",\"collation\":{\"locale\":\"en\"}}]}"));
+        assertEquals(1.0, deleteResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument findResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"readConcern\":{\"level\":\"local\"},\"hint\":{\"_id\":1},\"collation\":{\"locale\":\"en\"}}"));
+        assertEquals(1.0, findResponse.get("ok").asNumber().doubleValue());
+    }
+
+    @Test
+    void crudCommandsRejectInvalidOptionShapes() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument invalidOrdered = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"ordered\":\"true\",\"documents\":[{\"_id\":1}]}"));
+        assertCommandError(invalidOrdered, "TypeMismatch");
+
+        final BsonDocument invalidWriteConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"writeConcern\":\"majority\",\"documents\":[{\"_id\":1}]}"));
+        assertCommandError(invalidWriteConcern, "TypeMismatch");
+
+        final BsonDocument invalidHint = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"a\":1}},\"hint\":{}}]}"));
+        assertCommandError(invalidHint, "BadValue");
+
+        final BsonDocument invalidCollation = dispatcher.dispatch(BsonDocument.parse(
+                "{\"delete\":\"users\",\"$db\":\"app\",\"deletes\":[{\"q\":{},\"limit\":1,\"collation\":\"en\"}]}"));
+        assertCommandError(invalidCollation, "TypeMismatch");
+
+        final BsonDocument invalidReadConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"readConcern\":\"local\"}"));
+        assertCommandError(invalidReadConcern, "TypeMismatch");
     }
 
     @Test

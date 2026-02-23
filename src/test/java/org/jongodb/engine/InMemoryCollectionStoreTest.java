@@ -71,6 +71,38 @@ class InMemoryCollectionStoreTest {
     }
 
     @Test
+    void findSupportsOperatorFiltersForNestedArrayDocuments() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1)
+                                .append("tags", Arrays.asList("java", "db"))
+                                .append(
+                                        "items",
+                                        List.of(
+                                                new Document("sku", "A").append("qty", 2),
+                                                new Document("sku", "B").append("qty", 5))),
+                        new Document("_id", 2)
+                                .append("tags", Arrays.asList("ops"))
+                                .append(
+                                        "items",
+                                        List.of(new Document("sku", "A").append("qty", 1)))));
+
+        Document filter =
+                new Document(
+                        "$and",
+                        List.of(
+                                new Document("tags", new Document("$in", List.of("db"))),
+                                new Document("items.sku", "A"),
+                                new Document("items.qty", new Document("$gte", 2))));
+
+        List<Document> filtered = store.find(filter);
+        assertEquals(1, filtered.size());
+        assertEquals(1, filtered.get(0).getInteger("_id"));
+    }
+
+    @Test
     void insertManyAppendsToExistingCollectionState() {
         CollectionStore store = new InMemoryCollectionStore();
 

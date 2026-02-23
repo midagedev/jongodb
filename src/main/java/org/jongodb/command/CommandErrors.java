@@ -1,0 +1,46 @@
+package org.jongodb.command;
+
+import org.bson.BsonDocument;
+import org.bson.BsonDouble;
+import org.bson.BsonInt32;
+import org.bson.BsonString;
+
+/**
+ * Catalog of wire-compatible command errors used by command handlers.
+ */
+final class CommandErrors {
+    private static final int CODE_COMMAND_NOT_FOUND = 59;
+    private static final int CODE_INVALID_ARGUMENT = 14;
+    private static final int CODE_NO_SUCH_TRANSACTION = 251;
+    private static final int CODE_DUPLICATE_KEY = 11000;
+
+    private CommandErrors() {}
+
+    static BsonDocument commandNotFound(final String commandName) {
+        return error("no such command: " + commandName, CODE_COMMAND_NOT_FOUND, "CommandNotFound");
+    }
+
+    static BsonDocument badValue(final String message) {
+        return error(message, CODE_INVALID_ARGUMENT, "BadValue");
+    }
+
+    static BsonDocument typeMismatch(final String message) {
+        return error(message, CODE_INVALID_ARGUMENT, "TypeMismatch");
+    }
+
+    static BsonDocument noSuchTransaction(final String commandName) {
+        return error(commandName + " requires an active transaction", CODE_NO_SUCH_TRANSACTION, "NoSuchTransaction");
+    }
+
+    static BsonDocument duplicateKey(final String message) {
+        return error(message, CODE_DUPLICATE_KEY, "DuplicateKey");
+    }
+
+    private static BsonDocument error(final String message, final int code, final String codeName) {
+        return new BsonDocument()
+                .append("ok", new BsonDouble(0.0))
+                .append("errmsg", new BsonString(message))
+                .append("code", new BsonInt32(code))
+                .append("codeName", new BsonString(codeName));
+    }
+}

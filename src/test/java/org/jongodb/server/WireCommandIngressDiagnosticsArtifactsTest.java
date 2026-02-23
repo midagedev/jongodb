@@ -60,12 +60,16 @@ class WireCommandIngressDiagnosticsArtifactsTest {
 
         final BsonDocument snapshotDocument = ingress.dumpDiagnosticSnapshotDocument();
         final BsonDocument snapshotFromJson = BsonDocument.parse(ingress.dumpDiagnosticSnapshotJson());
+        final BsonDocument invariantReport = ingress.dumpInvariantReportDocument();
+        final BsonDocument triageReport = ingress.dumpFailureTriageReportDocument();
         assertEquals(
                 snapshotDocument.getDocument("journal").getInt32("size").getValue(),
                 snapshotFromJson.getDocument("journal").getInt32("size").getValue());
         assertEquals(
                 snapshotDocument.getDocument("journal").getInt32("capacity").getValue(),
                 snapshotFromJson.getDocument("journal").getInt32("capacity").getValue());
+        assertEquals(invariantReport.toJson(), ingress.dumpInvariantReportJson());
+        assertEquals(triageReport.toJson(), ingress.dumpFailureTriageReportJson());
 
         final BsonDocument journalDocument = snapshotDocument.getDocument("journal");
         assertEquals(4, journalDocument.getInt32("capacity").getValue());
@@ -76,6 +80,19 @@ class WireCommandIngressDiagnosticsArtifactsTest {
         assertEquals("doesnotexist", failedSnapshot.getString("commandName").getValue());
         assertTrue(failedSnapshot.getBoolean("failed").getValue());
         assertTrue(failedSnapshot.getString("error").getValue().contains("no such command"));
+        assertEquals(0, snapshotDocument.getDocument("invariants").getInt32("violationCount").getValue());
+        assertEquals(
+                "command_failure",
+                snapshotDocument.getDocument("triage").getDocument("summary").getString("rootCauseType").getValue());
+        assertEquals(
+                "doesnotexist",
+                snapshotDocument.getDocument("triage").getDocument("summary").getString("anchorCommandName").getValue());
+        assertEquals(
+                snapshotDocument.getDocument("invariants"),
+                invariantReport);
+        assertEquals(
+                snapshotDocument.getDocument("triage"),
+                triageReport);
 
         final String reproJsonLines = ingress.exportReproJsonLines();
         final String[] reproLines = reproJsonLines.split("\\R");
