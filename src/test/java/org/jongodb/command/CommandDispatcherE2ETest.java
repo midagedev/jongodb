@@ -240,7 +240,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument secondCommitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(secondCommitResponse);
+        assertNoSuchTransactionError(secondCommitResponse, false);
     }
 
     @Test
@@ -300,7 +300,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument beforeStartResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(beforeStartResponse);
+        assertNoSuchTransactionError(beforeStartResponse, true);
 
         final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
@@ -316,7 +316,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument afterCommitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(afterCommitResponse);
+        assertNoSuchTransactionError(afterCommitResponse, true);
     }
 
     @Test
@@ -326,7 +326,7 @@ class CommandDispatcherE2ETest {
         final BsonDocument abortResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
 
-        assertNoSuchTransactionError(abortResponse);
+        assertNoSuchTransactionError(abortResponse, false);
     }
 
     @Test
@@ -343,7 +343,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument postAbortResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(postAbortResponse);
+        assertNoSuchTransactionError(postAbortResponse, true);
     }
 
     @Test
@@ -379,7 +379,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument mismatchResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"$set\":{\"name\":\"updated\"}}}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":2,\"autocommit\":false}"));
-        assertNoSuchTransactionError(mismatchResponse);
+        assertNoSuchTransactionError(mismatchResponse, true);
     }
 
     private static void assertCommandError(final BsonDocument response, final String codeName) {
@@ -389,11 +389,19 @@ class CommandDispatcherE2ETest {
         assertNotNull(response.getString("errmsg"));
     }
 
-    private static void assertNoSuchTransactionError(final BsonDocument response) {
+    private static void assertNoSuchTransactionError(final BsonDocument response, final boolean expectTransientLabel) {
         assertEquals(0.0, response.get("ok").asNumber().doubleValue());
         assertEquals(251, response.getInt32("code").getValue());
         assertEquals("NoSuchTransaction", response.getString("codeName").getValue());
         assertNotNull(response.getString("errmsg"));
+        if (expectTransientLabel) {
+            assertEquals(1, response.getArray("errorLabels").size());
+            assertEquals(
+                    "TransientTransactionError",
+                    response.getArray("errorLabels").get(0).asString().getValue());
+        } else {
+            assertTrue(!response.containsKey("errorLabels") || response.getArray("errorLabels").isEmpty());
+        }
     }
 
     private static void assertDuplicateKeyError(final BsonDocument response) {

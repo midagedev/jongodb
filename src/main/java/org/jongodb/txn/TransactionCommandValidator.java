@@ -2,6 +2,8 @@ package org.jongodb.txn;
 
 import java.util.Objects;
 import java.util.Set;
+import java.util.List;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt32;
@@ -51,10 +53,15 @@ public final class TransactionCommandValidator {
         }
 
         if (!sessionPool.hasActiveTransaction(parsedFields.sessionId(), parsedFields.txnNumber())) {
-            return ValidationResult.error(error(
+            final BsonDocument noSuchTransaction = error(
                     commandName + " requires an active transaction",
                     CODE_NO_SUCH_TRANSACTION,
-                    "NoSuchTransaction"));
+                    "NoSuchTransaction");
+            if (!commitOrAbort) {
+                noSuchTransaction.append(
+                        "errorLabels", new BsonArray(List.of(new BsonString("TransientTransactionError"))));
+            }
+            return ValidationResult.error(noSuchTransaction);
         }
 
         return ValidationResult.transactional(
