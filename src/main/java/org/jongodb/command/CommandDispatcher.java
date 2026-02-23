@@ -11,6 +11,7 @@ import org.bson.BsonString;
 public final class CommandDispatcher {
     private static final int CODE_COMMAND_NOT_FOUND = 59;
     private static final int CODE_INVALID_ARGUMENT = 14;
+    private static final int CODE_DUPLICATE_KEY = 11000;
 
     private final Map<String, CommandHandler> handlers;
 
@@ -20,6 +21,7 @@ public final class CommandDispatcher {
         configuredHandlers.put("ping", new PingCommandHandler());
         configuredHandlers.put("insert", new InsertCommandHandler(store));
         configuredHandlers.put("find", new FindCommandHandler(store));
+        configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(store));
         configuredHandlers.put("update", new UpdateCommandHandler(store));
         configuredHandlers.put("delete", new DeleteCommandHandler(store));
         this.handlers = Map.copyOf(configuredHandlers);
@@ -45,5 +47,9 @@ public final class CommandDispatcher {
                 .append("errmsg", new BsonString(message))
                 .append("code", new BsonInt32(code))
                 .append("codeName", new BsonString(codeName));
+    }
+
+    static BsonDocument duplicateKeyError(final String message) {
+        return error(message, CODE_DUPLICATE_KEY, "DuplicateKey");
     }
 }

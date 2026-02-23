@@ -9,6 +9,8 @@ import org.bson.Document;
 public interface CollectionStore {
     void insertMany(List<Document> documents);
 
+    CreateIndexesResult createIndexes(List<IndexDefinition> indexes);
+
     List<Document> findAll();
 
     List<Document> find(Document filter);
@@ -16,4 +18,8 @@ public interface CollectionStore {
     UpdateManyResult updateMany(Document filter, Document update);
 
     DeleteManyResult deleteMany(Document filter);
+
+    record IndexDefinition(String name, Document key, boolean unique) {}
+
+    record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter) {}
 }

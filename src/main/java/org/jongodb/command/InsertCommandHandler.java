@@ -8,6 +8,7 @@ import org.bson.BsonDouble;
 import org.bson.BsonInt32;
 import org.bson.BsonString;
 import org.bson.BsonValue;
+import org.jongodb.engine.DuplicateKeyException;
 
 public final class InsertCommandHandler implements CommandHandler {
     private static final int CODE_INVALID_ARGUMENT = 14;
@@ -41,7 +42,12 @@ public final class InsertCommandHandler implements CommandHandler {
             documents.add(value.asDocument());
         }
 
-        final int insertedCount = store.insert(database, collection, List.copyOf(documents));
+        final int insertedCount;
+        try {
+            insertedCount = store.insert(database, collection, List.copyOf(documents));
+        } catch (final DuplicateKeyException exception) {
+            return CommandDispatcher.duplicateKeyError(exception.getMessage());
+        }
         return new BsonDocument()
                 .append("n", new BsonInt32(insertedCount))
                 .append("ok", new BsonDouble(1.0));

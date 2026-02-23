@@ -56,6 +56,25 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public CreateIndexesResult createIndexes(
+            final String database, final String collection, final List<IndexRequest> indexes) {
+        Objects.requireNonNull(indexes, "indexes");
+        final CollectionStore collectionStore = engineStore.collection(database, collection);
+
+        final List<CollectionStore.IndexDefinition> converted = new ArrayList<>(indexes.size());
+        for (final IndexRequest index : indexes) {
+            Objects.requireNonNull(index, "indexes entries must not be null");
+            converted.add(new CollectionStore.IndexDefinition(
+                    Objects.requireNonNull(index.name(), "index name"),
+                    toDocument(Objects.requireNonNull(index.key(), "index key")),
+                    index.unique()));
+        }
+
+        final CollectionStore.CreateIndexesResult result = collectionStore.createIndexes(List.copyOf(converted));
+        return new CreateIndexesResult(result.numIndexesBefore(), result.numIndexesAfter());
+    }
+
+    @Override
     public UpdateResult update(final String database, final String collection, final List<UpdateRequest> updates) {
         Objects.requireNonNull(updates, "updates");
         final CollectionStore collectionStore = engineStore.collection(database, collection);

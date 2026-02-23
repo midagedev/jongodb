@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
+import org.jongodb.engine.InMemoryEngineStore;
 import org.junit.jupiter.api.Test;
 
 class CommandDispatcherE2ETest {
@@ -74,6 +75,81 @@ class CommandDispatcherE2ETest {
         assertEquals("users", store.lastFindCollection);
         assertNotNull(store.lastFindFilter);
         assertEquals("a", store.lastFindFilter.getString("name").getValue());
+    }
+
+    @Test
+    void createIndexesCommandCallsStoreAndReturnsShape() {
+        final RecordingStore store = new RecordingStore();
+        store.createIndexesResult = new CommandStore.CreateIndexesResult(0, 1);
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"unique\":true}]}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(false, response.getBoolean("createdCollectionAutomatically").getValue());
+        assertEquals(0, response.getInt32("numIndexesBefore").getValue());
+        assertEquals(1, response.getInt32("numIndexesAfter").getValue());
+        assertEquals("app", store.lastCreateIndexesDatabase);
+        assertEquals("users", store.lastCreateIndexesCollection);
+        assertEquals(1, store.lastCreateIndexesRequests.size());
+        assertEquals("email_1", store.lastCreateIndexesRequests.get(0).name());
+        assertEquals(
+                1,
+                store.lastCreateIndexesRequests
+                        .get(0)
+                        .key()
+                        .getInt32("email")
+                        .getValue());
+        assertTrue(store.lastCreateIndexesRequests.get(0).unique());
+    }
+
+    @Test
+    void insertCommandRejectsDuplicateKeyAfterUniqueIndex() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument createIndexResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"unique\":true}]}"));
+        assertEquals(1.0, createIndexResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument firstInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"email\":\"ada@example.com\"}]}"));
+        assertEquals(1.0, firstInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument duplicateInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2,\"email\":\"ada@example.com\"}]}"));
+        assertDuplicateKeyError(duplicateInsert);
+
+        final BsonDocument findResponse =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(1, findResponse.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
+    void updateCommandRejectsDuplicateKeyAfterUniqueIndex() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"unique\":true}]}"));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"email\":\"ada@example.com\"},{\"_id\":2,\"email\":\"linus@example.com\"}]}"));
+
+        final BsonDocument duplicateUpdate = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":2},\"u\":{\"$set\":{\"email\":\"ada@example.com\"}}}]}"));
+        assertDuplicateKeyError(duplicateUpdate);
+
+        final BsonDocument secondDocResponse = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":2}}"));
+        assertEquals(1, secondDocResponse.getDocument("cursor").getArray("firstBatch").size());
+        assertEquals(
+                "linus@example.com",
+                secondDocResponse
+                        .getDocument("cursor")
+                        .getArray("firstBatch")
+                        .get(0)
+                        .asDocument()
+                        .getString("email")
+                        .getValue());
     }
 
     @Test
@@ -152,6 +228,13 @@ class CommandDispatcherE2ETest {
         assertNotNull(response.getString("errmsg"));
     }
 
+    private static void assertDuplicateKeyError(final BsonDocument response) {
+        assertEquals(0.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(11000, response.getInt32("code").getValue());
+        assertEquals("DuplicateKey", response.getString("codeName").getValue());
+        assertNotNull(response.getString("errmsg"));
+    }
+
     private static final class RecordingStore implements CommandStore {
         private String lastInsertDatabase;
         private String lastInsertCollection;
@@ -166,6 +249,11 @@ class CommandDispatcherE2ETest {
         private String lastUpdateCollection;
         private List<UpdateRequest> lastUpdateRequests = List.of();
         private UpdateResult updateResult = new UpdateResult(0, 0);
+
+        private String lastCreateIndexesDatabase;
+        private String lastCreateIndexesCollection;
+        private List<IndexRequest> lastCreateIndexesRequests = List.of();
+        private CreateIndexesResult createIndexesResult = new CreateIndexesResult(0, 0);
 
         private String lastDeleteDatabase;
         private String lastDeleteCollection;
@@ -186,6 +274,15 @@ class CommandDispatcherE2ETest {
             lastFindCollection = collection;
             lastFindFilter = filter;
             return new ArrayList<>(findResult);
+        }
+
+        @Override
+        public CreateIndexesResult createIndexes(
+                final String database, final String collection, final List<IndexRequest> indexes) {
+            lastCreateIndexesDatabase = database;
+            lastCreateIndexesCollection = collection;
+            lastCreateIndexesRequests = List.copyOf(indexes);
+            return createIndexesResult;
         }
 
         @Override

@@ -9,6 +9,7 @@ import org.bson.BsonDouble;
 import org.bson.BsonInt32;
 import org.bson.BsonString;
 import org.bson.BsonValue;
+import org.jongodb.engine.DuplicateKeyException;
 
 public final class UpdateCommandHandler implements CommandHandler {
     private static final int CODE_INVALID_ARGUMENT = 14;
@@ -79,7 +80,12 @@ public final class UpdateCommandHandler implements CommandHandler {
             updates.add(new CommandStore.UpdateRequest(query, updateDocument, multi));
         }
 
-        final CommandStore.UpdateResult result = store.update(database, collection, List.copyOf(updates));
+        final CommandStore.UpdateResult result;
+        try {
+            result = store.update(database, collection, List.copyOf(updates));
+        } catch (final DuplicateKeyException exception) {
+            return CommandDispatcher.duplicateKeyError(exception.getMessage());
+        }
         return new BsonDocument()
                 .append("n", new BsonInt32(result.matchedCount()))
                 .append("nModified", new BsonInt32(result.modifiedCount()))

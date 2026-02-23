@@ -9,6 +9,13 @@ public interface CommandStore {
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
 
     /**
+     * Default no-op for backward compatibility in tests/doubles that do not care about indexes.
+     */
+    default CreateIndexesResult createIndexes(String database, String collection, List<IndexRequest> indexes) {
+        return new CreateIndexesResult(0, 0);
+    }
+
+    /**
      * Default no-op for backward compatibility in tests/doubles that do not care about updates.
      */
     default UpdateResult update(String database, String collection, List<UpdateRequest> updates) {
@@ -21,6 +28,10 @@ public interface CommandStore {
     default int delete(String database, String collection, List<DeleteRequest> deletes) {
         return 0;
     }
+
+    record IndexRequest(String name, BsonDocument key, boolean unique) {}
+
+    record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter) {}
 
     record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi) {}
 
