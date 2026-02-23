@@ -27,6 +27,14 @@ Useful contribution areas:
 - compatibility impact documented in `docs/COMPATIBILITY.md`
 - roadmap impact reflected in `docs/ROADMAP.md` when relevant
 
+## Release Checklist (Maven Central)
+
+- use a non-SNAPSHOT version
+- ensure `publishGroup` namespace is registered in Central Publisher Portal
+- configure required repository secrets for release workflow
+- run `centralRelease` in CI (or locally with the same env vars)
+- verify artifact coordinates and signatures after publish
+
 ## Style Notes
 
 - prefer small, reviewable commits

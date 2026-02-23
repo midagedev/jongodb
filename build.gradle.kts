@@ -1,9 +1,13 @@
+import org.gradle.api.publish.maven.MavenPublication
+
 plugins {
     java
+    id("maven-publish")
+    id("org.jreleaser") version "1.22.0"
 }
 
-group = "org.jongodb"
-version = "0.1.0-SNAPSHOT"
+group = providers.gradleProperty("publishGroup").orElse("io.github.midagedev").get()
+version = providers.gradleProperty("publishVersion").orElse("0.1.0-SNAPSHOT").get()
 
 repositories {
     mavenCentral()
@@ -12,6 +16,8 @@ repositories {
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+    withJavadocJar()
 }
 
 sourceSets {
@@ -32,8 +38,73 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
 }
 
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            from(components["java"])
+            artifactId = providers.gradleProperty("publishArtifactId").orElse("jongodb").get()
+
+            pom {
+                name.set(providers.gradleProperty("pomName").orElse("jongodb"))
+                description.set(
+                    providers.gradleProperty("pomDescription")
+                        .orElse("In-memory MongoDB-compatible command engine for integration testing.")
+                )
+                url.set(providers.gradleProperty("pomUrl").orElse("https://github.com/midagedev/jongodb"))
+
+                licenses {
+                    license {
+                        name.set(providers.gradleProperty("pomLicenseName").orElse("Apache-2.0"))
+                        url.set(
+                            providers.gradleProperty("pomLicenseUrl")
+                                .orElse("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                        )
+                        distribution.set("repo")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set(providers.gradleProperty("pomDeveloperId").orElse("hckim"))
+                        name.set(providers.gradleProperty("pomDeveloperName").orElse("hckim"))
+                    }
+                }
+
+                scm {
+                    connection.set(
+                        providers.gradleProperty("pomScmConnection")
+                            .orElse("scm:git:https://github.com/midagedev/jongodb.git")
+                    )
+                    developerConnection.set(
+                        providers.gradleProperty("pomScmDeveloperConnection")
+                            .orElse("scm:git:ssh://git@github.com/midagedev/jongodb.git")
+                    )
+                    url.set(providers.gradleProperty("pomScmUrl").orElse("https://github.com/midagedev/jongodb"))
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = "staging"
+            url = layout.buildDirectory.dir("staging-deploy").get().asFile.toURI()
+        }
+    }
+}
+
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.named("jreleaserDeploy") {
+    dependsOn("publishAllPublicationsToStagingRepository")
+}
+
+tasks.register("centralRelease") {
+    group = "publishing"
+    description = "Stages Maven artifacts and deploys to Maven Central via JReleaser."
+    dependsOn("jreleaserDeploy")
 }
 
 tasks.register<JavaExec>("m3GateEvidence") {

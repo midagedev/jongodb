@@ -21,6 +21,18 @@ Run a specific test class:
 gradle test --tests org.jongodb.command.CommandDispatcherE2ETest
 ```
 
+## Consume from Another Spring Project
+
+Use Maven Central coordinates in your test scope:
+
+```kotlin
+dependencies {
+    testImplementation("io.github.midagedev:jongodb:<version>")
+}
+```
+
+If you need command-level integration without sockets, instantiate `WireCommandIngress` in your test bootstrap and route BSON commands through `OpMsgCodec`.
+
 ## In-Process Runtime Usage
 
 ### 1) Command Dispatcher API
@@ -92,6 +104,35 @@ Run final readiness aggregation:
 ```bash
 gradle finalReadinessEvidence
 ```
+
+## Publish to Maven Central
+
+This project publishes through Central Publisher Portal via JReleaser.
+
+Release command:
+
+```bash
+gradle \
+  -PpublishVersion=0.1.0 \
+  -PpublishGroup=io.github.midagedev \
+  -PpublishArtifactId=jongodb \
+  centralRelease
+```
+
+What `centralRelease` does:
+- publish `mavenJava` artifacts to `build/staging-deploy`
+- run `jreleaserDeploy` with Maven Central rules enabled
+
+Required environment variables:
+- `JRELEASER_GITHUB_TOKEN`
+- `JRELEASER_MAVENCENTRAL_APP_USERNAME`
+- `JRELEASER_MAVENCENTRAL_APP_PASSWORD`
+- `JRELEASER_GPG_PUBLIC_KEY`
+- `JRELEASER_GPG_SECRET_KEY`
+- `JRELEASER_GPG_PASSPHRASE`
+
+GitHub Actions workflow:
+- `.github/workflows/maven-central-release.yml`
 
 ## Artifact Paths (Defaults)
 

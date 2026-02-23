@@ -1,0 +1,21 @@
+project:
+  name: jongodb
+  description: In-memory MongoDB-compatible command engine for integration testing.
+  website: https://github.com/midagedev/jongodb
+  authors:
+    - hckim
+  license: Apache-2.0
+
+signing:
+  active: RELEASE
+  armored: true
+
+deploy:
+  maven:
+    mavenCentral:
+      app:
+        active: RELEASE
+        url: https://central.sonatype.com/api/v1/publisher
+        applyMavenCentralRules: true
+        stagingRepositories:
+          - build/staging-deploy

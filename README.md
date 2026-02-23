@@ -54,6 +54,14 @@ Run tests:
 gradle test
 ```
 
+Use the latest release from Maven Central in another project:
+
+```kotlin
+dependencies {
+    testImplementation("io.github.midagedev:jongodb:<version>")
+}
+```
+
 Use the command dispatcher directly:
 
 ```java
@@ -126,6 +134,31 @@ Verification tasks (Gradle):
 - `gradle r2CompatibilityEvidence`
 - `gradle r2CanaryCertificationEvidence -Pr2CanaryInputJson=<path>`
 - `gradle finalReadinessEvidence`
+
+## Maven Central Publishing
+
+This repository is configured for Maven Central publishing through Central Publisher Portal.
+
+Local release command:
+
+```bash
+gradle \
+  -PpublishVersion=0.1.0 \
+  -PpublishGroup=io.github.midagedev \
+  -PpublishArtifactId=jongodb \
+  centralRelease
+```
+
+Required environment variables for release:
+- `JRELEASER_GITHUB_TOKEN`
+- `JRELEASER_MAVENCENTRAL_APP_USERNAME`
+- `JRELEASER_MAVENCENTRAL_APP_PASSWORD`
+- `JRELEASER_GPG_PUBLIC_KEY`
+- `JRELEASER_GPG_SECRET_KEY`
+- `JRELEASER_GPG_PASSPHRASE`
+
+GitHub Actions workflow:
+- `.github/workflows/maven-central-release.yml` (manual `workflow_dispatch`)
 
 ## Documentation
 
