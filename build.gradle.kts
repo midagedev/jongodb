@@ -26,6 +26,7 @@ sourceSets {
 dependencies {
     implementation("org.mongodb:bson:4.11.2")
     implementation("org.mongodb:mongodb-driver-sync:4.11.2")
+    implementation("org.yaml:snakeyaml:2.2")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -117,6 +118,29 @@ tasks.register<JavaExec>("springCompatibilityMatrixEvidence") {
         args("--targets=$targets")
     }
     args(if (failOnFailures) "--fail-on-failures" else "--no-fail-on-failures")
+}
+
+tasks.register<JavaExec>("utfCorpusEvidence") {
+    group = "verification"
+    description = "Runs Unified Test Format corpus through differential harness and writes JSON/MD artifacts."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.UnifiedSpecCorpusRunner")
+
+    val specRoot = (findProperty("utfSpecRoot") as String?) ?: "testkit/specs/unified"
+    val outputDir = (findProperty("utfOutputDir") as String?) ?: "build/reports/unified-spec"
+    val seed = (findProperty("utfSeed") as String?) ?: "utf-corpus-v1"
+    val replayLimit = (findProperty("utfReplayLimit") as String?) ?: "20"
+    val mongoUri = (findProperty("utfMongoUri") as String?) ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
+
+    args(
+        "--spec-root=$specRoot",
+        "--output-dir=$outputDir",
+        "--seed=$seed",
+        "--replay-limit=$replayLimit"
+    )
+    if (mongoUri.isNotBlank()) {
+        args("--mongo-uri=$mongoUri")
+    }
 }
 
 tasks.register<JavaExec>("finalReadinessEvidence") {
