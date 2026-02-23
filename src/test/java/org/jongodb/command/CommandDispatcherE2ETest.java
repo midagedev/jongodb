@@ -221,10 +221,102 @@ class CommandDispatcherE2ETest {
         assertCommandError(badValueResponse, "BadValue");
     }
 
+    @Test
+    void transactionLifecycleAllowsCommitAndClearsState() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument inTxnResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"delete\":\"users\",\"$db\":\"app\",\"deletes\":[{\"q\":{\"_id\":1},\"limit\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, inTxnResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument secondCommitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertNoSuchTransactionError(secondCommitResponse);
+    }
+
+    @Test
+    void abortTransactionWithoutActiveTransactionReturnsNoSuchTransaction() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument abortResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+
+        assertNoSuchTransactionError(abortResponse);
+    }
+
+    @Test
+    void abortTransactionClearsActiveTransaction() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument abortResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, abortResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument postAbortResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertNoSuchTransactionError(postAbortResponse);
+    }
+
+    @Test
+    void transactionalCommandRejectsMissingLsid() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+
+        assertCommandError(response, "TypeMismatch");
+    }
+
+    @Test
+    void transactionStartRejectsInvalidFieldCombination() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument invalidStartTransaction = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":false}"));
+        assertCommandError(invalidStartTransaction, "BadValue");
+
+        final BsonDocument invalidAutocommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":true,\"startTransaction\":true}"));
+        assertCommandError(invalidAutocommit, "BadValue");
+    }
+
+    @Test
+    void transactionalCommandRejectsTxnNumberMismatch() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument mismatchResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"$set\":{\"name\":\"updated\"}}}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":2,\"autocommit\":false}"));
+        assertNoSuchTransactionError(mismatchResponse);
+    }
+
     private static void assertCommandError(final BsonDocument response, final String codeName) {
         assertEquals(0.0, response.get("ok").asNumber().doubleValue());
         assertEquals(14, response.getInt32("code").getValue());
         assertEquals(codeName, response.getString("codeName").getValue());
+        assertNotNull(response.getString("errmsg"));
+    }
+
+    private static void assertNoSuchTransactionError(final BsonDocument response) {
+        assertEquals(0.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(251, response.getInt32("code").getValue());
+        assertEquals("NoSuchTransaction", response.getString("codeName").getValue());
         assertNotNull(response.getString("errmsg"));
     }
 

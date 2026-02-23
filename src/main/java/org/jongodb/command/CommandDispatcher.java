@@ -7,6 +7,8 @@ import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt32;
 import org.bson.BsonString;
+import org.jongodb.txn.SessionTransactionPool;
+import org.jongodb.txn.TransactionCommandValidator;
 
 public final class CommandDispatcher {
     private static final int CODE_COMMAND_NOT_FOUND = 59;
@@ -14,6 +16,7 @@ public final class CommandDispatcher {
     private static final int CODE_DUPLICATE_KEY = 11000;
 
     private final Map<String, CommandHandler> handlers;
+    private final TransactionCommandValidator transactionValidator;
 
     public CommandDispatcher(final CommandStore store) {
         final Map<String, CommandHandler> configuredHandlers = new HashMap<>();
@@ -24,7 +27,10 @@ public final class CommandDispatcher {
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(store));
         configuredHandlers.put("update", new UpdateCommandHandler(store));
         configuredHandlers.put("delete", new DeleteCommandHandler(store));
+        configuredHandlers.put("committransaction", new CommitTransactionCommandHandler());
+        configuredHandlers.put("aborttransaction", new AbortTransactionCommandHandler());
         this.handlers = Map.copyOf(configuredHandlers);
+        this.transactionValidator = new TransactionCommandValidator(new SessionTransactionPool());
     }
 
     public BsonDocument dispatch(final BsonDocument command) {
@@ -36,6 +42,11 @@ public final class CommandDispatcher {
         final CommandHandler handler = handlers.get(commandName);
         if (handler == null) {
             return error("no such command: " + commandName, CODE_COMMAND_NOT_FOUND, "CommandNotFound");
+        }
+
+        final BsonDocument transactionError = transactionValidator.validateAndApply(commandName, command);
+        if (transactionError != null) {
+            return transactionError;
         }
 
         return handler.handle(command);
