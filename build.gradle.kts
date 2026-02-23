@@ -14,6 +14,15 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+sourceSets {
+    named("main") {
+        java.srcDir("testkit/spring-suite/src/main/java")
+    }
+    named("test") {
+        java.srcDir("testkit/spring-suite/src/test/java")
+    }
+}
+
 dependencies {
     implementation("org.mongodb:bson:4.11.2")
     implementation("org.mongodb:mongodb-driver-sync:4.11.2")
@@ -89,4 +98,52 @@ tasks.register<JavaExec>("realMongodDifferentialBaseline") {
     if (mongoUri.isNotBlank()) {
         args("--mongo-uri=$mongoUri")
     }
+}
+
+tasks.register<JavaExec>("springCompatibilityMatrixEvidence") {
+    group = "verification"
+    description = "Runs Spring Data Mongo compatibility matrix against jongodb endpoint and writes JSON/MD artifacts."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.springsuite.SpringCompatibilityMatrixRunner")
+
+    val outputDir = (findProperty("springMatrixOutputDir") as String?) ?: "build/reports/spring-matrix"
+    val targets = (findProperty("springMatrixTargets") as String?) ?: ""
+    val failOnFailures = (findProperty("springMatrixFailOnFailures") as String?)?.toBoolean() ?: true
+
+    args("--output-dir=$outputDir")
+    if (targets.isNotBlank()) {
+        args("--targets=$targets")
+    }
+    args(if (failOnFailures) "--fail-on-failures" else "--no-fail-on-failures")
+}
+
+tasks.register<JavaExec>("finalReadinessEvidence") {
+    group = "verification"
+    description = "Aggregates R1 release-readiness evidence into a unified JSON/MD report."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FinalReleaseReadinessAggregator")
+
+    val outputDir = (findProperty("finalReadinessOutputDir") as String?) ?: "build/reports/release-readiness"
+    val m3OutputDir = (findProperty("finalReadinessM3OutputDir") as String?) ?: "build/reports/m3-gate"
+    val realOutputDir = (findProperty("finalReadinessRealMongodOutputDir") as String?) ?: "build/reports/real-mongod-baseline"
+    val r1OutputDir = (findProperty("finalReadinessR1OutputDir") as String?) ?: "build/reports/r1-gates"
+    val springMatrixJson = (findProperty("finalReadinessSpringMatrixJson") as String?)
+        ?: "build/reports/spring-matrix/spring-compatibility-matrix.json"
+    val realMongodUri = (findProperty("finalReadinessRealMongodUri") as String?)
+        ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
+    val generateMissingEvidence = (findProperty("finalReadinessGenerateMissingEvidence") as String?)?.toBoolean() ?: false
+    val failOnGate = (findProperty("finalReadinessFailOnGate") as String?)?.toBoolean() ?: true
+
+    args(
+        "--output-dir=$outputDir",
+        "--m3-output-dir=$m3OutputDir",
+        "--real-mongod-output-dir=$realOutputDir",
+        "--r1-output-dir=$r1OutputDir",
+        "--spring-matrix-json=$springMatrixJson"
+    )
+    if (realMongodUri.isNotBlank()) {
+        args("--real-mongod-uri=$realMongodUri")
+    }
+    args(if (generateMissingEvidence) "--generate-missing-evidence" else "--no-generate-missing-evidence")
+    args(if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate")
 }
