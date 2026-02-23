@@ -75,7 +75,7 @@ public final class AggregateCommandHandler implements CommandHandler {
         try {
             aggregatedDocuments = store.aggregate(database, collection, List.copyOf(pipeline));
         } catch (final IllegalArgumentException exception) {
-            return CommandErrors.badValue(exception.getMessage());
+            return CommandExceptionMapper.fromIllegalArgument(exception);
         }
 
         if (batchSize == Integer.MAX_VALUE) {

@@ -86,7 +86,12 @@ public final class DeleteCommandHandler implements CommandHandler {
             deletes.add(new CommandStore.DeleteRequest(query, limit));
         }
 
-        final int deletedCount = store.delete(database, collection, List.copyOf(deletes));
+        final int deletedCount;
+        try {
+            deletedCount = store.delete(database, collection, List.copyOf(deletes));
+        } catch (final IllegalArgumentException exception) {
+            return CommandExceptionMapper.fromIllegalArgument(exception);
+        }
         return new BsonDocument()
                 .append("n", new BsonInt32(deletedCount))
                 .append("ok", new BsonDouble(1.0));

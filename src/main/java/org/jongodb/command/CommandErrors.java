@@ -13,6 +13,7 @@ import org.bson.BsonString;
 final class CommandErrors {
     private static final int CODE_COMMAND_NOT_FOUND = 59;
     private static final int CODE_INVALID_ARGUMENT = 14;
+    private static final int CODE_NOT_IMPLEMENTED = 238;
     private static final int CODE_CURSOR_NOT_FOUND = 43;
     private static final int CODE_NO_SUCH_TRANSACTION = 251;
     private static final int CODE_DUPLICATE_KEY = 11000;
@@ -29,6 +30,10 @@ final class CommandErrors {
 
     static BsonDocument typeMismatch(final String message) {
         return error(message, CODE_INVALID_ARGUMENT, "TypeMismatch");
+    }
+
+    static BsonDocument notImplemented(final String message) {
+        return errorWithLabels(message, CODE_NOT_IMPLEMENTED, "NotImplemented", List.of("UnsupportedFeature"));
     }
 
     static BsonDocument noSuchTransaction(final String commandName) {

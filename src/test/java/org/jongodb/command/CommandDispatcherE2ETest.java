@@ -134,6 +134,30 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void unsupportedQueryOperatorsReturnNotImplementedAcrossCrudCommands() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument insertResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alice\"}]}"));
+        assertEquals(1.0, insertResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument findResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}}}"));
+        assertCommandError(findResponse, 238, "NotImplemented");
+        assertEquals(
+                "UnsupportedFeature",
+                findResponse.getArray("errorLabels").get(0).asString().getValue());
+
+        final BsonDocument updateResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"name\":{\"$foo\":1}},\"u\":{\"$set\":{\"active\":true}}}]}"));
+        assertCommandError(updateResponse, 238, "NotImplemented");
+
+        final BsonDocument deleteResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"delete\":\"users\",\"$db\":\"app\",\"deletes\":[{\"q\":{\"name\":{\"$foo\":1}},\"limit\":0}]}"));
+        assertCommandError(deleteResponse, 238, "NotImplemented");
+    }
+
+    @Test
     void findGetMoreSupportsMultiBatchAndCursorConsumptionCleanup() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
@@ -862,8 +886,12 @@ class CommandDispatcherE2ETest {
     }
 
     private static void assertCommandError(final BsonDocument response, final String codeName) {
+        assertCommandError(response, 14, codeName);
+    }
+
+    private static void assertCommandError(final BsonDocument response, final int code, final String codeName) {
         assertEquals(0.0, response.get("ok").asNumber().doubleValue());
-        assertEquals(14, response.getInt32("code").getValue());
+        assertEquals(code, response.getInt32("code").getValue());
         assertEquals(codeName, response.getString("codeName").getValue());
         assertNotNull(response.getString("errmsg"));
     }

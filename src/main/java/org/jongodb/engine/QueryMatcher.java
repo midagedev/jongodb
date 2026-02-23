@@ -82,7 +82,9 @@ final class QueryMatcher {
             case "$expr":
                 return matchesExpression(document, definition);
             default:
-                throw new IllegalArgumentException("unsupported query operator: " + operator);
+                throw new UnsupportedFeatureException(
+                        "query.top_level_operator." + operator,
+                        "unsupported query operator: " + operator);
         }
     }
 
@@ -132,7 +134,9 @@ final class QueryMatcher {
             case "$or" -> evaluateExpressionOr(document, operand);
             case "$not" -> evaluateExpressionNot(document, operand);
             case "$literal" -> operand;
-            default -> throw new IllegalArgumentException("unsupported $expr operator: " + operator);
+            default -> throw new UnsupportedFeatureException(
+                    "query.expr_operator." + operator,
+                    "unsupported $expr operator: " + operator);
         };
     }
 
@@ -344,7 +348,9 @@ final class QueryMatcher {
                     matched = matchesFieldNot(path, operand);
                     break;
                 default:
-                    throw new IllegalArgumentException("unsupported query operator: " + operator);
+                    throw new UnsupportedFeatureException(
+                            "query.field_operator." + operator,
+                            "unsupported query operator: " + operator);
             }
 
             if (!matched) {

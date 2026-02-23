@@ -48,7 +48,12 @@ public final class FindCommandHandler implements CommandHandler {
             return CommandErrors.typeMismatch("filter must be a document");
         }
 
-        final List<BsonDocument> foundDocuments = store.find(database, collection, filter);
+        final List<BsonDocument> foundDocuments;
+        try {
+            foundDocuments = store.find(database, collection, filter);
+        } catch (final IllegalArgumentException exception) {
+            return CommandExceptionMapper.fromIllegalArgument(exception);
+        }
         final BsonValue batchSizeValue = command.get("batchSize");
         int batchSize = foundDocuments.size();
         if (batchSizeValue != null) {

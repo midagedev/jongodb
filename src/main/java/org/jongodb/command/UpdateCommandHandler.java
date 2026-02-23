@@ -119,7 +119,7 @@ public final class UpdateCommandHandler implements CommandHandler {
         } catch (final DuplicateKeyException exception) {
             return CommandErrors.duplicateKey(exception.getMessage());
         } catch (final IllegalArgumentException exception) {
-            return CommandErrors.badValue(exception.getMessage());
+            return CommandExceptionMapper.fromIllegalArgument(exception);
         }
 
         final BsonDocument response = new BsonDocument()

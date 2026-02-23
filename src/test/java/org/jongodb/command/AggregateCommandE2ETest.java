@@ -99,7 +99,7 @@ class AggregateCommandE2ETest {
 
         final BsonDocument unsupportedStage = dispatcher.dispatch(
                 BsonDocument.parse("{\"aggregate\":\"users\",\"pipeline\":[{\"$foo\":{}}],\"cursor\":{}}"));
-        assertCommandError(unsupportedStage, "BadValue");
+        assertCommandError(unsupportedStage, 238, "NotImplemented");
     }
 
     @Test
@@ -161,8 +161,12 @@ class AggregateCommandE2ETest {
     }
 
     private static void assertCommandError(final BsonDocument response, final String codeName) {
+        assertCommandError(response, 14, codeName);
+    }
+
+    private static void assertCommandError(final BsonDocument response, final int code, final String codeName) {
         assertEquals(0.0, response.get("ok").asNumber().doubleValue());
-        assertEquals(14, response.getInt32("code").getValue());
+        assertEquals(code, response.getInt32("code").getValue());
         assertEquals(codeName, response.getString("codeName").getValue());
     }
 

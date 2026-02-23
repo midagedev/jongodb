@@ -17,7 +17,8 @@ public final class AggregationPipeline {
 
     private static final CollectionResolver UNSUPPORTED_COLLECTION_RESOLVER =
             collectionName -> {
-                throw new IllegalArgumentException(
+                throw new UnsupportedFeatureException(
+                        "aggregation.cross_collection_resolver",
                         "stage requires collection resolver: " + requireText(collectionName, "collectionName"));
             };
 
@@ -67,7 +68,9 @@ public final class AggregationPipeline {
                 case "$facet" -> applyFacet(working, stageDefinition, collectionResolver);
                 case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver);
                 case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver);
-                default -> throw new IllegalArgumentException("unsupported aggregation stage: " + stageName);
+                default -> throw new UnsupportedFeatureException(
+                        "aggregation.stage." + stageName,
+                        "unsupported aggregation stage: " + stageName);
             };
         }
 
@@ -257,7 +260,9 @@ public final class AggregationPipeline {
 
             final String accumulatorName = accumulatorDefinition.keySet().iterator().next();
             if (!"$sum".equals(accumulatorName)) {
-                throw new IllegalArgumentException("unsupported $group accumulator: " + accumulatorName);
+                throw new UnsupportedFeatureException(
+                        "aggregation.group.accumulator." + accumulatorName,
+                        "unsupported $group accumulator: " + accumulatorName);
             }
             accumulators.add(new SumAccumulator(entry.getKey(), accumulatorDefinition.get("$sum")));
         }
@@ -493,7 +498,9 @@ public final class AggregationPipeline {
             preserveNullAndEmptyArrays = preserve;
         }
         if (unwindDocument.containsKey("includeArrayIndex")) {
-            throw new IllegalArgumentException("$unwind includeArrayIndex is not supported yet");
+            throw new UnsupportedFeatureException(
+                    "aggregation.unwind.includeArrayIndex",
+                    "$unwind includeArrayIndex is not supported yet");
         }
         return new UnwindSpec(unwindPath(pathExpression), preserveNullAndEmptyArrays);
     }
