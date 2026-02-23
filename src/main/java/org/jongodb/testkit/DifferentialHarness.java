@@ -8,11 +8,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Runs scenarios against two backends and computes structural diffs.
  */
 public final class DifferentialHarness {
+    private static final Pattern FAILURE_CODE_PATTERN = Pattern.compile(
+        "\\(code=([-]?[0-9]+)(?:,\\s*codeName=([^\\)]+))?\\)\\s*$"
+    );
+
     private final DifferentialBackend leftBackend;
     private final DifferentialBackend rightBackend;
     private final Clock clock;
@@ -70,8 +76,20 @@ public final class DifferentialHarness {
         List<DiffEntry> entries = new ArrayList<>();
         compareValue("$.success", leftOutcome.success(), rightOutcome.success(), entries);
         if (leftOutcome.success() && rightOutcome.success()) {
-            compareValue("$.commandResults", leftOutcome.commandResults(), rightOutcome.commandResults(), entries);
+            compareValue(
+                "$.commandResults",
+                normalizeForComparison(leftOutcome.commandResults()),
+                normalizeForComparison(rightOutcome.commandResults()),
+                entries
+            );
             return entries;
+        }
+        if (!leftOutcome.success() && !rightOutcome.success()) {
+            String leftMessage = leftOutcome.errorMessage().orElse(null);
+            String rightMessage = rightOutcome.errorMessage().orElse(null);
+            if (failureSemanticallyEqual(leftMessage, rightMessage)) {
+                return entries;
+            }
         }
         compareValue(
             "$.errorMessage",
@@ -80,6 +98,76 @@ public final class DifferentialHarness {
             entries
         );
         return entries;
+    }
+
+    private static Object normalizeForComparison(Object value) {
+        if (value instanceof Map<?, ?> valueMap) {
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : valueMap.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (isEphemeralMetadataKey(key)) {
+                    continue;
+                }
+                normalized.put(key, normalizeForComparison(entry.getValue()));
+            }
+            return normalized;
+        }
+        if (value instanceof List<?> valueList) {
+            List<Object> normalized = new ArrayList<>(valueList.size());
+            for (Object item : valueList) {
+                normalized.add(normalizeForComparison(item));
+            }
+            return normalized;
+        }
+        return value;
+    }
+
+    private static boolean isEphemeralMetadataKey(String key) {
+        return "$clusterTime".equals(key)
+            || "operationTime".equals(key)
+            || "electionId".equals(key)
+            || "opTime".equals(key);
+    }
+
+    private static boolean failureSemanticallyEqual(String leftMessage, String rightMessage) {
+        FailureSignature leftSignature = FailureSignature.parse(leftMessage);
+        FailureSignature rightSignature = FailureSignature.parse(rightMessage);
+        if (leftSignature.code != null && rightSignature.code != null) {
+            return leftSignature.code.equals(rightSignature.code);
+        }
+        if (leftSignature.codeName != null && rightSignature.codeName != null) {
+            return leftSignature.codeName.equals(rightSignature.codeName);
+        }
+        return Objects.equals(leftMessage, rightMessage);
+    }
+
+    private static final class FailureSignature {
+        private final Integer code;
+        private final String codeName;
+
+        private FailureSignature(Integer code, String codeName) {
+            this.code = code;
+            this.codeName = codeName;
+        }
+
+        private static FailureSignature parse(String message) {
+            if (message == null) {
+                return new FailureSignature(null, null);
+            }
+            Matcher matcher = FAILURE_CODE_PATTERN.matcher(message);
+            if (!matcher.find()) {
+                return new FailureSignature(null, null);
+            }
+            Integer code = Integer.valueOf(matcher.group(1));
+            String codeName = matcher.group(2);
+            if (codeName != null) {
+                codeName = codeName.trim();
+                if (codeName.isEmpty()) {
+                    codeName = null;
+                }
+            }
+            return new FailureSignature(code, codeName);
+        }
     }
 
     private static void compareValue(String path, Object left, Object right, List<DiffEntry> entries) {

@@ -68,13 +68,24 @@ final class ScenarioBsonCodec {
         return document;
     }
 
+    static BsonDocument toRealMongodCommandDocument(ScenarioCommand command, String defaultDatabase) {
+        BsonDocument commandDocument = toCommandDocument(command, defaultDatabase);
+        commandDocument.remove("$db");
+        commandDocument.remove("lsid");
+        ensureTxnNumberIsLong(commandDocument);
+        return commandDocument;
+    }
+
     static boolean isSuccess(BsonDocument response) {
         Objects.requireNonNull(response, "response");
         BsonValue okValue = response.get("ok");
         if (okValue == null || !okValue.isNumber()) {
             return false;
         }
-        return okValue.asNumber().doubleValue() == 1.0d;
+        if (okValue.asNumber().doubleValue() != 1.0d) {
+            return false;
+        }
+        return !hasWriteErrors(response) && !hasWriteConcernError(response);
     }
 
     static String formatFailure(String commandName, int commandIndex, BsonDocument response) {
@@ -85,15 +96,15 @@ final class ScenarioBsonCodec {
             .append("' failed at index ")
             .append(commandIndex);
 
-        String errorMessage = readString(response, "errmsg");
+        String errorMessage = extractErrorMessage(response);
         if (errorMessage != null) {
             message.append(": ").append(errorMessage);
         } else {
             message.append(": ").append(response.toJson());
         }
 
-        Integer errorCode = readInteger(response.get("code"));
-        String errorCodeName = readString(response, "codeName");
+        Integer errorCode = extractErrorCode(response);
+        String errorCodeName = extractErrorCodeName(response);
         if (errorCode != null || errorCodeName != null) {
             message.append(" (");
             boolean needsComma = false;
@@ -134,6 +145,104 @@ final class ScenarioBsonCodec {
             return null;
         }
         return value.asString().getValue();
+    }
+
+    private static boolean hasWriteErrors(BsonDocument response) {
+        BsonDocument writeError = firstWriteError(response);
+        return writeError != null;
+    }
+
+    private static boolean hasWriteConcernError(BsonDocument response) {
+        return writeConcernError(response) != null;
+    }
+
+    private static String extractErrorMessage(BsonDocument response) {
+        String topLevelMessage = readString(response, "errmsg");
+        if (topLevelMessage != null) {
+            return topLevelMessage;
+        }
+        BsonDocument writeError = firstWriteError(response);
+        if (writeError != null) {
+            String writeErrorMessage = readString(writeError, "errmsg");
+            if (writeErrorMessage != null) {
+                return writeErrorMessage;
+            }
+        }
+        BsonDocument writeConcernError = writeConcernError(response);
+        if (writeConcernError != null) {
+            return readString(writeConcernError, "errmsg");
+        }
+        return null;
+    }
+
+    private static Integer extractErrorCode(BsonDocument response) {
+        Integer topLevelCode = readInteger(response.get("code"));
+        if (topLevelCode != null) {
+            return topLevelCode;
+        }
+        BsonDocument writeError = firstWriteError(response);
+        if (writeError != null) {
+            Integer writeErrorCode = readInteger(writeError.get("code"));
+            if (writeErrorCode != null) {
+                return writeErrorCode;
+            }
+        }
+        BsonDocument writeConcernError = writeConcernError(response);
+        if (writeConcernError != null) {
+            return readInteger(writeConcernError.get("code"));
+        }
+        return null;
+    }
+
+    private static String extractErrorCodeName(BsonDocument response) {
+        String topLevelCodeName = readString(response, "codeName");
+        if (topLevelCodeName != null) {
+            return topLevelCodeName;
+        }
+        BsonDocument writeError = firstWriteError(response);
+        if (writeError != null) {
+            String writeErrorCodeName = readString(writeError, "codeName");
+            if (writeErrorCodeName != null) {
+                return writeErrorCodeName;
+            }
+        }
+        BsonDocument writeConcernError = writeConcernError(response);
+        if (writeConcernError != null) {
+            return readString(writeConcernError, "codeName");
+        }
+        return null;
+    }
+
+    private static BsonDocument firstWriteError(BsonDocument response) {
+        BsonValue writeErrors = response.get("writeErrors");
+        if (writeErrors == null || !writeErrors.isArray()) {
+            return null;
+        }
+        BsonArray writeErrorsArray = writeErrors.asArray();
+        if (writeErrorsArray.isEmpty()) {
+            return null;
+        }
+        BsonValue first = writeErrorsArray.get(0);
+        if (first == null || !first.isDocument()) {
+            return null;
+        }
+        return first.asDocument();
+    }
+
+    private static BsonDocument writeConcernError(BsonDocument response) {
+        BsonValue writeConcernError = response.get("writeConcernError");
+        if (writeConcernError == null || !writeConcernError.isDocument()) {
+            return null;
+        }
+        return writeConcernError.asDocument();
+    }
+
+    private static void ensureTxnNumberIsLong(BsonDocument commandDocument) {
+        BsonValue txnNumberValue = commandDocument.get("txnNumber");
+        if (txnNumberValue == null || !txnNumberValue.isNumber() || txnNumberValue.isInt64()) {
+            return;
+        }
+        commandDocument.put("txnNumber", new BsonInt64(txnNumberValue.asNumber().longValue()));
     }
 
     private static Object toJavaValue(BsonValue value) {

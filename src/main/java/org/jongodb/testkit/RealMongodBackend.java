@@ -2,6 +2,7 @@ package org.jongodb.testkit;
 
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoCommandException;
+import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
@@ -17,6 +18,7 @@ import org.bson.BsonDocument;
  */
 public final class RealMongodBackend implements DifferentialBackend {
     private static final String DEFAULT_DATABASE_PREFIX = "testkit";
+    private static final String ADMIN_DATABASE_NAME = "admin";
 
     private final String name;
     private final String connectionUri;
@@ -50,16 +52,18 @@ public final class RealMongodBackend implements DifferentialBackend {
         Objects.requireNonNull(scenario, "scenario");
         String databaseName = scenarioDatabaseName(scenario.id());
 
-        try (MongoClient client = clientFactory.create(connectionUri)) {
+        try (MongoClient client = clientFactory.create(connectionUri);
+            ClientSession session = client.startSession()) {
             MongoDatabase database = client.getDatabase(databaseName);
             resetDatabase(database);
 
             List<Map<String, Object>> commandResults = new ArrayList<>(scenario.commands().size());
             for (int i = 0; i < scenario.commands().size(); i++) {
                 ScenarioCommand command = scenario.commands().get(i);
+                MongoDatabase commandDatabase = resolveCommandDatabase(client, database, command.commandName());
                 BsonDocument commandDocument;
                 try {
-                    commandDocument = ScenarioBsonCodec.toCommandDocument(command, databaseName);
+                    commandDocument = ScenarioBsonCodec.toRealMongodCommandDocument(command, databaseName);
                 } catch (RuntimeException exception) {
                     return ScenarioOutcome.failure(
                         "invalid command payload for " + command.commandName() + ": " + exception.getMessage()
@@ -68,7 +72,7 @@ public final class RealMongodBackend implements DifferentialBackend {
 
                 BsonDocument responseBody;
                 try {
-                    responseBody = database.runCommand(commandDocument, BsonDocument.class);
+                    responseBody = commandDatabase.runCommand(session, commandDocument, BsonDocument.class);
                 } catch (MongoCommandException commandException) {
                     responseBody = commandException.getResponse();
                 } catch (RuntimeException exception) {
@@ -106,6 +110,17 @@ public final class RealMongodBackend implements DifferentialBackend {
 
     private String scenarioDatabaseName(String scenarioId) {
         return scenarioDatabaseName(databasePrefix, scenarioId);
+    }
+
+    private static MongoDatabase resolveCommandDatabase(
+        MongoClient client,
+        MongoDatabase defaultDatabase,
+        String commandName
+    ) {
+        if ("commitTransaction".equals(commandName) || "abortTransaction".equals(commandName)) {
+            return client.getDatabase(ADMIN_DATABASE_NAME);
+        }
+        return defaultDatabase;
     }
 
     private static void resetDatabase(MongoDatabase database) {

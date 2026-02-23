@@ -45,12 +45,13 @@ public final class WireCommandIngressBackend implements DifferentialBackend {
 
         final OpMsgCodec codec = new OpMsgCodec();
         int requestId = 1_000;
+        String databaseName = RealMongodBackend.scenarioDatabaseName(DEFAULT_DATABASE, scenario.id());
         final List<Map<String, Object>> commandResults = new ArrayList<>(scenario.commands().size());
         for (int i = 0; i < scenario.commands().size(); i++) {
             final ScenarioCommand command = scenario.commands().get(i);
             final BsonDocument commandDocument;
             try {
-                commandDocument = ScenarioBsonCodec.toCommandDocument(command, DEFAULT_DATABASE);
+                commandDocument = ScenarioBsonCodec.toCommandDocument(command, databaseName);
             } catch (RuntimeException exception) {
                 return ScenarioOutcome.failure("invalid command payload for " + command.commandName() + ": " + exception.getMessage());
             }
