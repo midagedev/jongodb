@@ -1,7 +1,7 @@
 import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
-    java
+    `java-library`
     id("maven-publish")
     id("org.jreleaser") version "1.22.0"
 }
@@ -30,12 +30,16 @@ sourceSets {
 }
 
 dependencies {
-    implementation("org.mongodb:bson:4.11.2")
+    api("org.mongodb:bson:4.11.2")
     implementation("org.mongodb:mongodb-driver-sync:4.11.2")
     implementation("org.yaml:snakeyaml:2.2")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+}
+
+jreleaser {
+    configFile.set(layout.projectDirectory.file("jreleaser.yml"))
 }
 
 publishing {
