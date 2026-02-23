@@ -193,3 +193,20 @@ tasks.register<JavaExec>("r2CompatibilityEvidence") {
         if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
     )
 }
+
+tasks.register<JavaExec>("r2CanaryCertificationEvidence") {
+    group = "verification"
+    description = "Generates R2 canary certification artifacts from project canary results."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.R2CanaryCertification")
+
+    val inputJson = (findProperty("r2CanaryInputJson") as String?) ?: "build/reports/spring-canary/projects.json"
+    val outputDir = (findProperty("r2CanaryOutputDir") as String?) ?: "build/reports/r2-canary"
+    val failOnGate = (findProperty("r2CanaryFailOnGate") as String?)?.toBoolean() ?: true
+
+    args(
+        "--input-json=$inputJson",
+        "--output-dir=$outputDir",
+        if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
+    )
+}
