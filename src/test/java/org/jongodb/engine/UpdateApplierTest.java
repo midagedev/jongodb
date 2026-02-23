@@ -81,4 +81,44 @@ class UpdateApplierTest {
                         () -> UpdateApplier.validateApplicable(target, parsed));
         assertTrue(error.getMessage().contains("non-document segment"));
     }
+
+    @Test
+    void replacementUpdateReplacesDocumentAndPreservesIdWhenMissingInReplacement() {
+        Document target =
+                new Document("_id", 1)
+                        .append("name", "old")
+                        .append("profile", new Document("city", "Seoul"));
+        Document replacement = new Document("name", "new");
+
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(replacement);
+        UpdateApplier.validateApplicable(target, parsed);
+
+        assertTrue(UpdateApplier.apply(target, parsed));
+        assertEquals(1, target.getInteger("_id"));
+        assertEquals("new", target.getString("name"));
+        assertFalse(target.containsKey("profile"));
+    }
+
+    @Test
+    void replacementUpdateRejectsChangingId() {
+        Document target = new Document("_id", 1).append("name", "old");
+        Document replacement = new Document("_id", 2).append("name", "new");
+
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(replacement);
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> UpdateApplier.validateApplicable(target, parsed));
+        assertTrue(error.getMessage().contains("immutable field '_id'"));
+    }
+
+    @Test
+    void parseRejectsPositionalPathUpdates() {
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> UpdateApplier.parse(new Document("$set", new Document("items.$.qty", 1))));
+        assertTrue(error.getMessage().contains("positional and array filter updates are not supported"));
+    }
 }

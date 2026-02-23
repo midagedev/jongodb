@@ -11,6 +11,9 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
+import org.bson.BsonInt32;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
 import org.jongodb.obs.StructuredJsonLinesLogger;
 import org.jongodb.wire.OpMsg;
 import org.jongodb.wire.OpMsgCodec;
@@ -74,6 +77,73 @@ class WireCommandIngressE2ETest {
         assertEquals(2, countByCorrelation(logLines, "102", "ping"));
         assertEquals(2, countByCorrelation(logLines, "103", "insert"));
         assertEquals(2, countByCorrelation(logLines, "104", "find"));
+    }
+
+    @Test
+    void supportsMultiBatchFindGetMoreKillCursorsLifecycle() {
+        final WireCommandIngress ingress = WireCommandIngress.inMemory();
+        final OpMsgCodec codec = new OpMsgCodec();
+
+        final OpMsg insertResponse = roundTrip(
+                ingress,
+                codec,
+                201,
+                BsonDocument.parse(
+                        "{\"insert\": \"users\", \"$db\": \"app\", \"documents\": [{\"_id\": 1, \"name\": \"alpha\"}, {\"_id\": 2, \"name\": \"beta\"}, {\"_id\": 3, \"name\": \"gamma\"}]}"));
+        assertEquals(1.0, insertResponse.body().get("ok").asNumber().doubleValue());
+
+        final OpMsg findResponse = roundTrip(
+                ingress,
+                codec,
+                202,
+                BsonDocument.parse("{\"find\": \"users\", \"$db\": \"app\", \"filter\": {}, \"batchSize\": 1}"));
+        assertEquals(1.0, findResponse.body().get("ok").asNumber().doubleValue());
+        final BsonDocument findCursor = findResponse.body().getDocument("cursor");
+        final long cursorId = findCursor.getInt64("id").getValue();
+        assertTrue(cursorId > 0);
+        assertEquals(1, findCursor.getArray("firstBatch").size());
+
+        final OpMsg getMoreResponse = roundTrip(
+                ingress,
+                codec,
+                203,
+                new BsonDocument()
+                        .append("getMore", new BsonInt64(cursorId))
+                        .append("collection", new BsonString("users"))
+                        .append("$db", new BsonString("app"))
+                        .append("batchSize", new BsonInt32(1)));
+        assertEquals(1.0, getMoreResponse.body().get("ok").asNumber().doubleValue());
+        final BsonDocument getMoreCursor = getMoreResponse.body().getDocument("cursor");
+        assertEquals(cursorId, getMoreCursor.getInt64("id").getValue());
+        assertEquals(1, getMoreCursor.getArray("nextBatch").size());
+
+        final OpMsg killResponse = roundTrip(
+                ingress,
+                codec,
+                204,
+                new BsonDocument()
+                        .append("killCursors", new BsonString("users"))
+                        .append("$db", new BsonString("app"))
+                        .append("cursors", new BsonArray(java.util.List.of(new BsonInt64(cursorId)))));
+        assertEquals(1.0, killResponse.body().get("ok").asNumber().doubleValue());
+        assertEquals(1, killResponse.body().getArray("cursorsKilled").size());
+        assertEquals(
+                cursorId,
+                killResponse.body().getArray("cursorsKilled").get(0).asInt64().getValue());
+
+        final OpMsg getMoreAfterKill = roundTrip(
+                ingress,
+                codec,
+                205,
+                new BsonDocument()
+                        .append("getMore", new BsonInt64(cursorId))
+                        .append("collection", new BsonString("users"))
+                        .append("$db", new BsonString("app")));
+        assertEquals(0.0, getMoreAfterKill.body().get("ok").asNumber().doubleValue());
+        assertEquals(43, getMoreAfterKill.body().getInt32("code").getValue());
+        assertEquals(
+                "CursorNotFound",
+                getMoreAfterKill.body().getString("codeName").getValue());
     }
 
     private static OpMsg roundTrip(

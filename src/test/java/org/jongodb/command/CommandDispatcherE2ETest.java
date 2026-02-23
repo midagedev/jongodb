@@ -9,6 +9,9 @@ import java.util.List;
 import java.util.Set;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
+import org.bson.BsonInt32;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
 import org.jongodb.engine.InMemoryEngineStore;
 import org.junit.jupiter.api.Test;
 
@@ -131,6 +134,91 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void findGetMoreSupportsMultiBatchAndCursorConsumptionCleanup() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument insertResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"a\"},{\"_id\":2,\"name\":\"b\"},{\"_id\":3,\"name\":\"c\"}]}"));
+        assertEquals(1.0, insertResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument findResponse = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"batchSize\":2}"));
+        assertEquals(1.0, findResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument findCursor = findResponse.getDocument("cursor");
+        final long cursorId = findCursor.getInt64("id").getValue();
+        assertTrue(cursorId > 0);
+        assertEquals(2, findCursor.getArray("firstBatch").size());
+
+        final BsonDocument getMoreResponse = dispatcher.dispatch(new BsonDocument()
+                .append("getMore", new BsonInt64(cursorId))
+                .append("collection", new BsonString("users"))
+                .append("$db", new BsonString("app"))
+                .append("batchSize", new BsonInt32(2)));
+        assertEquals(1.0, getMoreResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument getMoreCursor = getMoreResponse.getDocument("cursor");
+        assertEquals(0L, getMoreCursor.getInt64("id").getValue());
+        assertEquals(1, getMoreCursor.getArray("nextBatch").size());
+        assertEquals(
+                "c",
+                getMoreCursor
+                        .getArray("nextBatch")
+                        .get(0)
+                        .asDocument()
+                        .getString("name")
+                        .getValue());
+
+        final BsonDocument exhaustedResponse = dispatcher.dispatch(new BsonDocument()
+                .append("getMore", new BsonInt64(cursorId))
+                .append("collection", new BsonString("users"))
+                .append("$db", new BsonString("app")));
+        assertCursorNotFoundError(exhaustedResponse, cursorId);
+    }
+
+    @Test
+    void killCursorsRemovesCursorAndSubsequentGetMoreFails() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument insertResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"a\"},{\"_id\":2,\"name\":\"b\"},{\"_id\":3,\"name\":\"c\"}]}"));
+        assertEquals(1.0, insertResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument findResponse = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"batchSize\":1}"));
+        final long cursorId = findResponse.getDocument("cursor").getInt64("id").getValue();
+        assertTrue(cursorId > 0);
+
+        final BsonDocument killResponse = dispatcher.dispatch(new BsonDocument()
+                .append("killCursors", new BsonString("users"))
+                .append("$db", new BsonString("app"))
+                .append(
+                        "cursors",
+                        new BsonArray(List.of(new BsonInt64(cursorId)))));
+        assertEquals(1.0, killResponse.get("ok").asNumber().doubleValue());
+        assertEquals(1, killResponse.getArray("cursorsKilled").size());
+        assertEquals(cursorId, killResponse.getArray("cursorsKilled").get(0).asInt64().getValue());
+        assertEquals(0, killResponse.getArray("cursorsNotFound").size());
+
+        final BsonDocument getMoreResponse = dispatcher.dispatch(new BsonDocument()
+                .append("getMore", new BsonInt64(cursorId))
+                .append("collection", new BsonString("users"))
+                .append("$db", new BsonString("app")));
+        assertCursorNotFoundError(getMoreResponse, cursorId);
+
+        final BsonDocument secondKillResponse = dispatcher.dispatch(new BsonDocument()
+                .append("killCursors", new BsonString("users"))
+                .append("$db", new BsonString("app"))
+                .append(
+                        "cursors",
+                        new BsonArray(List.of(new BsonInt64(cursorId)))));
+        assertEquals(1, secondKillResponse.getArray("cursorsNotFound").size());
+        assertEquals(
+                cursorId,
+                secondKillResponse.getArray("cursorsNotFound").get(0).asInt64().getValue());
+    }
+
+    @Test
     void createIndexesCommandCallsStoreAndReturnsShape() {
         final RecordingStore store = new RecordingStore();
         store.createIndexesResult = new CommandStore.CreateIndexesResult(0, 1);
@@ -206,6 +294,88 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void updateCommandSupportsUpdateOneAndUpdateManySemantics() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"role\":\"user\",\"tier\":0},{\"_id\":2,\"role\":\"user\",\"tier\":0}]}"));
+
+        final BsonDocument updateOneResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"role\":\"user\"},\"u\":{\"$set\":{\"tier\":1}}}]}"));
+        assertEquals(1.0, updateOneResponse.get("ok").asNumber().doubleValue());
+        assertEquals(1, updateOneResponse.getInt32("n").getValue());
+        assertEquals(1, updateOneResponse.getInt32("nModified").getValue());
+
+        final BsonDocument updateManyResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"role\":\"user\"},\"u\":{\"$set\":{\"tier\":2}},\"multi\":true}]}"));
+        assertEquals(1.0, updateManyResponse.get("ok").asNumber().doubleValue());
+        assertEquals(2, updateManyResponse.getInt32("n").getValue());
+        assertEquals(2, updateManyResponse.getInt32("nModified").getValue());
+    }
+
+    @Test
+    void updateCommandSupportsReplaceOneSemantics() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"extra\":true}]}"));
+
+        final BsonDocument replaceResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"name\":\"after\"}}]}"));
+
+        assertEquals(1.0, replaceResponse.get("ok").asNumber().doubleValue());
+        assertEquals(1, replaceResponse.getInt32("n").getValue());
+        assertEquals(1, replaceResponse.getInt32("nModified").getValue());
+
+        final BsonDocument findResponse =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument replaced =
+                findResponse.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals(1, replaced.getInt32("_id").getValue());
+        assertEquals("after", replaced.getString("name").getValue());
+        assertTrue(!replaced.containsKey("extra"));
+    }
+
+    @Test
+    void updateCommandReturnsUpsertedEntriesForOperatorAndReplacementUpserts() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument upsertResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"email\":\"ada@example.com\"},\"u\":{\"$set\":{\"name\":\"Ada\"}},\"upsert\":true},{\"q\":{\"_id\":99},\"u\":{\"name\":\"Neo\"},\"upsert\":true}]}"));
+
+        assertEquals(1.0, upsertResponse.get("ok").asNumber().doubleValue());
+        assertEquals(2, upsertResponse.getInt32("n").getValue());
+        assertEquals(0, upsertResponse.getInt32("nModified").getValue());
+        assertEquals(2, upsertResponse.getArray("upserted").size());
+        assertEquals(
+                0,
+                upsertResponse
+                        .getArray("upserted")
+                        .get(0)
+                        .asDocument()
+                        .getInt32("index")
+                        .getValue());
+        assertEquals(
+                1,
+                upsertResponse
+                        .getArray("upserted")
+                        .get(1)
+                        .asDocument()
+                        .getInt32("index")
+                        .getValue());
+        assertEquals(
+                99,
+                upsertResponse
+                        .getArray("upserted")
+                        .get(1)
+                        .asDocument()
+                        .getInt32("_id")
+                        .getValue());
+
+        final BsonDocument findResponse =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(2, findResponse.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
     void updateCommandCallsStoreAndReturnsWriteShape() {
         final RecordingStore store = new RecordingStore();
         store.updateResult = new CommandStore.UpdateResult(2, 1);
@@ -224,6 +394,7 @@ class CommandDispatcherE2ETest {
                 "user",
                 store.lastUpdateRequests.get(0).query().getString("role").getValue());
         assertTrue(store.lastUpdateRequests.get(0).multi());
+        assertTrue(!store.lastUpdateRequests.get(0).upsert());
     }
 
     @Test
@@ -258,6 +429,22 @@ class CommandDispatcherE2ETest {
         final BsonDocument badValueResponse = dispatcher.dispatch(
                 BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{}}]}"));
         assertCommandError(badValueResponse, "BadValue");
+
+        final BsonDocument arrayFiltersTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"a\":1}},\"arrayFilters\":{}}]}"));
+        assertCommandError(arrayFiltersTypeMismatch, "TypeMismatch");
+
+        final BsonDocument unsupportedArrayFilters = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"a\":1}},\"arrayFilters\":[]}]}"));
+        assertCommandError(unsupportedArrayFilters, "BadValue");
+
+        final BsonDocument unsupportedPositionalPath = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"items.$.qty\":1}}}]}"));
+        assertCommandError(unsupportedPositionalPath, "BadValue");
+
+        final BsonDocument replacementMultiTrue = dispatcher.dispatch(
+                BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"name\":\"a\"},\"multi\":true}]}"));
+        assertCommandError(replacementMultiTrue, "BadValue");
     }
 
     @Test
@@ -342,7 +529,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument secondCommitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(secondCommitResponse, false);
+        assertNoSuchTransactionError(secondCommitResponse, "UnknownTransactionCommitResult");
     }
 
     @Test
@@ -402,7 +589,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument beforeStartResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(beforeStartResponse, true);
+        assertNoSuchTransactionError(beforeStartResponse, "TransientTransactionError");
 
         final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
@@ -418,7 +605,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument afterCommitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(afterCommitResponse, true);
+        assertNoSuchTransactionError(afterCommitResponse, "TransientTransactionError");
     }
 
     @Test
@@ -428,7 +615,7 @@ class CommandDispatcherE2ETest {
         final BsonDocument abortResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
 
-        assertNoSuchTransactionError(abortResponse, false);
+        assertNoSuchTransactionError(abortResponse);
     }
 
     @Test
@@ -445,7 +632,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument postAbortResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(postAbortResponse, true);
+        assertNoSuchTransactionError(postAbortResponse, "TransientTransactionError");
     }
 
     @Test
@@ -481,7 +668,79 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument mismatchResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"$set\":{\"name\":\"updated\"}}}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":2,\"autocommit\":false}"));
-        assertNoSuchTransactionError(mismatchResponse, true);
+        assertNoSuchTransactionError(mismatchResponse, "TransientTransactionError");
+    }
+
+    @Test
+    void transactionStartRejectsReusedTxnNumberAfterCompletion() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument reusedTxnNumberResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertCommandError(reusedTxnNumberResponse, "BadValue");
+
+        final BsonDocument lowerTxnNumberResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":3}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":0,\"autocommit\":false,\"startTransaction\":true}"));
+        assertCommandError(lowerTxnNumberResponse, "BadValue");
+    }
+
+    @Test
+    void transactionEnvelopeValidatesReadConcernPlacement() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true,\"readConcern\":{\"level\":\"local\"}}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument nonStartReadConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"readConcern\":{\"level\":\"local\"}}"));
+        assertCommandError(nonStartReadConcern, "BadValue");
+
+        final BsonDocument commitWithReadConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false,\"readConcern\":{\"level\":\"local\"}}"));
+        assertCommandError(commitWithReadConcern, "BadValue");
+    }
+
+    @Test
+    void transactionEnvelopeValidatesWriteConcernPlacement() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument startWithWriteConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true,\"writeConcern\":{\"w\":1}}"));
+        assertCommandError(startWithWriteConcern, "BadValue");
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2}],\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitWithWriteConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false,\"writeConcern\":{\"w\":\"majority\",\"j\":true,\"wtimeout\":1000}}"));
+        assertEquals(1.0, commitWithWriteConcern.get("ok").asNumber().doubleValue());
+    }
+
+    @Test
+    void transactionEnvelopeValidatesReadPreferenceRules() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument secondaryReadPreference = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true,\"readPreference\":{\"mode\":\"secondary\"}}"));
+        assertCommandError(secondaryReadPreference, "BadValue");
+
+        final BsonDocument primaryReadPreference = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true,\"readPreference\":{\"mode\":\"primary\"}}"));
+        assertEquals(1.0, primaryReadPreference.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitWithReadPreference = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false,\"readPreference\":{\"mode\":\"primary\"}}"));
+        assertCommandError(commitWithReadPreference, "BadValue");
     }
 
     private static void assertCommandError(final BsonDocument response, final String codeName) {
@@ -491,18 +750,21 @@ class CommandDispatcherE2ETest {
         assertNotNull(response.getString("errmsg"));
     }
 
-    private static void assertNoSuchTransactionError(final BsonDocument response, final boolean expectTransientLabel) {
+    private static void assertNoSuchTransactionError(final BsonDocument response, final String... expectedLabels) {
         assertEquals(0.0, response.get("ok").asNumber().doubleValue());
         assertEquals(251, response.getInt32("code").getValue());
         assertEquals("NoSuchTransaction", response.getString("codeName").getValue());
         assertNotNull(response.getString("errmsg"));
-        if (expectTransientLabel) {
-            assertEquals(1, response.getArray("errorLabels").size());
-            assertEquals(
-                    "TransientTransactionError",
-                    response.getArray("errorLabels").get(0).asString().getValue());
-        } else {
+        if (expectedLabels.length == 0) {
             assertTrue(!response.containsKey("errorLabels") || response.getArray("errorLabels").isEmpty());
+            return;
+        }
+
+        assertEquals(expectedLabels.length, response.getArray("errorLabels").size());
+        for (int index = 0; index < expectedLabels.length; index++) {
+            assertEquals(
+                    expectedLabels[index],
+                    response.getArray("errorLabels").get(index).asString().getValue());
         }
     }
 
@@ -511,6 +773,13 @@ class CommandDispatcherE2ETest {
         assertEquals(11000, response.getInt32("code").getValue());
         assertEquals("DuplicateKey", response.getString("codeName").getValue());
         assertNotNull(response.getString("errmsg"));
+    }
+
+    private static void assertCursorNotFoundError(final BsonDocument response, final long cursorId) {
+        assertEquals(0.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(43, response.getInt32("code").getValue());
+        assertEquals("CursorNotFound", response.getString("codeName").getValue());
+        assertTrue(response.getString("errmsg").getValue().contains(Long.toString(cursorId)));
     }
 
     private static final class RecordingStore implements CommandStore {

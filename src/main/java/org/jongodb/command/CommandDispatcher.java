@@ -21,6 +21,7 @@ public final class CommandDispatcher {
         this.globalStore = Objects.requireNonNull(store, "store");
         this.sessionPool = new SessionTransactionPool();
         this.transactionValidator = new TransactionCommandValidator(sessionPool);
+        final CursorRegistry cursorRegistry = new CursorRegistry();
         final CommandStore routedStore = new RoutingCommandStore(() -> {
             final CommandStore selectedStore = dispatchStore.get();
             return selectedStore == null ? globalStore : selectedStore;
@@ -33,7 +34,9 @@ public final class CommandDispatcher {
         configuredHandlers.put("buildinfo", new BuildInfoCommandHandler());
         configuredHandlers.put("getparameter", new GetParameterCommandHandler());
         configuredHandlers.put("insert", new InsertCommandHandler(routedStore));
-        configuredHandlers.put("find", new FindCommandHandler(routedStore));
+        configuredHandlers.put("find", new FindCommandHandler(routedStore, cursorRegistry));
+        configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry));
+        configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry));
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(routedStore));
         configuredHandlers.put("update", new UpdateCommandHandler(routedStore));
         configuredHandlers.put("delete", new DeleteCommandHandler(routedStore));
@@ -100,7 +103,13 @@ public final class CommandDispatcher {
     }
 
     private static BsonDocument noSuchTransactionError(final String commandName) {
-        return CommandErrors.noSuchTransaction(commandName);
+        if ("committransaction".equals(commandName)) {
+            return CommandErrors.noSuchTransactionWithUnknownCommitResultLabel(commandName);
+        }
+        if ("aborttransaction".equals(commandName)) {
+            return CommandErrors.noSuchTransaction(commandName);
+        }
+        return CommandErrors.noSuchTransactionWithTransientLabel(commandName);
     }
 
     private BsonDocument dispatchWithStore(

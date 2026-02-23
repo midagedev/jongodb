@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 
 /**
  * Basic synchronized in-memory collection store.
@@ -100,27 +101,38 @@ public final class InMemoryCollectionStore implements CollectionStore {
     }
 
     @Override
-    public synchronized UpdateManyResult updateMany(Document filter, Document update) {
-        Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
-        Document effectiveUpdate = update == null ? null : DocumentCopies.copy(update);
-        UpdateApplier.ParsedUpdate parsedUpdate = UpdateApplier.parse(effectiveUpdate);
+    public synchronized UpdateManyResult update(
+            final Document filter, final Document update, final boolean multi, final boolean upsert) {
+        final Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
+        final Document effectiveUpdate = update == null ? null : DocumentCopies.copy(update);
+        final UpdateApplier.ParsedUpdate parsedUpdate = UpdateApplier.parse(effectiveUpdate);
 
-        List<Document> matchedDocuments = new ArrayList<>();
-        for (Document document : documents) {
+        final List<Document> matchedDocuments = new ArrayList<>();
+        for (final Document document : documents) {
             if (QueryMatcher.matches(document, effectiveFilter)) {
                 matchedDocuments.add(document);
+                if (!multi) {
+                    break;
+                }
             }
         }
 
-        for (Document document : matchedDocuments) {
+        if (matchedDocuments.isEmpty()) {
+            if (!upsert) {
+                return new UpdateManyResult(0, 0);
+            }
+            return applyUpsert(effectiveFilter, parsedUpdate);
+        }
+
+        for (final Document document : matchedDocuments) {
             UpdateApplier.validateApplicable(document, parsedUpdate);
         }
 
-        IdentityHashMap<Document, UpdatePreview> previewsByDocument = new IdentityHashMap<>(matchedDocuments.size());
+        final IdentityHashMap<Document, UpdatePreview> previewsByDocument = new IdentityHashMap<>(matchedDocuments.size());
         long modifiedCount = 0;
-        for (Document document : matchedDocuments) {
-            Document previewDocument = DocumentCopies.copy(document);
-            boolean modified = UpdateApplier.apply(previewDocument, parsedUpdate);
+        for (final Document document : matchedDocuments) {
+            final Document previewDocument = DocumentCopies.copy(document);
+            final boolean modified = UpdateApplier.apply(previewDocument, parsedUpdate);
             previewsByDocument.put(document, new UpdatePreview(previewDocument, modified));
             if (modified) {
                 modifiedCount++;
@@ -128,9 +140,9 @@ public final class InMemoryCollectionStore implements CollectionStore {
         }
 
         if (modifiedCount > 0) {
-            List<Document> candidateDocuments = new ArrayList<>(documents.size());
-            for (Document document : documents) {
-                UpdatePreview preview = previewsByDocument.get(document);
+            final List<Document> candidateDocuments = new ArrayList<>(documents.size());
+            for (final Document document : documents) {
+                final UpdatePreview preview = previewsByDocument.get(document);
                 if (preview == null || !preview.modified()) {
                     candidateDocuments.add(document);
                 } else {
@@ -140,8 +152,8 @@ public final class InMemoryCollectionStore implements CollectionStore {
             validateUniqueConstraints(candidateDocuments, indexesByName.values());
         }
 
-        for (Document document : matchedDocuments) {
-            UpdatePreview preview = previewsByDocument.get(document);
+        for (final Document document : matchedDocuments) {
+            final UpdatePreview preview = previewsByDocument.get(document);
             if (preview == null || !preview.modified()) {
                 continue;
             }
@@ -177,6 +189,91 @@ public final class InMemoryCollectionStore implements CollectionStore {
             }
         }
         return matches;
+    }
+
+    private UpdateManyResult applyUpsert(final Document filter, final UpdateApplier.ParsedUpdate parsedUpdate) {
+        final Document seed = upsertSeed(filter);
+        final Document upsertedDocument = DocumentCopies.copy(seed);
+
+        UpdateApplier.validateApplicable(upsertedDocument, parsedUpdate);
+        UpdateApplier.apply(upsertedDocument, parsedUpdate);
+
+        if (!upsertedDocument.containsKey("_id")) {
+            upsertedDocument.put("_id", new ObjectId());
+        }
+
+        final List<Document> candidateDocuments = new ArrayList<>(documents.size() + 1);
+        candidateDocuments.addAll(documents);
+        candidateDocuments.add(upsertedDocument);
+        validateUniqueConstraints(candidateDocuments, indexesByName.values());
+
+        documents.add(upsertedDocument);
+        return new UpdateManyResult(0, 0, DocumentCopies.copyAny(upsertedDocument.get("_id")));
+    }
+
+    private static Document upsertSeed(final Document filter) {
+        final Document seed = new Document();
+        if (filter == null || filter.isEmpty()) {
+            return seed;
+        }
+
+        for (final Map.Entry<String, Object> entry : filter.entrySet()) {
+            final String key = entry.getKey();
+            if (key == null || key.isEmpty() || key.startsWith("$")) {
+                continue;
+            }
+            if (isOperatorDocument(entry.getValue())) {
+                continue;
+            }
+            setPathValue(seed, key, entry.getValue());
+        }
+        return seed;
+    }
+
+    private static boolean isOperatorDocument(final Object value) {
+        if (!(value instanceof Map<?, ?> mapValue) || mapValue.isEmpty()) {
+            return false;
+        }
+        for (final Object key : mapValue.keySet()) {
+            if (!(key instanceof String fieldName) || !fieldName.startsWith("$")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void setPathValue(final Document target, final String path, final Object value) {
+        final String[] segments = path.split("\\.");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> current = (Map<String, Object>) target;
+
+        for (int i = 0; i < segments.length - 1; i++) {
+            final String segment = segments[i];
+            if (segment.isEmpty()) {
+                return;
+            }
+
+            final Object existing = current.get(segment);
+            if (existing == null) {
+                final Document created = new Document();
+                current.put(segment, created);
+                current = created;
+                continue;
+            }
+            if (!(existing instanceof Map<?, ?> mapExisting)) {
+                return;
+            }
+            current = castStringMap(mapExisting);
+        }
+
+        final String leaf = segments[segments.length - 1];
+        if (leaf.isEmpty()) {
+            return;
+        }
+        if (current.containsKey(leaf) && !Objects.deepEquals(current.get(leaf), value)) {
+            return;
+        }
+        current.put(leaf, DocumentCopies.copyAny(value));
     }
 
     private static String requireNonBlankIndexName(final String name) {
@@ -251,6 +348,11 @@ public final class InMemoryCollectionStore implements CollectionStore {
             }
         }
         return current;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castStringMap(final Map<?, ?> source) {
+        return (Map<String, Object>) source;
     }
 
     private record UpdatePreview(Document updatedDocument, boolean modified) {}

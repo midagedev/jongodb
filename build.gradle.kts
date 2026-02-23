@@ -45,6 +45,31 @@ tasks.register<JavaExec>("m3GateEvidence") {
     )
 }
 
+tasks.register<JavaExec>("r1PerformanceStabilityGateEvidence") {
+    group = "verification"
+    description = "Runs R1 performance/stability gates and writes JSON/MD artifacts."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.R1PerformanceStabilityGateAutomation")
+
+    val outputDir = (findProperty("r1OutputDir") as String?) ?: "build/reports/r1-gates"
+    val flakeRuns = (findProperty("r1FlakeRuns") as String?) ?: "20"
+    val coldStartSamples = (findProperty("r1ColdStartSamples") as String?) ?: "21"
+    val resetSamples = (findProperty("r1ResetSamples") as String?) ?: "21"
+    val warmupOps = (findProperty("r1WarmupOps") as String?) ?: "100"
+    val measuredOps = (findProperty("r1MeasuredOps") as String?) ?: "500"
+    val failOnGate = (findProperty("r1FailOnGate") as String?)?.toBoolean() ?: true
+
+    args(
+        "--output-dir=$outputDir",
+        "--flake-runs=$flakeRuns",
+        "--cold-start-samples=$coldStartSamples",
+        "--reset-samples=$resetSamples",
+        "--warmup-ops=$warmupOps",
+        "--measured-ops=$measuredOps",
+        if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
+    )
+}
+
 tasks.register<JavaExec>("realMongodDifferentialBaseline") {
     group = "verification"
     description = "Runs differential corpus against wire backend vs real mongod and writes JSON/MD artifacts."

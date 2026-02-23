@@ -16,6 +16,8 @@ import org.bson.BsonValue;
 public final class TransactionCommandValidator {
     private static final int CODE_INVALID_ARGUMENT = 14;
     private static final int CODE_NO_SUCH_TRANSACTION = 251;
+    private static final String LABEL_TRANSIENT_TRANSACTION_ERROR = "TransientTransactionError";
+    private static final String LABEL_UNKNOWN_TRANSACTION_COMMIT_RESULT = "UnknownTransactionCommitResult";
     private static final Set<String> TRANSACTIONAL_COMMANDS =
             Set.of("insert", "update", "delete", "find", "committransaction", "aborttransaction");
 
@@ -43,25 +45,29 @@ public final class TransactionCommandValidator {
             return ValidationResult.error(parsedFields.error());
         }
 
+        final BsonDocument envelopeError =
+                validateTransactionEnvelope(commandName, command, parsedFields.startTransaction(), commitOrAbort);
+        if (envelopeError != null) {
+            return ValidationResult.error(envelopeError);
+        }
+
         if (parsedFields.startTransaction()) {
             if (sessionPool.hasActiveTransaction(parsedFields.sessionId())) {
                 return ValidationResult.error(
                         error("transaction already in progress for this session", CODE_INVALID_ARGUMENT, "BadValue"));
+            }
+            if (sessionPool.isTxnNumberReused(parsedFields.sessionId(), parsedFields.txnNumber())) {
+                return ValidationResult.error(error(
+                        "txnNumber must be strictly increasing for each session",
+                        CODE_INVALID_ARGUMENT,
+                        "BadValue"));
             }
             return ValidationResult.transactional(
                     parsedFields.sessionId(), parsedFields.txnNumber(), true, false, false);
         }
 
         if (!sessionPool.hasActiveTransaction(parsedFields.sessionId(), parsedFields.txnNumber())) {
-            final BsonDocument noSuchTransaction = error(
-                    commandName + " requires an active transaction",
-                    CODE_NO_SUCH_TRANSACTION,
-                    "NoSuchTransaction");
-            if (!commitOrAbort) {
-                noSuchTransaction.append(
-                        "errorLabels", new BsonArray(List.of(new BsonString("TransientTransactionError"))));
-            }
-            return ValidationResult.error(noSuchTransaction);
+            return ValidationResult.error(noSuchTransactionError(commandName, commitTransaction, abortTransaction));
         }
 
         return ValidationResult.transactional(
@@ -112,6 +118,130 @@ public final class TransactionCommandValidator {
         }
 
         return new ParsedFields(sessionId, parsedTxnNumber.value(), startTransaction, null);
+    }
+
+    private static BsonDocument validateTransactionEnvelope(
+            final String commandName,
+            final BsonDocument command,
+            final boolean startTransaction,
+            final boolean commitOrAbort) {
+        final BsonDocument writeConcernError = validateWriteConcernEnvelope(command, commitOrAbort);
+        if (writeConcernError != null) {
+            return writeConcernError;
+        }
+
+        final BsonDocument readConcernError = validateReadConcernEnvelope(commandName, command, startTransaction, commitOrAbort);
+        if (readConcernError != null) {
+            return readConcernError;
+        }
+
+        return validateReadPreferenceEnvelope(commandName, command, commitOrAbort);
+    }
+
+    private static BsonDocument validateReadConcernEnvelope(
+            final String commandName,
+            final BsonDocument command,
+            final boolean startTransaction,
+            final boolean commitOrAbort) {
+        final BsonValue readConcernValue = command.get("readConcern");
+        if (readConcernValue == null) {
+            return null;
+        }
+        if (!readConcernValue.isDocument()) {
+            return error("readConcern must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+        }
+        if (commitOrAbort) {
+            return error("readConcern is not allowed for " + commandName, CODE_INVALID_ARGUMENT, "BadValue");
+        }
+        if (!startTransaction) {
+            return error(
+                    "readConcern is only allowed when startTransaction is true",
+                    CODE_INVALID_ARGUMENT,
+                    "BadValue");
+        }
+
+        final BsonValue levelValue = readConcernValue.asDocument().get("level");
+        if (levelValue != null && !levelValue.isString()) {
+            return error("readConcern.level must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+        }
+        return null;
+    }
+
+    private static BsonDocument validateWriteConcernEnvelope(final BsonDocument command, final boolean commitOrAbort) {
+        final BsonValue writeConcernValue = command.get("writeConcern");
+        if (writeConcernValue == null) {
+            return null;
+        }
+        if (!commitOrAbort) {
+            return error("writeConcern is not allowed in a transaction", CODE_INVALID_ARGUMENT, "BadValue");
+        }
+        if (!writeConcernValue.isDocument()) {
+            return error("writeConcern must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+        }
+
+        final BsonDocument writeConcern = writeConcernValue.asDocument();
+        final BsonValue wValue = writeConcern.get("w");
+        if (wValue != null) {
+            if (!wValue.isString()) {
+                final Long parsedW = readIntegralLong(wValue);
+                if (parsedW == null) {
+                    return error("writeConcern.w must be a string or integer", CODE_INVALID_ARGUMENT, "TypeMismatch");
+                }
+                if (parsedW < 0) {
+                    return error("writeConcern.w must be non-negative when numeric", CODE_INVALID_ARGUMENT, "BadValue");
+                }
+            }
+        }
+
+        final BsonValue jValue = writeConcern.get("j");
+        if (jValue != null && !jValue.isBoolean()) {
+            return error("writeConcern.j must be a boolean", CODE_INVALID_ARGUMENT, "TypeMismatch");
+        }
+
+        final BsonValue wtimeoutValue = writeConcern.get("wtimeout");
+        if (wtimeoutValue != null) {
+            final Long parsedWtimeout = readIntegralLong(wtimeoutValue);
+            if (parsedWtimeout == null) {
+                return error("writeConcern.wtimeout must be an integer", CODE_INVALID_ARGUMENT, "TypeMismatch");
+            }
+            if (parsedWtimeout < 0) {
+                return error("writeConcern.wtimeout must be non-negative", CODE_INVALID_ARGUMENT, "BadValue");
+            }
+        }
+        return null;
+    }
+
+    private static BsonDocument validateReadPreferenceEnvelope(
+            final String commandName, final BsonDocument command, final boolean commitOrAbort) {
+        final BsonValue readPreferenceValue = command.get("readPreference");
+        final BsonValue dollarReadPreferenceValue = command.get("$readPreference");
+        if (readPreferenceValue != null && dollarReadPreferenceValue != null) {
+            return error(
+                    "readPreference and $readPreference cannot both be specified",
+                    CODE_INVALID_ARGUMENT,
+                    "BadValue");
+        }
+
+        final BsonValue effectiveReadPreference =
+                readPreferenceValue != null ? readPreferenceValue : dollarReadPreferenceValue;
+        if (effectiveReadPreference == null) {
+            return null;
+        }
+        if (commitOrAbort) {
+            return error("readPreference is not allowed for " + commandName, CODE_INVALID_ARGUMENT, "BadValue");
+        }
+        if (!effectiveReadPreference.isDocument()) {
+            return error("readPreference must be a document", CODE_INVALID_ARGUMENT, "TypeMismatch");
+        }
+
+        final BsonValue modeValue = effectiveReadPreference.asDocument().get("mode");
+        if (modeValue == null || !modeValue.isString()) {
+            return error("readPreference.mode must be a string", CODE_INVALID_ARGUMENT, "TypeMismatch");
+        }
+        if (!"primary".equals(modeValue.asString().getValue())) {
+            return error("readPreference in a transaction must be primary", CODE_INVALID_ARGUMENT, "BadValue");
+        }
+        return null;
     }
 
     private static ParsedTxnNumber parseTxnNumber(final BsonValue txnNumberValue) {
@@ -174,6 +304,26 @@ public final class TransactionCommandValidator {
                 .append("errmsg", new BsonString(message))
                 .append("code", new BsonInt32(code))
                 .append("codeName", new BsonString(codeName));
+    }
+
+    private static BsonDocument noSuchTransactionError(
+            final String commandName, final boolean commitTransaction, final boolean abortTransaction) {
+        final BsonDocument noSuchTransaction = error(
+                commandName + " requires an active transaction",
+                CODE_NO_SUCH_TRANSACTION,
+                "NoSuchTransaction");
+        if (commitTransaction) {
+            noSuchTransaction.append(
+                    "errorLabels",
+                    new BsonArray(List.of(new BsonString(LABEL_UNKNOWN_TRANSACTION_COMMIT_RESULT))));
+            return noSuchTransaction;
+        }
+        if (!abortTransaction) {
+            noSuchTransaction.append(
+                    "errorLabels",
+                    new BsonArray(List.of(new BsonString(LABEL_TRANSIENT_TRANSACTION_ERROR))));
+        }
+        return noSuchTransaction;
     }
 
     private record ParsedTxnNumber(Long value, BsonDocument error) {

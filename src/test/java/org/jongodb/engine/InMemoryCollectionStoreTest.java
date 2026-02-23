@@ -2,6 +2,7 @@ package org.jongodb.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -259,6 +260,107 @@ class InMemoryCollectionStoreTest {
 
         assertEquals("Busan", byId(store.findAll(), 1).get("profile", Document.class).getString("city"));
         assertEquals("Seoul", byId(store.findAll(), 2).get("profile", Document.class).getString("city"));
+    }
+
+    @Test
+    void updateWithMultiFalseUpdatesOnlyOneMatchedDocument() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("role", "user").append("active", true),
+                        new Document("_id", 2).append("role", "user").append("active", true)));
+
+        UpdateManyResult result =
+                store.update(
+                        new Document("role", "user"),
+                        new Document("$set", new Document("active", false)),
+                        false,
+                        false);
+
+        assertEquals(1, result.matchedCount());
+        assertEquals(1, result.modifiedCount());
+        assertFalse(byId(store.findAll(), 1).getBoolean("active"));
+        assertTrue(byId(store.findAll(), 2).getBoolean("active"));
+    }
+
+    @Test
+    void replaceOneReplacesMatchedDocumentAndPreservesId() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("name", "before").append("extra", true),
+                        new Document("_id", 2).append("name", "other")));
+
+        UpdateManyResult result =
+                store.update(new Document("_id", 1), new Document("name", "after"), false, false);
+
+        assertEquals(1, result.matchedCount());
+        assertEquals(1, result.modifiedCount());
+        Document replaced = byId(store.findAll(), 1);
+        assertEquals(1, replaced.getInteger("_id"));
+        assertEquals("after", replaced.getString("name"));
+        assertFalse(replaced.containsKey("extra"));
+    }
+
+    @Test
+    void updateWithUpsertInsertsOperatorDocumentAndReturnsUpsertedId() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        UpdateManyResult result =
+                store.update(
+                        new Document("email", "ada@example.com"),
+                        new Document("$set", new Document("name", "Ada")),
+                        false,
+                        true);
+
+        assertEquals(0, result.matchedCount());
+        assertEquals(0, result.modifiedCount());
+        assertNotNull(result.upsertedId());
+
+        List<Document> all = store.findAll();
+        assertEquals(1, all.size());
+        assertEquals("ada@example.com", all.get(0).getString("email"));
+        assertEquals("Ada", all.get(0).getString("name"));
+        assertEquals(result.upsertedId(), all.get(0).get("_id"));
+    }
+
+    @Test
+    void replaceOneWithUpsertInsertsReplacementAndUsesFilterIdSeed() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        UpdateManyResult result =
+                store.update(new Document("_id", 77), new Document("name", "inserted"), false, true);
+
+        assertEquals(0, result.matchedCount());
+        assertEquals(0, result.modifiedCount());
+        assertEquals(77, result.upsertedId());
+
+        List<Document> all = store.findAll();
+        assertEquals(1, all.size());
+        assertEquals(77, all.get(0).getInteger("_id"));
+        assertEquals("inserted", all.get(0).getString("name"));
+    }
+
+    @Test
+    void upsertRespectsUniqueIndexesAndRemainsAtomic() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.createIndexes(
+                List.of(new CollectionStore.IndexDefinition("email_1", new Document("email", 1), true)));
+        store.insertMany(List.of(new Document("_id", 1).append("email", "ada@example.com")));
+
+        assertThrows(
+                DuplicateKeyException.class,
+                () ->
+                        store.update(
+                                new Document("_id", 2),
+                                new Document("$set", new Document("email", "ada@example.com")),
+                                false,
+                                true));
+
+        List<Document> all = store.findAll();
+        assertEquals(1, all.size());
+        assertEquals(1, all.get(0).getInteger("_id"));
+        assertEquals("ada@example.com", all.get(0).getString("email"));
     }
 
     @Test

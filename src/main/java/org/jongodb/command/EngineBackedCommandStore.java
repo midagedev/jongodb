@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import org.bson.BsonDocument;
 import org.bson.BsonDocumentReader;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
@@ -103,28 +104,21 @@ public final class EngineBackedCommandStore implements CommandStore {
 
         int matchedCount = 0;
         int modifiedCount = 0;
-        for (final UpdateRequest updateRequest : updates) {
+        final List<Upserted> upserted = new ArrayList<>();
+        for (int index = 0; index < updates.size(); index++) {
+            final UpdateRequest updateRequest = updates.get(index);
             final Document query = toDocument(Objects.requireNonNull(updateRequest.query(), "query"));
             final Document update = toDocument(Objects.requireNonNull(updateRequest.update(), "update"));
 
-            if (updateRequest.multi()) {
-                final UpdateManyResult result = collectionStore.updateMany(query, update);
-                matchedCount += toBoundedInt(result.matchedCount());
-                modifiedCount += toBoundedInt(result.modifiedCount());
-                continue;
+            final UpdateManyResult result =
+                    collectionStore.update(query, update, updateRequest.multi(), updateRequest.upsert());
+            matchedCount += toBoundedInt(result.matchedCount());
+            modifiedCount += toBoundedInt(result.modifiedCount());
+            if (result.upsertedId() != null) {
+                upserted.add(new Upserted(index, toBsonValue(result.upsertedId())));
             }
-
-            final Document firstMatch = firstMatch(collectionStore, query);
-            if (firstMatch == null) {
-                continue;
-            }
-
-            final Document oneFilter = oneDocumentFilter(firstMatch);
-            final UpdateManyResult oneResult = collectionStore.updateMany(oneFilter, update);
-            matchedCount += Math.min(1, toBoundedInt(oneResult.matchedCount()));
-            modifiedCount += Math.min(1, toBoundedInt(oneResult.modifiedCount()));
         }
-        return new UpdateResult(matchedCount, modifiedCount);
+        return new UpdateResult(matchedCount, modifiedCount, List.copyOf(upserted));
     }
 
     @Override
@@ -167,6 +161,10 @@ public final class EngineBackedCommandStore implements CommandStore {
         return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
     }
 
+    private static BsonValue toBsonValue(final Object value) {
+        return toBsonDocument(new Document("value", value)).get("value");
+    }
+
     private static Document firstMatch(final CollectionStore store, final Document filter) {
         final List<Document> matches = store.find(filter);
         if (matches.isEmpty()) {
@@ -181,4 +179,5 @@ public final class EngineBackedCommandStore implements CommandStore {
         }
         return toDocument(toBsonDocument(document));
     }
+
 }

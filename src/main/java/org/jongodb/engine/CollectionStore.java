@@ -15,7 +15,11 @@ public interface CollectionStore {
 
     List<Document> find(Document filter);
 
-    UpdateManyResult updateMany(Document filter, Document update);
+    UpdateManyResult update(Document filter, Document update, boolean multi, boolean upsert);
+
+    default UpdateManyResult updateMany(final Document filter, final Document update) {
+        return update(filter, update, true, false);
+    }
 
     DeleteManyResult deleteMany(Document filter);
 

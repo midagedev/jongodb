@@ -10,6 +10,7 @@ import org.jongodb.command.CommandStore;
  */
 public final class SessionTransactionPool {
     private final Map<String, ActiveTransaction> activeTransactions = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastSeenTxnNumbers = new ConcurrentHashMap<>();
 
     public boolean hasActiveTransaction(final String sessionId) {
         Objects.requireNonNull(sessionId, "sessionId");
@@ -22,10 +23,20 @@ public final class SessionTransactionPool {
         return activeTransaction != null && activeTransaction.txnNumber() == txnNumber;
     }
 
-    public boolean startTransaction(final String sessionId, final long txnNumber, final CommandStore transactionStore) {
+    public synchronized boolean startTransaction(
+            final String sessionId, final long txnNumber, final CommandStore transactionStore) {
         Objects.requireNonNull(sessionId, "sessionId");
         Objects.requireNonNull(transactionStore, "transactionStore");
-        return activeTransactions.putIfAbsent(sessionId, new ActiveTransaction(txnNumber, transactionStore)) == null;
+        if (activeTransactions.containsKey(sessionId)) {
+            return false;
+        }
+        final Long lastSeenTxnNumber = lastSeenTxnNumbers.get(sessionId);
+        if (lastSeenTxnNumber != null && txnNumber <= lastSeenTxnNumber) {
+            return false;
+        }
+        activeTransactions.put(sessionId, new ActiveTransaction(txnNumber, transactionStore));
+        lastSeenTxnNumbers.put(sessionId, txnNumber);
+        return true;
     }
 
     public boolean clearTransaction(final String sessionId, final long txnNumber) {
@@ -53,6 +64,12 @@ public final class SessionTransactionPool {
             return null;
         }
         return activeTransaction;
+    }
+
+    public boolean isTxnNumberReused(final String sessionId, final long txnNumber) {
+        Objects.requireNonNull(sessionId, "sessionId");
+        final Long lastSeenTxnNumber = lastSeenTxnNumbers.get(sessionId);
+        return lastSeenTxnNumber != null && txnNumber <= lastSeenTxnNumber;
     }
 
     public record ActiveTransaction(long txnNumber, CommandStore store) {}

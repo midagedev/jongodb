@@ -2,6 +2,7 @@ package org.jongodb.command;
 
 import java.util.List;
 import org.bson.BsonDocument;
+import org.bson.BsonValue;
 
 public interface CommandStore {
     int insert(String database, String collection, List<BsonDocument> documents);
@@ -36,7 +37,7 @@ public interface CommandStore {
      * Default no-op for backward compatibility in tests/doubles that do not care about updates.
      */
     default UpdateResult update(String database, String collection, List<UpdateRequest> updates) {
-        return new UpdateResult(0, 0);
+        return new UpdateResult(0, 0, List.of());
     }
 
     /**
@@ -50,9 +51,19 @@ public interface CommandStore {
 
     record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter) {}
 
-    record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi) {}
+    record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi, boolean upsert) {}
 
     record DeleteRequest(BsonDocument query, int limit) {}
 
-    record UpdateResult(int matchedCount, int modifiedCount) {}
+    record Upserted(int index, BsonValue id) {}
+
+    record UpdateResult(int matchedCount, int modifiedCount, List<Upserted> upserted) {
+        public UpdateResult(final int matchedCount, final int modifiedCount) {
+            this(matchedCount, modifiedCount, List.of());
+        }
+
+        public UpdateResult {
+            upserted = upserted == null ? List.of() : List.copyOf(upserted);
+        }
+    }
 }

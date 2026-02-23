@@ -1,6 +1,5 @@
 package org.jongodb.command;
 
-import java.util.List;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
@@ -8,49 +7,32 @@ import org.bson.BsonInt64;
 import org.bson.BsonString;
 import org.bson.BsonValue;
 
-public final class FindCommandHandler implements CommandHandler {
-    private final CommandStore store;
+public final class GetMoreCommandHandler implements CommandHandler {
     private final CursorRegistry cursorRegistry;
 
-    public FindCommandHandler(final CommandStore store, final CursorRegistry cursorRegistry) {
-        this.store = store;
+    public GetMoreCommandHandler(final CursorRegistry cursorRegistry) {
         this.cursorRegistry = cursorRegistry;
     }
 
     @Override
     public BsonDocument handle(final BsonDocument command) {
         final String database = readDatabase(command);
-        final String collection = readRequiredString(command, "find");
+        final String collection = readRequiredString(command, "collection");
         if (collection == null) {
-            return CommandErrors.typeMismatch("find must be a string");
+            return CommandErrors.typeMismatch("collection must be a string");
         }
 
-        BsonDocument optionError = CrudCommandOptionValidator.validateReadConcern(command);
-        if (optionError != null) {
-            return optionError;
+        final BsonValue getMoreValue = command.get("getMore");
+        final Long cursorId = readIntegralLong(getMoreValue);
+        if (cursorId == null) {
+            return CommandErrors.typeMismatch("getMore must be an integer");
         }
-        optionError = CrudCommandOptionValidator.validateHint(command, "hint");
-        if (optionError != null) {
-            return optionError;
-        }
-        optionError = CrudCommandOptionValidator.validateCollation(command, "collation");
-        if (optionError != null) {
-            return optionError;
+        if (cursorId < 0) {
+            return CommandErrors.badValue("getMore must be a non-negative integer");
         }
 
-        final BsonValue filterValue = command.get("filter");
-        final BsonDocument filter;
-        if (filterValue == null) {
-            filter = new BsonDocument();
-        } else if (filterValue.isDocument()) {
-            filter = filterValue.asDocument();
-        } else {
-            return CommandErrors.typeMismatch("filter must be a document");
-        }
-
-        final List<BsonDocument> foundDocuments = store.find(database, collection, filter);
         final BsonValue batchSizeValue = command.get("batchSize");
-        int batchSize = foundDocuments.size();
+        int batchSize = Integer.MAX_VALUE;
         if (batchSizeValue != null) {
             final Long parsedBatchSize = readIntegralLong(batchSizeValue);
             if (parsedBatchSize == null) {
@@ -62,17 +44,21 @@ public final class FindCommandHandler implements CommandHandler {
             batchSize = parsedBatchSize.intValue();
         }
 
-        final CursorRegistry.FindRegistration registration =
-                cursorRegistry.openCursor(database + "." + collection, foundDocuments, batchSize);
-        final BsonArray firstBatch = new BsonArray();
-        for (final BsonDocument foundDocument : registration.firstBatch()) {
-            firstBatch.add(foundDocument);
+        final String namespace = database + "." + collection;
+        final CursorRegistry.GetMoreResult result = cursorRegistry.getMore(cursorId, namespace, batchSize);
+        if (!result.found()) {
+            return CommandErrors.cursorNotFound(cursorId);
+        }
+
+        final BsonArray nextBatch = new BsonArray();
+        for (final BsonDocument document : result.nextBatch()) {
+            nextBatch.add(document);
         }
 
         final BsonDocument cursor = new BsonDocument()
-                .append("id", new BsonInt64(registration.cursorId()))
-                .append("ns", new BsonString(database + "." + collection))
-                .append("firstBatch", firstBatch);
+                .append("id", new BsonInt64(result.cursorId()))
+                .append("ns", new BsonString(namespace))
+                .append("nextBatch", nextBatch);
 
         return new BsonDocument()
                 .append("cursor", cursor)
@@ -96,6 +82,9 @@ public final class FindCommandHandler implements CommandHandler {
     }
 
     private static Long readIntegralLong(final BsonValue value) {
+        if (value == null) {
+            return null;
+        }
         if (value.isInt32()) {
             return (long) value.asInt32().getValue();
         }
