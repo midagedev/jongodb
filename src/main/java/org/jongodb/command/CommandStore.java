@@ -7,4 +7,24 @@ public interface CommandStore {
     int insert(String database, String collection, List<BsonDocument> documents);
 
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
+
+    /**
+     * Default no-op for backward compatibility in tests/doubles that do not care about updates.
+     */
+    default UpdateResult update(String database, String collection, List<UpdateRequest> updates) {
+        return new UpdateResult(0, 0);
+    }
+
+    /**
+     * Default no-op for backward compatibility in tests/doubles that do not care about deletes.
+     */
+    default int delete(String database, String collection, List<DeleteRequest> deletes) {
+        return 0;
+    }
+
+    record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi) {}
+
+    record DeleteRequest(BsonDocument query, int limit) {}
+
+    record UpdateResult(int matchedCount, int modifiedCount) {}
 }

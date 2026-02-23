@@ -16,12 +16,12 @@ final class DocumentCopies {
 
         Document copy = new Document();
         for (Map.Entry<String, Object> entry : source.entrySet()) {
-            copy.put(entry.getKey(), copyValue(entry.getValue()));
+            copy.put(entry.getKey(), copyAny(entry.getValue()));
         }
         return copy;
     }
 
-    private static Object copyValue(Object value) {
+    static Object copyAny(Object value) {
         if (value == null) {
             return null;
         }
@@ -32,7 +32,7 @@ final class DocumentCopies {
             List<?> input = (List<?>) value;
             List<Object> output = new ArrayList<>(input.size());
             for (Object item : input) {
-                output.add(copyValue(item));
+                output.add(copyAny(item));
             }
             return output;
         }
@@ -40,7 +40,7 @@ final class DocumentCopies {
             Map<?, ?> input = (Map<?, ?>) value;
             Map<Object, Object> output = new LinkedHashMap<>(input.size());
             for (Map.Entry<?, ?> entry : input.entrySet()) {
-                output.put(entry.getKey(), copyValue(entry.getValue()));
+                output.put(entry.getKey(), copyAny(entry.getValue()));
             }
             return output;
         }
@@ -75,7 +75,7 @@ final class DocumentCopies {
             Object[] input = (Object[]) value;
             Object[] output = new Object[input.length];
             for (int i = 0; i < input.length; i++) {
-                output[i] = copyValue(input[i]);
+                output[i] = copyAny(input[i]);
             }
             return output;
         }

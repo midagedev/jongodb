@@ -1,9 +1,8 @@
 package org.jongodb.engine;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import org.bson.Document;
 
@@ -36,30 +35,57 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return copyMatchingDocuments(effectiveFilter);
     }
 
+    @Override
+    public synchronized UpdateManyResult updateMany(Document filter, Document update) {
+        Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
+        Document effectiveUpdate = update == null ? null : DocumentCopies.copy(update);
+        UpdateApplier.ParsedUpdate parsedUpdate = UpdateApplier.parse(effectiveUpdate);
+
+        List<Document> matchedDocuments = new ArrayList<>();
+        for (Document document : documents) {
+            if (QueryMatcher.matches(document, effectiveFilter)) {
+                matchedDocuments.add(document);
+            }
+        }
+
+        for (Document document : matchedDocuments) {
+            UpdateApplier.validateApplicable(document, parsedUpdate);
+        }
+
+        long modifiedCount = 0;
+        for (Document document : matchedDocuments) {
+            if (UpdateApplier.apply(document, parsedUpdate)) {
+                modifiedCount++;
+            }
+        }
+
+        return new UpdateManyResult(matchedDocuments.size(), modifiedCount);
+    }
+
+    @Override
+    public synchronized DeleteManyResult deleteMany(Document filter) {
+        Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
+
+        long deletedCount = 0;
+        Iterator<Document> iterator = documents.iterator();
+        while (iterator.hasNext()) {
+            Document document = iterator.next();
+            if (QueryMatcher.matches(document, effectiveFilter)) {
+                iterator.remove();
+                deletedCount++;
+            }
+        }
+
+        return new DeleteManyResult(deletedCount, deletedCount);
+    }
+
     private List<Document> copyMatchingDocuments(Document filter) {
         List<Document> matches = new ArrayList<>();
         for (Document document : documents) {
-            if (matches(document, filter)) {
+            if (QueryMatcher.matches(document, filter)) {
                 matches.add(DocumentCopies.copy(document));
             }
         }
         return matches;
-    }
-
-    private static boolean matches(Document document, Document filter) {
-        for (Map.Entry<String, Object> criteria : filter.entrySet()) {
-            Object currentValue = document.get(criteria.getKey());
-            if (!valueEquals(currentValue, criteria.getValue())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean valueEquals(Object left, Object right) {
-        if (left instanceof byte[] && right instanceof byte[]) {
-            return Arrays.equals((byte[]) left, (byte[]) right);
-        }
-        return Objects.equals(left, right);
     }
 }

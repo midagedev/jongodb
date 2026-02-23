@@ -1,7 +1,9 @@
 package org.jongodb.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
@@ -36,6 +38,34 @@ class InMemoryCollectionStoreTest {
                         new Document("_id", 3).append("role", "user").append("active", false)));
 
         List<Document> filtered = store.find(new Document("role", "user").append("active", true));
+        assertEquals(1, filtered.size());
+        assertEquals(1, filtered.get(0).getInteger("_id"));
+    }
+
+    @Test
+    void findSupportsDotPathLookup() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("profile", new Document("city", "Seoul")),
+                        new Document("_id", 2).append("profile", new Document("city", "Busan"))));
+
+        List<Document> filtered = store.find(new Document("profile.city", "Seoul"));
+        assertEquals(1, filtered.size());
+        assertEquals(1, filtered.get(0).getInteger("_id"));
+    }
+
+    @Test
+    void findSupportsArrayContainmentForScalarEquality() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("tags", Arrays.asList("java", "db")),
+                        new Document("_id", 2).append("tags", Arrays.asList("ops", "infra"))));
+
+        List<Document> filtered = store.find(new Document("tags", "db"));
         assertEquals(1, filtered.size());
         assertEquals(1, filtered.get(0).getInteger("_id"));
     }
@@ -110,5 +140,118 @@ class InMemoryCollectionStoreTest {
         CollectionStore usersAgain = engineStore.collection(Namespace.of("appdb", "users"));
         assertEquals(1, usersAgain.findAll().size());
         assertTrue(usersAgain.findAll().get(0).containsKey("_id"));
+    }
+
+    @Test
+    void updateManyReturnsMatchedAndModifiedCounts() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("role", "user").append("active", true),
+                        new Document("_id", 2).append("role", "user").append("active", false),
+                        new Document("_id", 3).append("role", "admin").append("active", true)));
+
+        UpdateManyResult result =
+                store.updateMany(
+                        new Document("role", "user"), new Document("$set", new Document("active", false)));
+
+        assertEquals(2, result.matchedCount());
+        assertEquals(1, result.modifiedCount());
+
+        assertFalse(byId(store.findAll(), 1).getBoolean("active"));
+        assertFalse(byId(store.findAll(), 2).getBoolean("active"));
+        assertTrue(byId(store.findAll(), 3).getBoolean("active"));
+    }
+
+    @Test
+    void updateManySupportsIncAndUnsetOperators() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("count", 1).append("stale", true),
+                        new Document("_id", 2).append("stale", true)));
+
+        UpdateManyResult result =
+                store.updateMany(
+                        new Document(),
+                        new Document("$inc", new Document("count", 2))
+                                .append("$unset", new Document("stale", true)));
+
+        assertEquals(2, result.matchedCount());
+        assertEquals(2, result.modifiedCount());
+        assertEquals(3, byId(store.findAll(), 1).getInteger("count"));
+        assertEquals(2, byId(store.findAll(), 2).getInteger("count"));
+        assertFalse(byId(store.findAll(), 1).containsKey("stale"));
+        assertFalse(byId(store.findAll(), 2).containsKey("stale"));
+    }
+
+    @Test
+    void updateManyRejectsIncForNonNumericTargetsWithoutPartialUpdates() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("count", 1),
+                        new Document("_id", 2).append("count", "oops")));
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                store.updateMany(
+                                        new Document(),
+                                        new Document("$inc", new Document("count", 1))));
+        assertTrue(error.getMessage().contains("$inc target"));
+
+        assertEquals(1, byId(store.findAll(), 1).getInteger("count"));
+        assertEquals("oops", byId(store.findAll(), 2).getString("count"));
+    }
+
+    @Test
+    void updateManySetCopiesValuesPerDocument() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("group", "users"),
+                        new Document("_id", 2).append("group", "users")));
+
+        store.updateMany(
+                new Document("group", "users"),
+                new Document("$set", new Document("profile", new Document("city", "Seoul"))));
+        store.updateMany(
+                new Document("_id", 1),
+                new Document("$set", new Document("profile.city", "Busan")));
+
+        assertEquals("Busan", byId(store.findAll(), 1).get("profile", Document.class).getString("city"));
+        assertEquals("Seoul", byId(store.findAll(), 2).get("profile", Document.class).getString("city"));
+    }
+
+    @Test
+    void deleteManyRemovesMatchingDocumentsAndReturnsCounts() {
+        CollectionStore store = new InMemoryCollectionStore();
+
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1).append("tags", Arrays.asList("java", "db")),
+                        new Document("_id", 2).append("tags", Arrays.asList("ops")),
+                        new Document("_id", 3).append("tags", Arrays.asList("db", "search"))));
+
+        DeleteManyResult result = store.deleteMany(new Document("tags", "db"));
+        assertEquals(2, result.matchedCount());
+        assertEquals(2, result.deletedCount());
+        assertEquals(1, store.findAll().size());
+        assertEquals(2, store.findAll().get(0).getInteger("_id"));
+    }
+
+    private static Document byId(List<Document> documents, int id) {
+        for (Document document : documents) {
+            if (document.getInteger("_id") == id) {
+                return document;
+            }
+        }
+        throw new AssertionError("missing document for _id=" + id);
     }
 }

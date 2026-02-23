@@ -12,4 +12,8 @@ public interface CollectionStore {
     List<Document> findAll();
 
     List<Document> find(Document filter);
+
+    UpdateManyResult updateMany(Document filter, Document update);
+
+    DeleteManyResult deleteMany(Document filter);
 }

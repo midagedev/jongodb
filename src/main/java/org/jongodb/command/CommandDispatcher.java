@@ -20,6 +20,8 @@ public final class CommandDispatcher {
         configuredHandlers.put("ping", new PingCommandHandler());
         configuredHandlers.put("insert", new InsertCommandHandler(store));
         configuredHandlers.put("find", new FindCommandHandler(store));
+        configuredHandlers.put("update", new UpdateCommandHandler(store));
+        configuredHandlers.put("delete", new DeleteCommandHandler(store));
         this.handlers = Map.copyOf(configuredHandlers);
     }
 
