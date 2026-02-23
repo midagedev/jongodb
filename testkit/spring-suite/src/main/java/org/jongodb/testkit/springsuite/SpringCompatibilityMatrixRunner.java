@@ -378,8 +378,10 @@ public final class SpringCompatibilityMatrixRunner {
 
     static List<SpringProfileTarget> defaultTargets() {
         return List.of(
-            new SpringProfileTarget("boot-2.7-data-3.4", "spring27", "2.7.x", "3.4.x", "17"),
-            new SpringProfileTarget("boot-3.2-data-4.2", "spring32", "3.2.x", "4.2.x", "17")
+            new SpringProfileTarget("petclinic-boot-2.7-data-3.4", "petclinic27", "2.7.x", "3.4.x", "17"),
+            new SpringProfileTarget("petclinic-boot-3.2-data-4.2", "petclinic32", "3.2.x", "4.2.x", "17"),
+            new SpringProfileTarget("commerce-boot-3.2-data-4.2", "commerce32", "3.2.x", "4.2.x", "17"),
+            new SpringProfileTarget("commerce-boot-3.3-data-4.3", "commerce33", "3.3.x", "4.3.x", "21")
         );
     }
 
@@ -506,6 +508,99 @@ public final class SpringCompatibilityMatrixRunner {
                         )
                     ),
                     command("find", payload("collection", "spring_txn_orders", "filter", payload("_id", 1)))
+                )
+            ),
+            new SpringScenario(
+                "spring.repository.aggregation-lookup",
+                SpringSurface.REPOSITORY,
+                "Repository aggregation with $lookup join",
+                scenario(
+                    "spring.repository.aggregation-lookup",
+                    "insert + lookup + aggregate",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_lookup_users",
+                            "documents",
+                            List.of(
+                                payload("_id", 1, "name", "kim"),
+                                payload("_id", 2, "name", "park")
+                            )
+                        )
+                    ),
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_lookup_orders",
+                            "documents",
+                            List.of(
+                                payload("_id", 11, "userId", 1, "total", 120),
+                                payload("_id", 12, "userId", 2, "total", 90)
+                            )
+                        )
+                    ),
+                    command(
+                        "aggregate",
+                        payload(
+                            "collection",
+                            "spring_lookup_orders",
+                            "pipeline",
+                            List.of(
+                                payload(
+                                    "$lookup",
+                                    payload(
+                                        "from",
+                                        "spring_lookup_users",
+                                        "localField",
+                                        "userId",
+                                        "foreignField",
+                                        "_id",
+                                        "as",
+                                        "user"
+                                    )
+                                ),
+                                payload("$match", payload("user.name", "kim"))
+                            ),
+                            "cursor",
+                            payload()
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.mongo-template.index-ttl-partial",
+                SpringSurface.MONGO_TEMPLATE,
+                "MongoTemplate index lifecycle with ttl/partial/collation metadata",
+                scenario(
+                    "spring.mongo-template.index-ttl-partial",
+                    "create index + list indexes",
+                    command(
+                        "createIndexes",
+                        payload(
+                            "collection",
+                            "spring_template_indexes",
+                            "indexes",
+                            List.of(
+                                payload(
+                                    "name",
+                                    "email_1",
+                                    "key",
+                                    payload("email", 1),
+                                    "sparse",
+                                    true,
+                                    "partialFilterExpression",
+                                    payload("email", payload("$exists", true)),
+                                    "collation",
+                                    payload("locale", "en", "strength", 2),
+                                    "expireAfterSeconds",
+                                    3600
+                                )
+                            )
+                        )
+                    ),
+                    command("listIndexes", payload("collection", "spring_template_indexes"))
                 )
             )
         );

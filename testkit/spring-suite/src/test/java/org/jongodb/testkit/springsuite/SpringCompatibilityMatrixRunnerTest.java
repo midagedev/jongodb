@@ -18,8 +18,14 @@ import org.jongodb.testkit.ScenarioOutcome;
 import org.junit.jupiter.api.Test;
 
 class SpringCompatibilityMatrixRunnerTest {
-    private static final String TARGET_BOOT_27 = "boot-2.7-data-3.4";
-    private static final String TARGET_BOOT_32 = "boot-3.2-data-4.2";
+    private static final String TARGET_BOOT_27 = "petclinic-boot-2.7-data-3.4";
+    private static final String TARGET_BOOT_32 = "petclinic-boot-3.2-data-4.2";
+
+    @Test
+    void defaultCatalogIncludesMultipleProjectTargetsAndScenarioCoverage() {
+        assertTrue(SpringCompatibilityMatrixRunner.defaultTargets().size() >= 4);
+        assertTrue(SpringCompatibilityMatrixRunner.defaultScenarios().size() >= 5);
+    }
 
     @Test
     void accountsScenarioResultsAcrossTargetAndSurfaceMatrix() {
@@ -31,22 +37,22 @@ class SpringCompatibilityMatrixRunnerTest {
         );
         SpringCompatibilityMatrixRunner.EvidenceConfig config = new SpringCompatibilityMatrixRunner.EvidenceConfig(
             Path.of("build/reports/spring-suite-test"),
-            List.of(),
+            List.of(TARGET_BOOT_27, TARGET_BOOT_32),
             false
         );
 
         SpringCompatibilityMatrixRunner.MatrixReport report = runner.run(config);
 
-        assertEquals(6, report.totalCells());
-        assertEquals(5, report.passCount());
+        assertEquals(10, report.totalCells());
+        assertEquals(9, report.passCount());
         assertEquals(1, report.failCount());
-        assertEquals(5.0d / 6.0d, report.passRate(), 1e-9);
+        assertEquals(9.0d / 10.0d, report.passRate(), 1e-9);
 
         Map<String, SpringCompatibilityMatrixRunner.TargetSummary> targetSummary =
             toMap(report.targetSummaries(), SpringCompatibilityMatrixRunner.TargetSummary::targetId);
-        assertEquals(3, targetSummary.get(TARGET_BOOT_27).passCount());
+        assertEquals(5, targetSummary.get(TARGET_BOOT_27).passCount());
         assertEquals(0, targetSummary.get(TARGET_BOOT_27).failCount());
-        assertEquals(2, targetSummary.get(TARGET_BOOT_32).passCount());
+        assertEquals(4, targetSummary.get(TARGET_BOOT_32).passCount());
         assertEquals(1, targetSummary.get(TARGET_BOOT_32).failCount());
 
         Map<SpringCompatibilityMatrixRunner.SpringSurface, SpringCompatibilityMatrixRunner.SurfaceSummary> surfaceSummary =
@@ -99,7 +105,7 @@ class SpringCompatibilityMatrixRunnerTest {
         assertTrue(markdown.contains("| spring.transaction-template.commit | TransactionTemplate | PASS | PASS |"));
 
         assertEquals(0, report.failCount());
-        assertEquals(6, report.passCount());
+        assertEquals(10, report.passCount());
     }
 
     private static <K, V> Map<K, V> toMap(List<V> values, Function<V, K> keyMapper) {
