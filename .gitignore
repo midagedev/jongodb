@@ -9,3 +9,6 @@ out/
 # Local logs and temp artifacts
 *.log
 *.tmp
+
+# Local tool distributions
+.tooling/
