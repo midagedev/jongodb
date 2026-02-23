@@ -18,6 +18,28 @@ public final class InMemoryCollectionStore implements CollectionStore {
     private final List<Document> documents = new ArrayList<>();
     private final Map<String, IndexMetadata> indexesByName = new LinkedHashMap<>();
 
+    InMemoryCollectionStore() {}
+
+    private InMemoryCollectionStore(final InMemoryCollectionStore source) {
+        for (final Document sourceDocument : source.documents) {
+            this.documents.add(DocumentCopies.copy(sourceDocument));
+        }
+        for (final Map.Entry<String, IndexMetadata> entry : source.indexesByName.entrySet()) {
+            final IndexMetadata index = entry.getValue();
+            this.indexesByName.put(
+                    entry.getKey(),
+                    new IndexMetadata(
+                            index.name(),
+                            DocumentCopies.copy(index.key()),
+                            index.unique(),
+                            index.uniqueFieldPath()));
+        }
+    }
+
+    synchronized InMemoryCollectionStore snapshot() {
+        return new InMemoryCollectionStore(this);
+    }
+
     @Override
     public synchronized void insertMany(List<Document> documents) {
         Objects.requireNonNull(documents, "documents");

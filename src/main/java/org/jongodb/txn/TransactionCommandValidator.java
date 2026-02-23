@@ -9,7 +9,7 @@ import org.bson.BsonString;
 import org.bson.BsonValue;
 
 /**
- * Validates transaction command fields and applies minimal session transaction state transitions.
+ * Validates transaction command fields and resolves transaction command intent.
  */
 public final class TransactionCommandValidator {
     private static final int CODE_INVALID_ARGUMENT = 14;
@@ -23,41 +23,46 @@ public final class TransactionCommandValidator {
         this.sessionPool = Objects.requireNonNull(sessionPool, "sessionPool");
     }
 
-    public BsonDocument validateAndApply(final String commandName, final BsonDocument command) {
+    public ValidationResult validate(final String commandName, final BsonDocument command) {
         if (!TRANSACTIONAL_COMMANDS.contains(commandName)) {
-            return null;
+            return ValidationResult.nonTransactional();
         }
 
         final boolean commitOrAbort = isCommitOrAbort(commandName);
+        final boolean commitTransaction = "committransaction".equals(commandName);
+        final boolean abortTransaction = "aborttransaction".equals(commandName);
         final boolean hasTransactionFields = hasTransactionFields(command);
         if (!commitOrAbort && !hasTransactionFields) {
-            return null;
+            return ValidationResult.nonTransactional();
         }
 
         final ParsedFields parsedFields = parseFields(commandName, command, commitOrAbort);
         if (parsedFields.error() != null) {
-            return parsedFields.error();
+            return ValidationResult.error(parsedFields.error());
         }
 
         if (parsedFields.startTransaction()) {
             if (sessionPool.hasActiveTransaction(parsedFields.sessionId())) {
-                return error("transaction already in progress for this session", CODE_INVALID_ARGUMENT, "BadValue");
+                return ValidationResult.error(
+                        error("transaction already in progress for this session", CODE_INVALID_ARGUMENT, "BadValue"));
             }
-            sessionPool.startTransaction(parsedFields.sessionId(), parsedFields.txnNumber());
-            return null;
+            return ValidationResult.transactional(
+                    parsedFields.sessionId(), parsedFields.txnNumber(), true, false, false);
         }
 
         if (!sessionPool.hasActiveTransaction(parsedFields.sessionId(), parsedFields.txnNumber())) {
-            return error(
+            return ValidationResult.error(error(
                     commandName + " requires an active transaction",
                     CODE_NO_SUCH_TRANSACTION,
-                    "NoSuchTransaction");
+                    "NoSuchTransaction"));
         }
 
-        if (commitOrAbort) {
-            sessionPool.clearTransaction(parsedFields.sessionId(), parsedFields.txnNumber());
-        }
-        return null;
+        return ValidationResult.transactional(
+                parsedFields.sessionId(),
+                parsedFields.txnNumber(),
+                false,
+                commitTransaction,
+                abortTransaction);
     }
 
     private static ParsedFields parseFields(
@@ -173,6 +178,33 @@ public final class TransactionCommandValidator {
     private record ParsedFields(String sessionId, long txnNumber, boolean startTransaction, BsonDocument error) {
         private static ParsedFields error(final BsonDocument error) {
             return new ParsedFields(null, 0L, false, error);
+        }
+    }
+
+    public record ValidationResult(
+            boolean transactional,
+            String sessionId,
+            long txnNumber,
+            boolean startTransaction,
+            boolean commitTransaction,
+            boolean abortTransaction,
+            BsonDocument error) {
+        private static ValidationResult nonTransactional() {
+            return new ValidationResult(false, null, 0L, false, false, false, null);
+        }
+
+        private static ValidationResult transactional(
+                final String sessionId,
+                final long txnNumber,
+                final boolean startTransaction,
+                final boolean commitTransaction,
+                final boolean abortTransaction) {
+            return new ValidationResult(
+                    true, sessionId, txnNumber, startTransaction, commitTransaction, abortTransaction, null);
+        }
+
+        private static ValidationResult error(final BsonDocument error) {
+            return new ValidationResult(false, null, 0L, false, false, false, error);
         }
     }
 }

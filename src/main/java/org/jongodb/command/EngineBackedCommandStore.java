@@ -13,6 +13,7 @@ import org.bson.codecs.configuration.CodecRegistry;
 import org.jongodb.engine.CollectionStore;
 import org.jongodb.engine.DeleteManyResult;
 import org.jongodb.engine.EngineStore;
+import org.jongodb.engine.InMemoryEngineStore;
 import org.jongodb.engine.UpdateManyResult;
 
 /**
@@ -26,6 +27,27 @@ public final class EngineBackedCommandStore implements CommandStore {
 
     public EngineBackedCommandStore(final EngineStore engineStore) {
         this.engineStore = Objects.requireNonNull(engineStore, "engineStore");
+    }
+
+    @Override
+    public CommandStore snapshotForTransaction() {
+        if (!(engineStore instanceof InMemoryEngineStore inMemoryEngineStore)) {
+            throw new IllegalStateException("transaction snapshots require InMemoryEngineStore");
+        }
+        return new EngineBackedCommandStore(inMemoryEngineStore.snapshot());
+    }
+
+    @Override
+    public void publishTransactionSnapshot(final CommandStore snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        if (!(engineStore instanceof InMemoryEngineStore inMemoryEngineStore)) {
+            throw new IllegalStateException("transaction publish requires InMemoryEngineStore");
+        }
+        if (!(snapshot instanceof EngineBackedCommandStore engineSnapshot)
+                || !(engineSnapshot.engineStore instanceof InMemoryEngineStore inMemorySnapshot)) {
+            throw new IllegalArgumentException("snapshot must be an EngineBackedCommandStore backed by InMemoryEngineStore");
+        }
+        inMemoryEngineStore.replaceWith(inMemorySnapshot);
     }
 
     @Override

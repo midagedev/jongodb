@@ -9,6 +9,23 @@ public interface CommandStore {
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
 
     /**
+     * Creates a transaction-local snapshot for command execution.
+     *
+     * <p>The default implementation returns this store, which preserves backward compatibility for lightweight
+     * test doubles that do not model transactional isolation.
+     */
+    default CommandStore snapshotForTransaction() {
+        return this;
+    }
+
+    /**
+     * Publishes a transaction snapshot into this store.
+     *
+     * <p>The default implementation is a no-op to preserve backward compatibility for lightweight test doubles.
+     */
+    default void publishTransactionSnapshot(CommandStore snapshot) {}
+
+    /**
      * Default no-op for backward compatibility in tests/doubles that do not care about indexes.
      */
     default CreateIndexesResult createIndexes(String database, String collection, List<IndexRequest> indexes) {
