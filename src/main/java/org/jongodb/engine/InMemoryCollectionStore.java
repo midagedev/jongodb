@@ -33,7 +33,12 @@ public final class InMemoryCollectionStore implements CollectionStore {
                             index.name(),
                             DocumentCopies.copy(index.key()),
                             index.unique(),
-                            index.uniqueFieldPath()));
+                            index.sparse(),
+                            index.partialFilterExpression() == null
+                                    ? null
+                                    : DocumentCopies.copy(index.partialFilterExpression()),
+                            index.expireAfterSeconds(),
+                            List.copyOf(index.uniqueFieldPaths())));
         }
     }
 
@@ -78,8 +83,19 @@ public final class InMemoryCollectionStore implements CollectionStore {
             }
 
             final Document key = requireNonEmptyIndexKey(index.key());
-            final String uniqueFieldPath = index.unique() ? singleFieldPath(key) : null;
-            candidateIndexes.put(name, new IndexMetadata(name, key, index.unique(), uniqueFieldPath));
+            final List<String> uniqueFieldPaths = index.unique() ? indexFieldPaths(key) : List.of();
+            final Document partialFilterExpression =
+                    index.partialFilterExpression() == null ? null : DocumentCopies.copy(index.partialFilterExpression());
+            candidateIndexes.put(
+                    name,
+                    new IndexMetadata(
+                            name,
+                            key,
+                            index.unique(),
+                            index.sparse(),
+                            partialFilterExpression,
+                            index.expireAfterSeconds(),
+                            uniqueFieldPaths));
         }
 
         validateUniqueConstraints(documents, candidateIndexes.values());
@@ -87,6 +103,21 @@ public final class InMemoryCollectionStore implements CollectionStore {
         indexesByName.clear();
         indexesByName.putAll(candidateIndexes);
         return new CreateIndexesResult(numIndexesBefore, indexesByName.size());
+    }
+
+    @Override
+    public synchronized List<IndexDefinition> listIndexes() {
+        final List<IndexDefinition> listed = new ArrayList<>(indexesByName.size());
+        for (final IndexMetadata metadata : indexesByName.values()) {
+            listed.add(new IndexDefinition(
+                    metadata.name(),
+                    metadata.key(),
+                    metadata.unique(),
+                    metadata.sparse(),
+                    metadata.partialFilterExpression(),
+                    metadata.expireAfterSeconds()));
+        }
+        return List.copyOf(listed);
     }
 
     @Override
@@ -98,6 +129,25 @@ public final class InMemoryCollectionStore implements CollectionStore {
     public synchronized List<Document> find(Document filter) {
         Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
         return copyMatchingDocuments(effectiveFilter);
+    }
+
+    @Override
+    public synchronized List<Document> aggregate(final List<Document> pipeline) {
+        Objects.requireNonNull(pipeline, "pipeline");
+
+        final List<Document> copiedPipeline = new ArrayList<>(pipeline.size());
+        for (final Document stage : pipeline) {
+            if (stage == null) {
+                throw new IllegalArgumentException("pipeline stages must not contain null");
+            }
+            copiedPipeline.add(DocumentCopies.copy(stage));
+        }
+
+        final List<Document> source = new ArrayList<>(documents.size());
+        for (final Document document : documents) {
+            source.add(DocumentCopies.copy(document));
+        }
+        return AggregationPipeline.execute(source, copiedPipeline);
     }
 
     @Override
@@ -290,42 +340,101 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return DocumentCopies.copy(key);
     }
 
-    private static String singleFieldPath(final Document key) {
-        if (key.size() != 1) {
-            return null;
+    private static List<String> indexFieldPaths(final Document key) {
+        final List<String> fieldPaths = new ArrayList<>(key.size());
+        for (final String fieldPath : key.keySet()) {
+            if (fieldPath == null || fieldPath.isBlank()) {
+                continue;
+            }
+            fieldPaths.add(fieldPath);
         }
-        final String fieldPath = key.keySet().iterator().next();
-        if (fieldPath == null || fieldPath.isBlank()) {
-            return null;
-        }
-        return fieldPath;
+        return List.copyOf(fieldPaths);
     }
 
     private static void validateUniqueConstraints(
             final List<Document> candidateDocuments, final Iterable<IndexMetadata> indexes) {
         for (IndexMetadata index : indexes) {
-            if (!index.unique() || index.uniqueFieldPath() == null) {
+            if (!index.unique() || index.uniqueFieldPaths().isEmpty()) {
                 continue;
             }
 
             Map<UniqueValueKey, Boolean> seenValues = new HashMap<>();
             for (Document document : candidateDocuments) {
-                Object value = resolvePathValue(document, index.uniqueFieldPath());
-                if (seenValues.putIfAbsent(new UniqueValueKey(value), Boolean.TRUE) != null) {
-                    throw new DuplicateKeyException(duplicateKeyMessage(index, value));
+                if (index.partialFilterExpression() != null
+                        && !QueryMatcher.matches(document, index.partialFilterExpression())) {
+                    continue;
+                }
+                if (index.sparse() && isSparseExcluded(document, index.uniqueFieldPaths())) {
+                    continue;
+                }
+
+                final Object[] values = resolvePathValues(document, index.uniqueFieldPaths());
+                if (seenValues.putIfAbsent(new UniqueValueKey(values), Boolean.TRUE) != null) {
+                    throw new DuplicateKeyException(duplicateKeyMessage(index, values));
                 }
             }
         }
     }
 
-    private static String duplicateKeyMessage(final IndexMetadata index, final Object duplicateValue) {
+    private static String duplicateKeyMessage(final IndexMetadata index, final Object[] duplicateValues) {
+        final StringBuilder duplicateKeyBuilder = new StringBuilder();
+        for (int i = 0; i < index.uniqueFieldPaths().size(); i++) {
+            if (i > 0) {
+                duplicateKeyBuilder.append(", ");
+            }
+            duplicateKeyBuilder
+                    .append(index.uniqueFieldPaths().get(i))
+                    .append(": ")
+                    .append(String.valueOf(duplicateValues[i]));
+        }
         return "E11000 duplicate key error index: "
                 + index.name()
                 + " dup key: { "
-                + index.uniqueFieldPath()
-                + ": "
-                + String.valueOf(duplicateValue)
+                + duplicateKeyBuilder
                 + " }";
+    }
+
+    private static boolean isSparseExcluded(final Document document, final List<String> fieldPaths) {
+        for (final String fieldPath : fieldPaths) {
+            if (pathExists(document, fieldPath)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean pathExists(final Document document, final String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        if (!path.contains(".")) {
+            return document.containsKey(path);
+        }
+
+        final String[] segments = path.split("\\.");
+        Object current = document;
+        for (int i = 0; i < segments.length; i++) {
+            if (!(current instanceof Map<?, ?> mapValue)) {
+                return false;
+            }
+            final String segment = segments[i];
+            if (!mapValue.containsKey(segment)) {
+                return false;
+            }
+            current = mapValue.get(segment);
+            if (i < segments.length - 1 && current == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Object[] resolvePathValues(final Document document, final List<String> paths) {
+        final Object[] values = new Object[paths.size()];
+        for (int i = 0; i < paths.size(); i++) {
+            values[i] = resolvePathValue(document, paths.get(i));
+        }
+        return values;
     }
 
     private static Object resolvePathValue(final Document document, final String path) {
@@ -357,7 +466,14 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     private record UpdatePreview(Document updatedDocument, boolean modified) {}
 
-    private record IndexMetadata(String name, Document key, boolean unique, String uniqueFieldPath) {}
+    private record IndexMetadata(
+            String name,
+            Document key,
+            boolean unique,
+            boolean sparse,
+            Document partialFilterExpression,
+            Long expireAfterSeconds,
+            List<String> uniqueFieldPaths) {}
 
     private static final class UniqueValueKey {
         private final Object value;

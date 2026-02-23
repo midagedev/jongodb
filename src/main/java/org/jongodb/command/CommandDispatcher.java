@@ -35,9 +35,11 @@ public final class CommandDispatcher {
         configuredHandlers.put("getparameter", new GetParameterCommandHandler());
         configuredHandlers.put("insert", new InsertCommandHandler(routedStore));
         configuredHandlers.put("find", new FindCommandHandler(routedStore, cursorRegistry));
+        configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry));
         configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry));
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(routedStore));
+        configuredHandlers.put("listindexes", new ListIndexesCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("update", new UpdateCommandHandler(routedStore));
         configuredHandlers.put("delete", new DeleteCommandHandler(routedStore));
         configuredHandlers.put("committransaction", new CommitTransactionCommandHandler());
@@ -141,6 +143,12 @@ public final class CommandDispatcher {
         }
 
         @Override
+        public java.util.List<BsonDocument> aggregate(
+                final String database, final String collection, final java.util.List<BsonDocument> pipeline) {
+            return delegate().aggregate(database, collection, pipeline);
+        }
+
+        @Override
         public CommandStore snapshotForTransaction() {
             return delegate().snapshotForTransaction();
         }
@@ -154,6 +162,11 @@ public final class CommandDispatcher {
         public CreateIndexesResult createIndexes(
                 final String database, final String collection, final java.util.List<IndexRequest> indexes) {
             return delegate().createIndexes(database, collection, indexes);
+        }
+
+        @Override
+        public java.util.List<IndexMetadata> listIndexes(final String database, final String collection) {
+            return delegate().listIndexes(database, collection);
         }
 
         @Override

@@ -79,6 +79,25 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public List<BsonDocument> aggregate(
+            final String database, final String collection, final List<BsonDocument> pipeline) {
+        Objects.requireNonNull(pipeline, "pipeline");
+        final CollectionStore collectionStore = engineStore.collection(database, collection);
+
+        final List<Document> convertedPipeline = new ArrayList<>(pipeline.size());
+        for (final BsonDocument stage : pipeline) {
+            convertedPipeline.add(toDocument(Objects.requireNonNull(stage, "pipeline entries must not be null")));
+        }
+
+        final List<Document> aggregatedDocuments = collectionStore.aggregate(List.copyOf(convertedPipeline));
+        final List<BsonDocument> converted = new ArrayList<>(aggregatedDocuments.size());
+        for (final Document document : aggregatedDocuments) {
+            converted.add(toBsonDocument(document));
+        }
+        return List.copyOf(converted);
+    }
+
+    @Override
     public CreateIndexesResult createIndexes(
             final String database, final String collection, final List<IndexRequest> indexes) {
         Objects.requireNonNull(indexes, "indexes");
@@ -90,11 +109,31 @@ public final class EngineBackedCommandStore implements CommandStore {
             converted.add(new CollectionStore.IndexDefinition(
                     Objects.requireNonNull(index.name(), "index name"),
                     toDocument(Objects.requireNonNull(index.key(), "index key")),
-                    index.unique()));
+                    index.unique(),
+                    index.sparse(),
+                    index.partialFilterExpression() == null ? null : toDocument(index.partialFilterExpression()),
+                    index.expireAfterSeconds()));
         }
 
         final CollectionStore.CreateIndexesResult result = collectionStore.createIndexes(List.copyOf(converted));
         return new CreateIndexesResult(result.numIndexesBefore(), result.numIndexesAfter());
+    }
+
+    @Override
+    public List<IndexMetadata> listIndexes(final String database, final String collection) {
+        final CollectionStore collectionStore = engineStore.collection(database, collection);
+        final List<CollectionStore.IndexDefinition> indexes = collectionStore.listIndexes();
+        final List<IndexMetadata> converted = new ArrayList<>(indexes.size());
+        for (final CollectionStore.IndexDefinition index : indexes) {
+            converted.add(new IndexMetadata(
+                    index.name(),
+                    toBsonDocument(index.key()),
+                    index.unique(),
+                    index.sparse(),
+                    index.partialFilterExpression() == null ? null : toBsonDocument(index.partialFilterExpression()),
+                    index.expireAfterSeconds()));
+        }
+        return List.copyOf(converted);
     }
 
     @Override

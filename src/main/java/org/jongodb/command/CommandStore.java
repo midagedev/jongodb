@@ -10,6 +10,13 @@ public interface CommandStore {
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
 
     /**
+     * Default fallback for test doubles that do not yet model aggregation pipelines.
+     */
+    default List<BsonDocument> aggregate(String database, String collection, List<BsonDocument> pipeline) {
+        return find(database, collection, new BsonDocument());
+    }
+
+    /**
      * Creates a transaction-local snapshot for command execution.
      *
      * <p>The default implementation returns this store, which preserves backward compatibility for lightweight
@@ -34,6 +41,13 @@ public interface CommandStore {
     }
 
     /**
+     * Default no-op for backward compatibility in tests/doubles that do not care about index metadata.
+     */
+    default List<IndexMetadata> listIndexes(String database, String collection) {
+        return List.of();
+    }
+
+    /**
      * Default no-op for backward compatibility in tests/doubles that do not care about updates.
      */
     default UpdateResult update(String database, String collection, List<UpdateRequest> updates) {
@@ -47,9 +61,27 @@ public interface CommandStore {
         return 0;
     }
 
-    record IndexRequest(String name, BsonDocument key, boolean unique) {}
+    record IndexRequest(
+            String name,
+            BsonDocument key,
+            boolean unique,
+            boolean sparse,
+            BsonDocument partialFilterExpression,
+            Long expireAfterSeconds) {
+        public IndexRequest(final String name, final BsonDocument key, final boolean unique) {
+            this(name, key, unique, false, null, null);
+        }
+    }
 
     record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter) {}
+
+    record IndexMetadata(
+            String name,
+            BsonDocument key,
+            boolean unique,
+            boolean sparse,
+            BsonDocument partialFilterExpression,
+            Long expireAfterSeconds) {}
 
     record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi, boolean upsert) {}
 

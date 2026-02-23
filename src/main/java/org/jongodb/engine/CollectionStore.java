@@ -11,9 +11,15 @@ public interface CollectionStore {
 
     CreateIndexesResult createIndexes(List<IndexDefinition> indexes);
 
+    List<IndexDefinition> listIndexes();
+
     List<Document> findAll();
 
     List<Document> find(Document filter);
+
+    default List<Document> aggregate(final List<Document> pipeline) {
+        throw new UnsupportedOperationException("aggregate is not supported");
+    }
 
     UpdateManyResult update(Document filter, Document update, boolean multi, boolean upsert);
 
@@ -23,7 +29,23 @@ public interface CollectionStore {
 
     DeleteManyResult deleteMany(Document filter);
 
-    record IndexDefinition(String name, Document key, boolean unique) {}
+    record IndexDefinition(
+            String name,
+            Document key,
+            boolean unique,
+            boolean sparse,
+            Document partialFilterExpression,
+            Long expireAfterSeconds) {
+        public IndexDefinition {
+            key = key == null ? null : DocumentCopies.copy(key);
+            partialFilterExpression =
+                    partialFilterExpression == null ? null : DocumentCopies.copy(partialFilterExpression);
+        }
+
+        public IndexDefinition(final String name, final Document key, final boolean unique) {
+            this(name, key, unique, false, null, null);
+        }
+    }
 
     record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter) {}
 }

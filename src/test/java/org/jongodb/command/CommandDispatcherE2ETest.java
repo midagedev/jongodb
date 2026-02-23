@@ -246,6 +246,103 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void createIndexesCommandAcceptsAndForwardsSparsePartialAndTtlOptions() {
+        final RecordingStore store = new RecordingStore();
+        store.createIndexesResult = new CommandStore.CreateIndexesResult(0, 1);
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"sparse\":true,\"partialFilterExpression\":{\"email\":{\"$exists\":true}},\"expireAfterSeconds\":3600}]}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, store.lastCreateIndexesRequests.size());
+        assertTrue(store.lastCreateIndexesRequests.get(0).sparse());
+        assertEquals(
+                true,
+                store.lastCreateIndexesRequests
+                        .get(0)
+                        .partialFilterExpression()
+                        .getDocument("email")
+                        .getBoolean("$exists")
+                        .getValue());
+        assertEquals(3600L, store.lastCreateIndexesRequests.get(0).expireAfterSeconds());
+    }
+
+    @Test
+    void createIndexesCommandValidatesSparsePartialAndTtlOptionShape() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument sparseTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"sparse\":\"true\"}]}"));
+        assertCommandError(sparseTypeMismatch, "TypeMismatch");
+
+        final BsonDocument partialTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"partialFilterExpression\":1}]}"));
+        assertCommandError(partialTypeMismatch, "TypeMismatch");
+
+        final BsonDocument ttlTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"expireAfterSeconds\":1.5}]}"));
+        assertCommandError(ttlTypeMismatch, "TypeMismatch");
+
+        final BsonDocument ttlBadValue = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"expireAfterSeconds\":-1}]}"));
+        assertCommandError(ttlBadValue, "BadValue");
+    }
+
+    @Test
+    void listIndexesCommandReturnsCursorWithIndexMetadata() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument createIndexResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"unique\":true,\"sparse\":true,\"partialFilterExpression\":{\"email\":{\"$exists\":true}},\"expireAfterSeconds\":3600}]}"));
+        assertEquals(1.0, createIndexResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument listIndexesResponse =
+                dispatcher.dispatch(BsonDocument.parse("{\"listIndexes\":\"users\",\"$db\":\"app\"}"));
+
+        assertEquals(1.0, listIndexesResponse.get("ok").asNumber().doubleValue());
+        final BsonDocument cursor = listIndexesResponse.getDocument("cursor");
+        assertEquals("app.users", cursor.getString("ns").getValue());
+        assertEquals(1, cursor.getArray("firstBatch").size());
+
+        final BsonDocument index = cursor.getArray("firstBatch").get(0).asDocument();
+        assertEquals(2, index.getInt32("v").getValue());
+        assertEquals("email_1", index.getString("name").getValue());
+        assertEquals("app.users", index.getString("ns").getValue());
+        assertEquals(1, index.getDocument("key").getInt32("email").getValue());
+        assertEquals(true, index.getBoolean("unique").getValue());
+        assertEquals(true, index.getBoolean("sparse").getValue());
+        assertEquals(
+                true,
+                index.getDocument("partialFilterExpression")
+                        .getDocument("email")
+                        .getBoolean("$exists")
+                        .getValue());
+        assertEquals(3600L, index.getInt64("expireAfterSeconds").getValue());
+    }
+
+    @Test
+    void listIndexesCommandCallsStore() {
+        final RecordingStore store = new RecordingStore();
+        store.listIndexesResult = List.of(new CommandStore.IndexMetadata(
+                "email_1",
+                BsonDocument.parse("{\"email\":1}"),
+                true,
+                false,
+                null,
+                null));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"listIndexes\":\"users\",\"$db\":\"app\",\"cursor\":{\"batchSize\":5}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals("app", store.lastListIndexesDatabase);
+        assertEquals("users", store.lastListIndexesCollection);
+        assertEquals(1, response.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
     void insertCommandRejectsDuplicateKeyAfterUniqueIndex() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
@@ -802,6 +899,10 @@ class CommandDispatcherE2ETest {
         private List<IndexRequest> lastCreateIndexesRequests = List.of();
         private CreateIndexesResult createIndexesResult = new CreateIndexesResult(0, 0);
 
+        private String lastListIndexesDatabase;
+        private String lastListIndexesCollection;
+        private List<IndexMetadata> listIndexesResult = List.of();
+
         private String lastDeleteDatabase;
         private String lastDeleteCollection;
         private List<DeleteRequest> lastDeleteRequests = List.of();
@@ -830,6 +931,13 @@ class CommandDispatcherE2ETest {
             lastCreateIndexesCollection = collection;
             lastCreateIndexesRequests = List.copyOf(indexes);
             return createIndexesResult;
+        }
+
+        @Override
+        public List<IndexMetadata> listIndexes(final String database, final String collection) {
+            lastListIndexesDatabase = database;
+            lastListIndexesCollection = collection;
+            return List.copyOf(listIndexesResult);
         }
 
         @Override

@@ -364,6 +364,50 @@ class InMemoryCollectionStoreTest {
     }
 
     @Test
+    void createUniqueCompoundIndexRejectsExistingDuplicateTuplesAtomically() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(
+                List.of(
+                        new Document("_id", 1).append("tenantId", "t1").append("email", "dup@example.com"),
+                        new Document("_id", 2).append("tenantId", "t1").append("email", "dup@example.com")));
+
+        assertThrows(
+                DuplicateKeyException.class,
+                () ->
+                        store.createIndexes(List.of(new CollectionStore.IndexDefinition(
+                                "tenant_email_1",
+                                new Document("tenantId", 1).append("email", 1),
+                                true))));
+
+        store.insertMany(List.of(new Document("_id", 3).append("tenantId", "t1").append("email", "dup@example.com")));
+        assertEquals(3, store.findAll().size());
+    }
+
+    @Test
+    void compoundUniqueIndexTreatsMissingFieldsAsTupleValues() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.createIndexes(List.of(new CollectionStore.IndexDefinition(
+                "tenant_email_1",
+                new Document("tenantId", 1).append("email", 1),
+                true)));
+
+        store.insertMany(
+                List.of(
+                        new Document("_id", 1).append("tenantId", "t1"),
+                        new Document("_id", 2).append("tenantId", "t1").append("email", "a@example.com"),
+                        new Document("_id", 3).append("email", "a@example.com")));
+
+        assertThrows(
+                DuplicateKeyException.class,
+                () -> store.insertMany(List.of(new Document("_id", 4).append("tenantId", "t1"))));
+        assertThrows(
+                DuplicateKeyException.class,
+                () -> store.insertMany(List.of(new Document("_id", 5).append("email", "a@example.com"))));
+
+        assertEquals(3, store.findAll().size());
+    }
+
+    @Test
     void deleteManyRemovesMatchingDocumentsAndReturnsCounts() {
         CollectionStore store = new InMemoryCollectionStore();
 

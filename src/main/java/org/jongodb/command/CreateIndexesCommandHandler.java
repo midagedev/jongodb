@@ -66,7 +66,43 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
                 unique = uniqueValue.asBoolean().getValue();
             }
 
-            indexes.add(new CommandStore.IndexRequest(name, key, unique));
+            final BsonValue sparseValue = indexSpec.get("sparse");
+            final boolean sparse;
+            if (sparseValue == null) {
+                sparse = false;
+            } else if (!sparseValue.isBoolean()) {
+                return CommandErrors.typeMismatch("sparse must be a boolean");
+            } else {
+                sparse = sparseValue.asBoolean().getValue();
+            }
+
+            final BsonValue partialFilterExpressionValue = indexSpec.get("partialFilterExpression");
+            final BsonDocument partialFilterExpression;
+            if (partialFilterExpressionValue == null) {
+                partialFilterExpression = null;
+            } else if (!partialFilterExpressionValue.isDocument()) {
+                return CommandErrors.typeMismatch("partialFilterExpression must be a document");
+            } else {
+                partialFilterExpression = partialFilterExpressionValue.asDocument();
+            }
+
+            final BsonValue expireAfterSecondsValue = indexSpec.get("expireAfterSeconds");
+            final Long expireAfterSeconds;
+            if (expireAfterSecondsValue == null) {
+                expireAfterSeconds = null;
+            } else {
+                final Long parsedExpireAfterSeconds = readIntegralLong(expireAfterSecondsValue);
+                if (parsedExpireAfterSeconds == null) {
+                    return CommandErrors.typeMismatch("expireAfterSeconds must be an integer");
+                }
+                if (parsedExpireAfterSeconds < 0) {
+                    return CommandErrors.badValue("expireAfterSeconds must be a non-negative integer");
+                }
+                expireAfterSeconds = parsedExpireAfterSeconds;
+            }
+
+            indexes.add(new CommandStore.IndexRequest(
+                    name, key, unique, sparse, partialFilterExpression, expireAfterSeconds));
         }
 
         final CommandStore.CreateIndexesResult result;
@@ -105,5 +141,25 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
             return null;
         }
         return value.asDocument();
+    }
+
+    private static Long readIntegralLong(final BsonValue value) {
+        if (value.isInt32()) {
+            return (long) value.asInt32().getValue();
+        }
+        if (value.isInt64()) {
+            return value.asInt64().getValue();
+        }
+        if (value.isDouble()) {
+            final double doubleValue = value.asDouble().getValue();
+            if (!Double.isFinite(doubleValue) || Math.rint(doubleValue) != doubleValue) {
+                return null;
+            }
+            if (doubleValue < Long.MIN_VALUE || doubleValue > Long.MAX_VALUE) {
+                return null;
+            }
+            return (long) doubleValue;
+        }
+        return null;
     }
 }
