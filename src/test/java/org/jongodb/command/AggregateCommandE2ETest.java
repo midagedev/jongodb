@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt32;
@@ -99,6 +100,64 @@ class AggregateCommandE2ETest {
         final BsonDocument unsupportedStage = dispatcher.dispatch(
                 BsonDocument.parse("{\"aggregate\":\"users\",\"pipeline\":[{\"$foo\":{}}],\"cursor\":{}}"));
         assertCommandError(unsupportedStage, "BadValue");
+    }
+
+    @Test
+    void aggregateCommandSupportsLookupWithExprPipeline() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alice\"},{\"_id\":2,\"name\":\"bob\"}]}"));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"orders\",\"$db\":\"app\",\"documents\":[{\"_id\":10,\"userId\":1},{\"_id\":11,\"userId\":2}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"orders\",\"$db\":\"app\",\"pipeline\":[{\"$lookup\":{\"from\":\"users\",\"localField\":\"userId\",\"foreignField\":\"_id\",\"as\":\"joinedByField\"}},{\"$lookup\":{\"from\":\"users\",\"let\":{\"uid\":\"$userId\"},\"pipeline\":[{\"$match\":{\"$expr\":{\"$eq\":[\"$_id\",\"$$uid\"]}}},{\"$project\":{\"_id\":0,\"name\":1}}],\"as\":\"joinedByExpr\"}},{\"$sort\":{\"_id\":1}}],\"cursor\":{}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray firstBatch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals(2, firstBatch.size());
+
+        final BsonDocument firstOrder = firstBatch.get(0).asDocument();
+        assertEquals(1, firstOrder.getArray("joinedByField").size());
+        assertEquals(
+                "alice",
+                firstOrder
+                        .getArray("joinedByField")
+                        .get(0)
+                        .asDocument()
+                        .getString("name")
+                        .getValue());
+        assertEquals(1, firstOrder.getArray("joinedByExpr").size());
+        assertEquals(
+                "alice",
+                firstOrder
+                        .getArray("joinedByExpr")
+                        .get(0)
+                        .asDocument()
+                        .getString("name")
+                        .getValue());
+    }
+
+    @Test
+    void aggregateCommandSupportsUnionWithPipeline() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alice\"},{\"_id\":2,\"name\":\"bob\"}]}"));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"orders\",\"$db\":\"app\",\"documents\":[{\"_id\":10,\"orderNo\":\"A-10\"},{\"_id\":11,\"orderNo\":\"B-11\"}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"orders\",\"$db\":\"app\",\"pipeline\":[{\"$project\":{\"_id\":0,\"type\":\"order\",\"ref\":\"$orderNo\"}},{\"$unionWith\":{\"coll\":\"users\",\"pipeline\":[{\"$project\":{\"_id\":0,\"type\":\"user\",\"ref\":\"$name\"}}]}},{\"$sort\":{\"type\":1,\"ref\":1}}],\"cursor\":{}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray firstBatch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals(4, firstBatch.size());
+        assertEquals("order", firstBatch.get(0).asDocument().getString("type").getValue());
+        assertEquals("A-10", firstBatch.get(0).asDocument().getString("ref").getValue());
+        assertEquals("user", firstBatch.get(2).asDocument().getString("type").getValue());
+        assertEquals("alice", firstBatch.get(2).asDocument().getString("ref").getValue());
     }
 
     private static void assertCommandError(final BsonDocument response, final String codeName) {

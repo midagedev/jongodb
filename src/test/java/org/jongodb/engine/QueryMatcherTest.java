@@ -320,6 +320,34 @@ class QueryMatcherTest {
     }
 
     @Test
+    void supportsExprTopLevelOperator() {
+        final Document document =
+                new Document("price", 120)
+                        .append("cost", 80)
+                        .append("qty", 3)
+                        .append("active", true);
+
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document("$expr", new Document("$gt", List.of("$price", "$cost")))));
+        assertFalse(
+                QueryMatcher.matches(
+                        document,
+                        new Document("$expr", new Document("$lt", List.of("$price", "$cost")))));
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document(
+                                "$expr",
+                                new Document(
+                                        "$and",
+                                        List.of(
+                                                new Document("$eq", List.of("$qty", 3)),
+                                                new Document("$eq", List.of("$active", true)))))));
+    }
+
+    @Test
     void rejectsUnsupportedOperatorsOrInvalidOperands() {
         Document document = new Document("score", 10);
 
@@ -338,5 +366,17 @@ class QueryMatcherTest {
                         QueryMatcher.matches(
                                 document,
                                 new Document("name", new Document("$regex", "a").append("$options", "q"))));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        QueryMatcher.matches(
+                                document,
+                                new Document("$expr", new Document("$eq", List.of("$score")))));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        QueryMatcher.matches(
+                                document,
+                                new Document("$expr", new Document("$unknown", List.of(1, 1)))));
     }
 }

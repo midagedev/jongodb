@@ -35,15 +35,27 @@ public interface CollectionStore {
             boolean unique,
             boolean sparse,
             Document partialFilterExpression,
+            Document collation,
             Long expireAfterSeconds) {
         public IndexDefinition {
             key = key == null ? null : DocumentCopies.copy(key);
             partialFilterExpression =
                     partialFilterExpression == null ? null : DocumentCopies.copy(partialFilterExpression);
+            collation = collation == null ? null : DocumentCopies.copy(collation);
         }
 
         public IndexDefinition(final String name, final Document key, final boolean unique) {
-            this(name, key, unique, false, null, null);
+            this(name, key, unique, false, null, null, null);
+        }
+
+        public IndexDefinition(
+                final String name,
+                final Document key,
+                final boolean unique,
+                final boolean sparse,
+                final Document partialFilterExpression,
+                final Long expireAfterSeconds) {
+            this(name, key, unique, sparse, partialFilterExpression, null, expireAfterSeconds);
         }
     }
 

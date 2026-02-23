@@ -43,7 +43,11 @@ final class QueryMatcher {
     }
 
     private static boolean isTopLevelOperator(String key) {
-        return "$and".equals(key) || "$or".equals(key) || "$not".equals(key) || "$nor".equals(key);
+        return "$and".equals(key)
+                || "$or".equals(key)
+                || "$not".equals(key)
+                || "$nor".equals(key)
+                || "$expr".equals(key);
     }
 
     private static boolean matchesTopLevelOperator(Document document, String operator, Object definition) {
@@ -75,9 +79,164 @@ final class QueryMatcher {
                 return true;
             case "$not":
                 return !matches(document, toDocument(operator, definition));
+            case "$expr":
+                return matchesExpression(document, definition);
             default:
                 throw new IllegalArgumentException("unsupported query operator: " + operator);
         }
+    }
+
+    private static boolean matchesExpression(final Document document, final Object expression) {
+        return expressionTruthiness(evaluateExpression(document, expression));
+    }
+
+    private static Object evaluateExpression(final Document document, final Object expression) {
+        if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
+            return resolveExpressionPath(document, pathExpression.substring(1));
+        }
+        if (expression instanceof Map<?, ?> rawMap) {
+            final Map<String, Object> expressionMap = toStringKeyedMap(rawMap, "$expr");
+            if (expressionMap.size() == 1) {
+                final Map.Entry<String, Object> singleEntry = expressionMap.entrySet().iterator().next();
+                if (singleEntry.getKey().startsWith("$")) {
+                    return evaluateExpressionOperator(document, singleEntry.getKey(), singleEntry.getValue());
+                }
+            }
+
+            final Map<String, Object> evaluatedDocument = new LinkedHashMap<>();
+            for (final Map.Entry<String, Object> entry : expressionMap.entrySet()) {
+                evaluatedDocument.put(entry.getKey(), evaluateExpression(document, entry.getValue()));
+            }
+            return evaluatedDocument;
+        }
+        if (expression instanceof List<?> expressionList) {
+            final List<Object> evaluated = new ArrayList<>(expressionList.size());
+            for (final Object item : expressionList) {
+                evaluated.add(evaluateExpression(document, item));
+            }
+            return evaluated;
+        }
+        return expression;
+    }
+
+    private static Object evaluateExpressionOperator(
+            final Document document, final String operator, final Object operand) {
+        return switch (operator) {
+            case "$eq" -> evaluateExpressionEquality(document, operand, true);
+            case "$ne" -> evaluateExpressionEquality(document, operand, false);
+            case "$gt" -> evaluateExpressionComparison(document, operand, ComparisonOperator.GT);
+            case "$gte" -> evaluateExpressionComparison(document, operand, ComparisonOperator.GTE);
+            case "$lt" -> evaluateExpressionComparison(document, operand, ComparisonOperator.LT);
+            case "$lte" -> evaluateExpressionComparison(document, operand, ComparisonOperator.LTE);
+            case "$and" -> evaluateExpressionAnd(document, operand);
+            case "$or" -> evaluateExpressionOr(document, operand);
+            case "$not" -> evaluateExpressionNot(document, operand);
+            case "$literal" -> operand;
+            default -> throw new IllegalArgumentException("unsupported $expr operator: " + operator);
+        };
+    }
+
+    private static boolean evaluateExpressionEquality(
+            final Document document, final Object operand, final boolean expectedEqual) {
+        final List<Object> values = evaluateExpressionArguments(document, operand, 2, 2, "comparison");
+        final boolean equals = valueEquals(values.get(0), values.get(1));
+        return expectedEqual ? equals : !equals;
+    }
+
+    private static boolean evaluateExpressionComparison(
+            final Document document, final Object operand, final ComparisonOperator operator) {
+        final List<Object> values = evaluateExpressionArguments(document, operand, 2, 2, "comparison");
+        final Integer compared = compareValues(values.get(0), values.get(1));
+        if (compared == null) {
+            return false;
+        }
+        return switch (operator) {
+            case GT -> compared > 0;
+            case GTE -> compared >= 0;
+            case LT -> compared < 0;
+            case LTE -> compared <= 0;
+        };
+    }
+
+    private static boolean evaluateExpressionAnd(final Document document, final Object operand) {
+        final List<Object> values = evaluateExpressionArguments(document, operand, 1, null, "$and");
+        for (final Object value : values) {
+            if (!expressionTruthiness(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean evaluateExpressionOr(final Document document, final Object operand) {
+        final List<Object> values = evaluateExpressionArguments(document, operand, 1, null, "$or");
+        for (final Object value : values) {
+            if (expressionTruthiness(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean evaluateExpressionNot(final Document document, final Object operand) {
+        final List<Object> values = evaluateExpressionArguments(document, operand, 1, 1, "$not");
+        return !expressionTruthiness(values.get(0));
+    }
+
+    private static List<Object> evaluateExpressionArguments(
+            final Document document,
+            final Object operand,
+            final int minSize,
+            final Integer exactSize,
+            final String operatorName) {
+        if (!(operand instanceof List<?> rawOperands)) {
+            throw new IllegalArgumentException("$expr " + operatorName + " requires an array argument");
+        }
+        if (exactSize != null && rawOperands.size() != exactSize) {
+            throw new IllegalArgumentException("$expr " + operatorName + " requires exactly " + exactSize + " arguments");
+        }
+        if (rawOperands.size() < minSize) {
+            throw new IllegalArgumentException("$expr " + operatorName + " requires at least " + minSize + " arguments");
+        }
+
+        final List<Object> values = new ArrayList<>(rawOperands.size());
+        for (final Object rawOperand : rawOperands) {
+            values.add(evaluateExpression(document, rawOperand));
+        }
+        return values;
+    }
+
+    private static boolean expressionTruthiness(final Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        if (value instanceof Number numberValue) {
+            final double numeric = numberValue.doubleValue();
+            return Double.isFinite(numeric) && numeric != 0d;
+        }
+        if (value instanceof CharSequence charSequence) {
+            return charSequence.length() > 0;
+        }
+        return true;
+    }
+
+    private static Object resolveExpressionPath(final Document document, final String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+
+        final String[] segments = path.split("\\.");
+        Object current = document;
+        for (final String segment : segments) {
+            if (!(current instanceof Map<?, ?> mapValue) || !mapValue.containsKey(segment)) {
+                return null;
+            }
+            current = mapValue.get(segment);
+        }
+        return current;
     }
 
     private static List<Document> toDocumentList(String operator, Object rawValue) {

@@ -246,13 +246,13 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
-    void createIndexesCommandAcceptsAndForwardsSparsePartialAndTtlOptions() {
+    void createIndexesCommandAcceptsAndForwardsSparsePartialCollationAndTtlOptions() {
         final RecordingStore store = new RecordingStore();
         store.createIndexesResult = new CommandStore.CreateIndexesResult(0, 1);
         final CommandDispatcher dispatcher = new CommandDispatcher(store);
 
         final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
-                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"sparse\":true,\"partialFilterExpression\":{\"email\":{\"$exists\":true}},\"expireAfterSeconds\":3600}]}"));
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"sparse\":true,\"partialFilterExpression\":{\"email\":{\"$exists\":true}},\"collation\":{\"locale\":\"en\",\"strength\":2},\"expireAfterSeconds\":3600}]}"));
 
         assertEquals(1.0, response.get("ok").asNumber().doubleValue());
         assertEquals(1, store.lastCreateIndexesRequests.size());
@@ -265,11 +265,13 @@ class CommandDispatcherE2ETest {
                         .getDocument("email")
                         .getBoolean("$exists")
                         .getValue());
+        assertEquals("en", store.lastCreateIndexesRequests.get(0).collation().getString("locale").getValue());
+        assertEquals(2, store.lastCreateIndexesRequests.get(0).collation().getInt32("strength").getValue());
         assertEquals(3600L, store.lastCreateIndexesRequests.get(0).expireAfterSeconds());
     }
 
     @Test
-    void createIndexesCommandValidatesSparsePartialAndTtlOptionShape() {
+    void createIndexesCommandValidatesSparsePartialCollationAndTtlOptionShape() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
 
         final BsonDocument sparseTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
@@ -287,6 +289,14 @@ class CommandDispatcherE2ETest {
         final BsonDocument ttlBadValue = dispatcher.dispatch(BsonDocument.parse(
                 "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"expireAfterSeconds\":-1}]}"));
         assertCommandError(ttlBadValue, "BadValue");
+
+        final BsonDocument collationTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"collation\":\"en\"}]}"));
+        assertCommandError(collationTypeMismatch, "TypeMismatch");
+
+        final BsonDocument collationLocaleTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"collation\":{\"locale\":1}}]}"));
+        assertCommandError(collationLocaleTypeMismatch, "TypeMismatch");
     }
 
     @Test
@@ -294,7 +304,7 @@ class CommandDispatcherE2ETest {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
         final BsonDocument createIndexResponse = dispatcher.dispatch(BsonDocument.parse(
-                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"unique\":true,\"sparse\":true,\"partialFilterExpression\":{\"email\":{\"$exists\":true}},\"expireAfterSeconds\":3600}]}"));
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1},\"unique\":true,\"sparse\":true,\"partialFilterExpression\":{\"email\":{\"$exists\":true}},\"collation\":{\"locale\":\"en\"},\"expireAfterSeconds\":3600}]}"));
         assertEquals(1.0, createIndexResponse.get("ok").asNumber().doubleValue());
 
         final BsonDocument listIndexesResponse =
@@ -318,6 +328,7 @@ class CommandDispatcherE2ETest {
                         .getDocument("email")
                         .getBoolean("$exists")
                         .getValue());
+        assertEquals("en", index.getDocument("collation").getString("locale").getValue());
         assertEquals(3600L, index.getInt64("expireAfterSeconds").getValue());
     }
 
@@ -330,6 +341,7 @@ class CommandDispatcherE2ETest {
                 true,
                 false,
                 null,
+                BsonDocument.parse("{\"locale\":\"en\"}"),
                 null));
         final CommandDispatcher dispatcher = new CommandDispatcher(store);
 
@@ -340,6 +352,15 @@ class CommandDispatcherE2ETest {
         assertEquals("app", store.lastListIndexesDatabase);
         assertEquals("users", store.lastListIndexesCollection);
         assertEquals(1, response.getDocument("cursor").getArray("firstBatch").size());
+        assertEquals(
+                "en",
+                response.getDocument("cursor")
+                        .getArray("firstBatch")
+                        .get(0)
+                        .asDocument()
+                        .getDocument("collation")
+                        .getString("locale")
+                        .getValue());
     }
 
     @Test

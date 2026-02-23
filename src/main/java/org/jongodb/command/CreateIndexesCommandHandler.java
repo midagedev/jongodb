@@ -86,6 +86,13 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
                 partialFilterExpression = partialFilterExpressionValue.asDocument();
             }
 
+            final BsonDocument collationOptionError = CrudCommandOptionValidator.validateCollation(indexSpec, "collation");
+            if (collationOptionError != null) {
+                return collationOptionError;
+            }
+            final BsonValue collationValue = indexSpec.get("collation");
+            final BsonDocument collation = collationValue == null ? null : collationValue.asDocument();
+
             final BsonValue expireAfterSecondsValue = indexSpec.get("expireAfterSeconds");
             final Long expireAfterSeconds;
             if (expireAfterSecondsValue == null) {
@@ -102,7 +109,7 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
             }
 
             indexes.add(new CommandStore.IndexRequest(
-                    name, key, unique, sparse, partialFilterExpression, expireAfterSeconds));
+                    name, key, unique, sparse, partialFilterExpression, collation, expireAfterSeconds));
         }
 
         final CommandStore.CreateIndexesResult result;

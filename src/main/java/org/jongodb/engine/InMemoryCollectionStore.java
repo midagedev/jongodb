@@ -37,6 +37,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
                             index.partialFilterExpression() == null
                                     ? null
                                     : DocumentCopies.copy(index.partialFilterExpression()),
+                            index.collation() == null ? null : DocumentCopies.copy(index.collation()),
                             index.expireAfterSeconds(),
                             List.copyOf(index.uniqueFieldPaths())));
         }
@@ -86,6 +87,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             final List<String> uniqueFieldPaths = index.unique() ? indexFieldPaths(key) : List.of();
             final Document partialFilterExpression =
                     index.partialFilterExpression() == null ? null : DocumentCopies.copy(index.partialFilterExpression());
+            final Document collation = index.collation() == null ? null : DocumentCopies.copy(index.collation());
             candidateIndexes.put(
                     name,
                     new IndexMetadata(
@@ -94,6 +96,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
                             index.unique(),
                             index.sparse(),
                             partialFilterExpression,
+                            collation,
                             index.expireAfterSeconds(),
                             uniqueFieldPaths));
         }
@@ -115,6 +118,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
                     metadata.unique(),
                     metadata.sparse(),
                     metadata.partialFilterExpression(),
+                    metadata.collation(),
                     metadata.expireAfterSeconds()));
         }
         return List.copyOf(listed);
@@ -472,6 +476,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             boolean unique,
             boolean sparse,
             Document partialFilterExpression,
+            Document collation,
             Long expireAfterSeconds,
             List<String> uniqueFieldPaths) {}
 

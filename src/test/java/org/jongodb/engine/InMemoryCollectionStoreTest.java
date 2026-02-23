@@ -408,6 +408,58 @@ class InMemoryCollectionStoreTest {
     }
 
     @Test
+    void listIndexesReturnsCollationMetadataAsDefensiveCopies() {
+        CollectionStore store = new InMemoryCollectionStore();
+        Document collation = new Document("locale", "en").append("strength", 2);
+        store.createIndexes(List.of(new CollectionStore.IndexDefinition(
+                "email_1",
+                new Document("email", 1),
+                true,
+                true,
+                new Document("email", new Document("$exists", true)),
+                collation,
+                3600L)));
+
+        collation.put("locale", "fr");
+        List<CollectionStore.IndexDefinition> firstListed = store.listIndexes();
+        assertEquals(1, firstListed.size());
+        assertEquals("en", firstListed.get(0).collation().getString("locale"));
+        assertEquals(2, firstListed.get(0).collation().getInteger("strength"));
+
+        firstListed.get(0).collation().put("locale", "de");
+        List<CollectionStore.IndexDefinition> secondListed = store.listIndexes();
+        assertEquals("en", secondListed.get(0).collation().getString("locale"));
+    }
+
+    @Test
+    void snapshotCapturesIndexCollationMetadataIndependently() {
+        InMemoryCollectionStore store = new InMemoryCollectionStore();
+        store.createIndexes(List.of(new CollectionStore.IndexDefinition(
+                "email_1",
+                new Document("email", 1),
+                true,
+                false,
+                null,
+                new Document("locale", "en"),
+                null)));
+
+        InMemoryCollectionStore snapshot = store.snapshot();
+        store.createIndexes(List.of(new CollectionStore.IndexDefinition(
+                "name_1",
+                new Document("name", 1),
+                false,
+                false,
+                null,
+                new Document("locale", "fr"),
+                null)));
+
+        assertEquals(2, store.listIndexes().size());
+        assertEquals(1, snapshot.listIndexes().size());
+        assertEquals("email_1", snapshot.listIndexes().get(0).name());
+        assertEquals("en", snapshot.listIndexes().get(0).collation().getString("locale"));
+    }
+
+    @Test
     void deleteManyRemovesMatchingDocumentsAndReturnsCounts() {
         CollectionStore store = new InMemoryCollectionStore();
 

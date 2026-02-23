@@ -113,6 +113,72 @@ class InMemoryCollectionStoreAggregateTest {
         assertTrue(emptyCount.isEmpty());
     }
 
+    @Test
+    void aggregateSupportsAddFieldsAndSortByCount() {
+        final CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(Arrays.asList(
+                new Document("_id", 1).append("profile", new Document("city", "Seoul")),
+                new Document("_id", 2).append("profile", new Document("city", "Busan")),
+                new Document("_id", 3).append("profile", new Document("city", "Seoul"))));
+
+        final List<Document> aggregated = store.aggregate(List.of(
+                new Document("$addFields", new Document("city", "$profile.city")),
+                new Document("$sortByCount", "$city")));
+
+        assertEquals(2, aggregated.size());
+        assertEquals("Seoul", aggregated.get(0).getString("_id"));
+        assertEquals(2L, asLong(aggregated.get(0).get("count")));
+        assertEquals("Busan", aggregated.get(1).getString("_id"));
+        assertEquals(1L, asLong(aggregated.get(1).get("count")));
+    }
+
+    @Test
+    void aggregateSupportsFacetWithIndependentPipelines() {
+        final CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(Arrays.asList(
+                new Document("_id", 1)
+                        .append("status", "active")
+                        .append("profile", new Document("city", "Seoul")),
+                new Document("_id", 2)
+                        .append("status", "active")
+                        .append("profile", new Document("city", "Busan")),
+                new Document("_id", 3)
+                        .append("status", "inactive")
+                        .append("profile", new Document("city", "Seoul"))));
+
+        final List<Document> aggregated = store.aggregate(List.of(new Document(
+                "$facet",
+                new Document(
+                        "activeOnly",
+                        List.of(
+                                new Document("$match", new Document("status", "active")),
+                                new Document("$count", "total")))
+                        .append(
+                                "byCity",
+                                List.of(
+                                        new Document(
+                                                "$group",
+                                                new Document("_id", "$profile.city")
+                                                        .append("total", new Document("$sum", 1))),
+                                        new Document("$sort", new Document("_id", 1)))))));
+
+        assertEquals(1, aggregated.size());
+        final Document facetResult = aggregated.get(0);
+
+        @SuppressWarnings("unchecked")
+        final List<Document> activeOnly = (List<Document>) facetResult.get("activeOnly");
+        assertEquals(1, activeOnly.size());
+        assertEquals(2, activeOnly.get(0).getInteger("total"));
+
+        @SuppressWarnings("unchecked")
+        final List<Document> byCity = (List<Document>) facetResult.get("byCity");
+        assertEquals(2, byCity.size());
+        assertEquals("Busan", byCity.get(0).getString("_id"));
+        assertEquals(1L, asLong(byCity.get(0).get("total")));
+        assertEquals("Seoul", byCity.get(1).getString("_id"));
+        assertEquals(2L, asLong(byCity.get(1).get("total")));
+    }
+
     private static long asLong(final Object value) {
         if (!(value instanceof Number number)) {
             throw new AssertionError("expected numeric value but got: " + value);

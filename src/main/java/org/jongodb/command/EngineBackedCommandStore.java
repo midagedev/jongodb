@@ -11,6 +11,7 @@ import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.codecs.configuration.CodecRegistry;
+import org.jongodb.engine.AggregationPipeline;
 import org.jongodb.engine.CollectionStore;
 import org.jongodb.engine.DeleteManyResult;
 import org.jongodb.engine.EngineStore;
@@ -89,7 +90,11 @@ public final class EngineBackedCommandStore implements CommandStore {
             convertedPipeline.add(toDocument(Objects.requireNonNull(stage, "pipeline entries must not be null")));
         }
 
-        final List<Document> aggregatedDocuments = collectionStore.aggregate(List.copyOf(convertedPipeline));
+        final List<Document> sourceDocuments = collectionStore.findAll();
+        final List<Document> aggregatedDocuments = AggregationPipeline.execute(
+                sourceDocuments,
+                List.copyOf(convertedPipeline),
+                foreignCollectionName -> engineStore.collection(database, foreignCollectionName).findAll());
         final List<BsonDocument> converted = new ArrayList<>(aggregatedDocuments.size());
         for (final Document document : aggregatedDocuments) {
             converted.add(toBsonDocument(document));
@@ -112,6 +117,7 @@ public final class EngineBackedCommandStore implements CommandStore {
                     index.unique(),
                     index.sparse(),
                     index.partialFilterExpression() == null ? null : toDocument(index.partialFilterExpression()),
+                    index.collation() == null ? null : toDocument(index.collation()),
                     index.expireAfterSeconds()));
         }
 
@@ -131,6 +137,7 @@ public final class EngineBackedCommandStore implements CommandStore {
                     index.unique(),
                     index.sparse(),
                     index.partialFilterExpression() == null ? null : toBsonDocument(index.partialFilterExpression()),
+                    index.collation() == null ? null : toBsonDocument(index.collation()),
                     index.expireAfterSeconds()));
         }
         return List.copyOf(converted);

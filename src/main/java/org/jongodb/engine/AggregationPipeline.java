@@ -2,18 +2,38 @@ package org.jongodb.engine;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.bson.Document;
 
-final class AggregationPipeline {
+public final class AggregationPipeline {
+    @FunctionalInterface
+    public interface CollectionResolver {
+        List<Document> resolve(String collectionName);
+    }
+
+    private static final CollectionResolver UNSUPPORTED_COLLECTION_RESOLVER =
+            collectionName -> {
+                throw new IllegalArgumentException(
+                        "stage requires collection resolver: " + requireText(collectionName, "collectionName"));
+            };
+
     private AggregationPipeline() {}
 
-    static List<Document> execute(final List<Document> source, final List<Document> pipeline) {
+    public static List<Document> execute(final List<Document> source, final List<Document> pipeline) {
+        return execute(source, pipeline, UNSUPPORTED_COLLECTION_RESOLVER);
+    }
+
+    public static List<Document> execute(
+            final List<Document> source,
+            final List<Document> pipeline,
+            final CollectionResolver collectionResolver) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(pipeline, "pipeline");
+        Objects.requireNonNull(collectionResolver, "collectionResolver");
 
         List<Document> working = new ArrayList<>(source.size());
         for (final Document document : source) {
@@ -42,6 +62,11 @@ final class AggregationPipeline {
                 case "$skip" -> applySkip(working, stageDefinition);
                 case "$unwind" -> applyUnwind(working, stageDefinition);
                 case "$count" -> applyCount(working, stageDefinition);
+                case "$addFields" -> applyAddFields(working, stageDefinition);
+                case "$sortByCount" -> applySortByCount(working, stageDefinition);
+                case "$facet" -> applyFacet(working, stageDefinition, collectionResolver);
+                case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver);
+                case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver);
                 default -> throw new IllegalArgumentException("unsupported aggregation stage: " + stageName);
             };
         }
@@ -492,6 +517,164 @@ final class AggregationPipeline {
         return List.of(new Document(fieldName, input.size()));
     }
 
+    private static List<Document> applyAddFields(final List<Document> input, final Object stageDefinition) {
+        final Document addFields = requireDocument(stageDefinition, "$addFields stage requires a document");
+        if (addFields.isEmpty()) {
+            throw new IllegalArgumentException("$addFields stage must not be empty");
+        }
+
+        final List<Document> output = new ArrayList<>(input.size());
+        for (final Document source : input) {
+            final Document expanded = DocumentCopies.copy(source);
+            for (final Map.Entry<String, Object> entry : addFields.entrySet()) {
+                final String fieldName = requireText(entry.getKey(), "$addFields field");
+                setPath(expanded, fieldName, evaluateExpression(source, entry.getValue()));
+            }
+            output.add(expanded);
+        }
+        return List.copyOf(output);
+    }
+
+    private static List<Document> applySortByCount(final List<Document> input, final Object stageDefinition) {
+        final Map<GroupKey, CountBucket> buckets = new LinkedHashMap<>();
+        for (final Document source : input) {
+            final Object bucketValue = evaluateExpression(source, stageDefinition);
+            final GroupKey bucketKey = new GroupKey(bucketValue);
+            final CountBucket existing = buckets.get(bucketKey);
+            if (existing == null) {
+                buckets.put(bucketKey, new CountBucket(DocumentCopies.copyAny(bucketValue), 1L));
+                continue;
+            }
+            existing.increment();
+        }
+
+        final List<Document> output = new ArrayList<>(buckets.size());
+        for (final CountBucket bucket : buckets.values()) {
+            output.add(new Document("_id", bucket.id()).append("count", bucket.count()));
+        }
+
+        output.sort((left, right) -> {
+            final int countCompared = compareSortValues(right.get("count"), left.get("count"));
+            if (countCompared != 0) {
+                return countCompared;
+            }
+            return compareSortValues(left.get("_id"), right.get("_id"));
+        });
+        return List.copyOf(output);
+    }
+
+    private static List<Document> applyFacet(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollectionResolver collectionResolver) {
+        final Document facetDefinition = requireDocument(stageDefinition, "$facet stage requires a document");
+        if (facetDefinition.isEmpty()) {
+            throw new IllegalArgumentException("$facet stage must not be empty");
+        }
+
+        final Document facetResult = new Document();
+        for (final Map.Entry<String, Object> entry : facetDefinition.entrySet()) {
+            final String facetName = requireText(entry.getKey(), "$facet key");
+            final List<Document> facetPipeline = toPipelineList(entry.getValue(), "$facet pipeline must be an array");
+            final List<Document> facetOutput =
+                    execute(input, facetPipeline, collectionResolver);
+            facetResult.put(facetName, facetOutput);
+        }
+        return List.of(facetResult);
+    }
+
+    private static List<Document> applyLookup(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollectionResolver collectionResolver) {
+        final Document lookupDefinition = requireDocument(stageDefinition, "$lookup stage requires a document");
+        final String from = requireStringField(lookupDefinition, "from", "$lookup.from must be a string");
+        final String as = requireStringField(lookupDefinition, "as", "$lookup.as must be a string");
+
+        final String localField = optionalStringField(lookupDefinition, "localField", "$lookup.localField must be a string");
+        final String foreignField = optionalStringField(lookupDefinition, "foreignField", "$lookup.foreignField must be a string");
+        final List<Document> lookupPipeline =
+                lookupDefinition.containsKey("pipeline")
+                        ? toPipelineList(lookupDefinition.get("pipeline"), "$lookup.pipeline must be an array")
+                        : List.of();
+        final Document letDefinition =
+                lookupDefinition.containsKey("let")
+                        ? requireDocument(lookupDefinition.get("let"), "$lookup.let must be a document")
+                        : new Document();
+
+        final boolean hasLocalForeign = localField != null || foreignField != null;
+        if (hasLocalForeign && (localField == null || foreignField == null)) {
+            throw new IllegalArgumentException("$lookup localField and foreignField must be specified together");
+        }
+        if (!hasLocalForeign && lookupPipeline.isEmpty()) {
+            throw new IllegalArgumentException("$lookup requires localField/foreignField or pipeline");
+        }
+
+        final List<Document> output = new ArrayList<>(input.size());
+        for (final Document source : input) {
+            final List<Document> foreignSource = copyDocuments(
+                    collectionResolver.resolve(from),
+                    "$lookup resolver returned null documents");
+            List<Document> joined = foreignSource;
+
+            if (hasLocalForeign) {
+                final Object localValue = resolvePath(source, localField).valueOrNull();
+                final List<Document> matched = new ArrayList<>();
+                for (final Document foreignDocument : foreignSource) {
+                    final Object foreignValue = resolvePath(foreignDocument, foreignField).valueOrNull();
+                    if (lookupValueMatches(localValue, foreignValue)) {
+                        matched.add(DocumentCopies.copy(foreignDocument));
+                    }
+                }
+                joined = matched;
+            }
+
+            if (!lookupPipeline.isEmpty()) {
+                final Map<String, Object> variables = evaluateLookupVariables(source, letDefinition);
+                final List<Document> substitutedPipeline = substitutePipelineVariables(lookupPipeline, variables);
+                joined = execute(joined, substitutedPipeline, collectionResolver);
+            }
+
+            final Document expanded = DocumentCopies.copy(source);
+            expanded.put(as, joined);
+            output.add(expanded);
+        }
+        return List.copyOf(output);
+    }
+
+    private static List<Document> applyUnionWith(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollectionResolver collectionResolver) {
+        final String collectionName;
+        final List<Document> unionPipeline;
+        if (stageDefinition instanceof String collectionValue) {
+            collectionName = requireText(collectionValue, "$unionWith");
+            unionPipeline = List.of();
+        } else {
+            final Document unionDefinition =
+                    requireDocument(stageDefinition, "$unionWith stage requires a string or document");
+            collectionName = requireStringField(unionDefinition, "coll", "$unionWith.coll must be a string");
+            if (unionDefinition.containsKey("pipeline")) {
+                unionPipeline = toPipelineList(unionDefinition.get("pipeline"), "$unionWith.pipeline must be an array");
+            } else {
+                unionPipeline = List.of();
+            }
+        }
+
+        final List<Document> combined = copyDocuments(input, "input must not contain null");
+        List<Document> unionSource = copyDocuments(
+                collectionResolver.resolve(collectionName),
+                "$unionWith resolver returned null documents");
+        if (!unionPipeline.isEmpty()) {
+            unionSource = execute(unionSource, unionPipeline, collectionResolver);
+        }
+        for (final Document document : unionSource) {
+            combined.add(DocumentCopies.copy(document));
+        }
+        return List.copyOf(combined);
+    }
+
     private static Object evaluateExpression(final Document source, final Object expression) {
         if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
             final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
@@ -564,6 +747,139 @@ final class AggregationPipeline {
         return copyMapToDocument(mapValue);
     }
 
+    private static String requireStringField(
+            final Document document,
+            final String fieldName,
+            final String errorMessage) {
+        final Object value = document.get(fieldName);
+        if (!(value instanceof String stringValue)) {
+            throw new IllegalArgumentException(errorMessage);
+        }
+        return requireText(stringValue, fieldName);
+    }
+
+    private static String optionalStringField(
+            final Document document,
+            final String fieldName,
+            final String errorMessage) {
+        if (!document.containsKey(fieldName)) {
+            return null;
+        }
+        final Object value = document.get(fieldName);
+        if (!(value instanceof String stringValue)) {
+            throw new IllegalArgumentException(errorMessage);
+        }
+        return requireText(stringValue, fieldName);
+    }
+
+    private static List<Document> toPipelineList(final Object value, final String errorMessage) {
+        if (!(value instanceof List<?> rawList)) {
+            throw new IllegalArgumentException(errorMessage);
+        }
+        final List<Document> pipeline = new ArrayList<>(rawList.size());
+        for (final Object stage : rawList) {
+            pipeline.add(requireDocument(stage, "pipeline stages must be documents"));
+        }
+        return List.copyOf(pipeline);
+    }
+
+    private static List<Document> copyDocuments(final List<Document> source, final String nullMessage) {
+        Objects.requireNonNull(source, "source");
+        final List<Document> copied = new ArrayList<>(source.size());
+        for (final Document document : source) {
+            if (document == null) {
+                throw new IllegalArgumentException(nullMessage);
+            }
+            copied.add(DocumentCopies.copy(document));
+        }
+        return copied;
+    }
+
+    private static boolean lookupValueMatches(final Object localValue, final Object foreignValue) {
+        if (localValue instanceof List<?> localList) {
+            for (final Object candidate : localList) {
+                if (Objects.deepEquals(candidate, foreignValue)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (foreignValue instanceof List<?> foreignList) {
+            for (final Object candidate : foreignList) {
+                if (Objects.deepEquals(localValue, candidate)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return Objects.deepEquals(localValue, foreignValue);
+    }
+
+    private static Map<String, Object> evaluateLookupVariables(
+            final Document source,
+            final Document letDefinition) {
+        if (letDefinition.isEmpty()) {
+            return Map.of();
+        }
+        final Map<String, Object> variables = new LinkedHashMap<>();
+        for (final Map.Entry<String, Object> entry : letDefinition.entrySet()) {
+            final String variableName = requireText(entry.getKey(), "$lookup.let key");
+            variables.put(variableName, evaluateExpression(source, entry.getValue()));
+        }
+        return Collections.unmodifiableMap(variables);
+    }
+
+    private static List<Document> substitutePipelineVariables(
+            final List<Document> pipeline,
+            final Map<String, Object> variables) {
+        if (variables.isEmpty()) {
+            return pipeline;
+        }
+        final List<Document> substituted = new ArrayList<>(pipeline.size());
+        for (final Document stage : pipeline) {
+            @SuppressWarnings("unchecked")
+            final Map<String, Object> stageMap = (Map<String, Object>) substituteVariables(stage, variables);
+            substituted.add(copyMapToDocument(stageMap));
+        }
+        return List.copyOf(substituted);
+    }
+
+    private static Object substituteVariables(final Object value, final Map<String, Object> variables) {
+        if (value instanceof String stringValue) {
+            if (stringValue.startsWith("$$")) {
+                final String variableName = stringValue.substring(2);
+                if (variables.containsKey(variableName)) {
+                    return DocumentCopies.copyAny(variables.get(variableName));
+                }
+            }
+            return stringValue;
+        }
+        if (value instanceof Map<?, ?> mapValue) {
+            final Map<String, Object> transformed = new LinkedHashMap<>();
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                final String key = String.valueOf(entry.getKey());
+                transformed.put(key, substituteVariables(entry.getValue(), variables));
+            }
+            return transformed;
+        }
+        if (value instanceof List<?> listValue) {
+            final List<Object> transformed = new ArrayList<>(listValue.size());
+            for (final Object item : listValue) {
+                transformed.add(substituteVariables(item, variables));
+            }
+            return transformed;
+        }
+        return DocumentCopies.copyAny(value);
+    }
+
+    private static String requireText(final String value, final String fieldName) {
+        final String normalized = value == null ? null : value.trim();
+        if (normalized == null || normalized.isEmpty()) {
+            throw new IllegalArgumentException(fieldName + " must not be blank");
+        }
+        return normalized;
+    }
+
     private static Document copyMapToDocument(final Map<?, ?> source) {
         final Document output = new Document();
         for (final Map.Entry<?, ?> entry : source.entrySet()) {
@@ -617,6 +933,28 @@ final class AggregationPipeline {
                 return numberExpression;
             }
             return 0L;
+        }
+    }
+
+    private static final class CountBucket {
+        private final Object id;
+        private long count;
+
+        private CountBucket(final Object id, final long count) {
+            this.id = id;
+            this.count = count;
+        }
+
+        private Object id() {
+            return id;
+        }
+
+        private long count() {
+            return count;
+        }
+
+        private void increment() {
+            count++;
         }
     }
 

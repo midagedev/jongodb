@@ -64,6 +64,9 @@ public final class ListIndexesCommandHandler implements CommandHandler {
             if (index.partialFilterExpression() != null) {
                 metadata.append("partialFilterExpression", index.partialFilterExpression().clone());
             }
+            if (index.collation() != null) {
+                metadata.append("collation", index.collation().clone());
+            }
             if (index.expireAfterSeconds() != null) {
                 metadata.append("expireAfterSeconds", new BsonInt64(index.expireAfterSeconds()));
             }

@@ -67,9 +67,20 @@ public interface CommandStore {
             boolean unique,
             boolean sparse,
             BsonDocument partialFilterExpression,
+            BsonDocument collation,
             Long expireAfterSeconds) {
         public IndexRequest(final String name, final BsonDocument key, final boolean unique) {
-            this(name, key, unique, false, null, null);
+            this(name, key, unique, false, null, null, null);
+        }
+
+        public IndexRequest(
+                final String name,
+                final BsonDocument key,
+                final boolean unique,
+                final boolean sparse,
+                final BsonDocument partialFilterExpression,
+                final Long expireAfterSeconds) {
+            this(name, key, unique, sparse, partialFilterExpression, null, expireAfterSeconds);
         }
     }
 
@@ -81,7 +92,18 @@ public interface CommandStore {
             boolean unique,
             boolean sparse,
             BsonDocument partialFilterExpression,
-            Long expireAfterSeconds) {}
+            BsonDocument collation,
+            Long expireAfterSeconds) {
+        public IndexMetadata(
+                final String name,
+                final BsonDocument key,
+                final boolean unique,
+                final boolean sparse,
+                final BsonDocument partialFilterExpression,
+                final Long expireAfterSeconds) {
+            this(name, key, unique, sparse, partialFilterExpression, null, expireAfterSeconds);
+        }
+    }
 
     record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi, boolean upsert) {}
 
