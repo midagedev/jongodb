@@ -135,6 +135,10 @@
 - Exit evidence:
   - differential report artifacts generated every CI run
   - parity summary tracked historically
+- CI automation baseline:
+  - workflow: `.github/workflows/real-mongod-baseline.yml`
+  - fixture scripts: `scripts/ci/bootstrap-replset.sh`, `scripts/ci/collect-replset-diagnostics.sh`, `scripts/ci/teardown-replset.sh`
+  - artifacts: `real-mongod-baseline`, `replset-diagnostics`
 
 ### #32 Testkit: Spring Data Mongo Compatibility Matrix
 
@@ -189,4 +193,3 @@
 - `#25` query operator matrix와 differential seed corpus 확장
 - `#30` invariant checker 인터페이스/기본 규칙 구현
 - `#31` real mongod baseline adapter 스켈레톤 + nightly artifact 경로 고정
-

@@ -14,6 +14,7 @@
 - [`08-success-criteria.md`](./08-success-criteria.md): 정량 성공기준과 단계별 품질 게이트
 - [`09-r1-replacement-reference-baseline.md`](./09-r1-replacement-reference-baseline.md): R1 대체 목표의 공식 레퍼런스 기준선
 - [`10-r1-issue-reference-test-matrix.md`](./10-r1-issue-reference-test-matrix.md): R1 이슈별 레퍼런스/테스트/게이트 매핑
+- [`11-r1-issue-37-canary-cutover-rollback-playbook.md`](./11-r1-issue-37-canary-cutover-rollback-playbook.md): Issue #37 canary 전환/롤백 실행 플레이북
 
 ## 권장 읽기 순서
 
@@ -27,6 +28,7 @@
 8. `08-success-criteria.md`로 품질 게이트/성공기준 운영
 9. `09-r1-replacement-reference-baseline.md`로 R1 판정 기준 고정
 10. `10-r1-issue-reference-test-matrix.md`로 이슈 실행/검증 매핑 적용
+11. `11-r1-issue-37-canary-cutover-rollback-playbook.md`로 canary cutover/rollback 증빙 운영
 
 ## 리서치 스냅샷
 

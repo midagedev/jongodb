@@ -1,0 +1,74 @@
+name: Real Mongod Baseline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  real-mongod-baseline:
+    name: Differential vs real mongod
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MONGO_CONTAINER_NAME: jongodb-replset
+      MONGO_REPLSET_NAME: rs0
+      MONGO_PORT: "27017"
+      REPLSET_WAIT_TIMEOUT_SECONDS: "120"
+      REPLSET_WAIT_INTERVAL_SECONDS: "2"
+      REPLSET_DIAGNOSTICS_DIR: build/reports/replset-diagnostics
+      REAL_MONGOD_OUTPUT_DIR: build/reports/real-mongod-baseline
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Bootstrap replica set fixture
+        run: ./scripts/ci/bootstrap-replset.sh
+
+      - name: Run real mongod differential baseline
+        run: |
+          gradle --no-daemon --stacktrace \
+            -PrealMongodOutputDir="${REAL_MONGOD_OUTPUT_DIR}" \
+            realMongodDifferentialBaseline
+
+      - name: Collect replica set diagnostics
+        if: always()
+        run: ./scripts/ci/collect-replset-diagnostics.sh "${REPLSET_DIAGNOSTICS_DIR}"
+
+      - name: Upload real mongod baseline artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-mongod-baseline
+          path: |
+            build/reports/real-mongod-baseline/**/*.json
+            build/reports/real-mongod-baseline/**/*.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload replica set diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replset-diagnostics
+          path: build/reports/replset-diagnostics/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Teardown replica set fixture
+        if: always()
+        run: ./scripts/ci/teardown-replset.sh

@@ -17,12 +17,22 @@ import org.junit.jupiter.api.Test;
 class RealMongodCorpusRunnerTest {
     @Test
     void buildScenarioCorpusUsesDeterministicSeed() {
-        List<String> first = scenarioIds(RealMongodCorpusRunner.buildScenarioCorpus("seed-a"));
-        List<String> second = scenarioIds(RealMongodCorpusRunner.buildScenarioCorpus("seed-a"));
-        List<String> different = scenarioIds(RealMongodCorpusRunner.buildScenarioCorpus("seed-b"));
+        List<String> first = scenarioIds(RealMongodCorpusRunner.buildScenarioCorpus("seed-a", 128));
+        List<String> second = scenarioIds(RealMongodCorpusRunner.buildScenarioCorpus("seed-a", 128));
+        List<String> different = scenarioIds(RealMongodCorpusRunner.buildScenarioCorpus("seed-b", 128));
 
         assertEquals(first, second);
         assertNotEquals(first, different);
+        assertEquals(128, first.size());
+        assertEquals(first.size(), first.stream().distinct().count());
+    }
+
+    @Test
+    void buildScenarioCorpusDefaultsToLargeTierOneTarget() {
+        List<Scenario> corpus = RealMongodCorpusRunner.buildScenarioCorpus("seed-default");
+
+        assertTrue(corpus.size() >= 2_000);
+        assertEquals(corpus.size(), corpus.stream().map(Scenario::id).distinct().count());
     }
 
     @Test
@@ -37,6 +47,7 @@ class RealMongodCorpusRunnerTest {
             outputDir,
             "mongodb://localhost:27017",
             "seed-for-test",
+            128,
             2
         );
 

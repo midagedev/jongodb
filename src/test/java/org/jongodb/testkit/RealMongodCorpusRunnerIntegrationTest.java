@@ -28,6 +28,7 @@ class RealMongodCorpusRunnerIntegrationTest {
             outputDir,
             mongoUri,
             "integration-seed",
+            64,
             5
         );
 
@@ -36,10 +37,7 @@ class RealMongodCorpusRunnerIntegrationTest {
 
         assertTrue(Files.exists(paths.jsonArtifact()));
         assertTrue(Files.exists(paths.markdownArtifact()));
-        assertEquals(
-            CrudScenarioCatalog.scenarios().size() + TransactionScenarioCatalog.scenarios().size(),
-            result.report().totalScenarios()
-        );
+        assertEquals(64, result.report().totalScenarios());
 
         String json = Files.readString(paths.jsonArtifact());
         String markdown = Files.readString(paths.markdownArtifact());

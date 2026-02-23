@@ -7,9 +7,11 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
@@ -24,6 +26,7 @@ public final class RealMongodCorpusRunner {
     private static final Path DEFAULT_OUTPUT_DIR = Path.of("build/reports/real-mongod-baseline");
     private static final String DEFAULT_SEED = "wire-vs-real-mongod-baseline-v1";
     private static final int DEFAULT_TOP_REGRESSION_LIMIT = 10;
+    private static final int DEFAULT_SCENARIO_COUNT = 2_000;
 
     private static final String BASELINE_JSON = "real-mongod-differential-baseline.json";
     private static final String BASELINE_MARKDOWN = "real-mongod-differential-baseline.md";
@@ -77,6 +80,7 @@ public final class RealMongodCorpusRunner {
         System.out.println("Real mongod differential baseline generated.");
         System.out.println("- generatedAt: " + result.generatedAt());
         System.out.println("- seed: " + result.seed() + " (numericSeed=" + result.numericSeed() + ")");
+        System.out.println("- scenarioCount: " + config.scenarioCount());
         System.out.println("- backends: " + result.report().leftBackend() + " vs " + result.report().rightBackend());
         System.out.println("- total: " + result.report().totalScenarios());
         System.out.println("- match: " + result.report().matchCount());
@@ -99,7 +103,7 @@ public final class RealMongodCorpusRunner {
 
     public RunResult run(RunConfig config) {
         Objects.requireNonNull(config, "config");
-        List<Scenario> scenarios = buildScenarioCorpus(config.seed());
+        List<Scenario> scenarios = buildScenarioCorpus(config.seed(), config.scenarioCount());
         DifferentialHarness harness = new DifferentialHarness(
             Objects.requireNonNull(wireBackendFactory.get(), "wireBackendFactory result"),
             Objects.requireNonNull(realBackendFactory.apply(config.mongoUri()), "realBackendFactory result"),
@@ -121,11 +125,16 @@ public final class RealMongodCorpusRunner {
     }
 
     static List<Scenario> buildScenarioCorpus(String seed) {
+        return buildScenarioCorpus(seed, DEFAULT_SCENARIO_COUNT);
+    }
+
+    static List<Scenario> buildScenarioCorpus(String seed, int scenarioCount) {
         requireText(seed, "seed");
-        List<Scenario> scenarios = new ArrayList<>();
-        scenarios.addAll(CrudScenarioCatalog.scenarios());
-        scenarios.addAll(TransactionScenarioCatalog.scenarios());
-        scenarios.sort(Comparator.comparing(Scenario::id));
+        if (scenarioCount <= 0) {
+            throw new IllegalArgumentException("scenarioCount must be > 0");
+        }
+        List<Scenario> scenarioTemplates = baseScenarioTemplates();
+        List<Scenario> scenarios = expandScenarioTemplates(seed, scenarioTemplates, scenarioCount);
         Random random = new Random(deterministicSeed(seed));
         for (int i = scenarios.size() - 1; i > 0; i--) {
             int swapIndex = random.nextInt(i + 1);
@@ -133,7 +142,158 @@ public final class RealMongodCorpusRunner {
             scenarios.set(i, scenarios.get(swapIndex));
             scenarios.set(swapIndex, current);
         }
-        return List.copyOf(scenarios);
+        return List.copyOf(scenarios.subList(0, scenarioCount));
+    }
+
+    private static List<Scenario> baseScenarioTemplates() {
+        List<Scenario> scenarios = new ArrayList<>();
+        scenarios.addAll(CrudScenarioCatalog.scenarios());
+        scenarios.addAll(TransactionScenarioCatalog.scenarios());
+        scenarios.sort(Comparator.comparing(Scenario::id));
+        return scenarios;
+    }
+
+    private static List<Scenario> expandScenarioTemplates(
+        String seed,
+        List<Scenario> scenarioTemplates,
+        int targetCount
+    ) {
+        List<Scenario> expanded = new ArrayList<>(Math.max(targetCount, scenarioTemplates.size()));
+        expanded.addAll(scenarioTemplates);
+        if (expanded.size() >= targetCount) {
+            return expanded;
+        }
+
+        long numericSeed = deterministicSeed(seed);
+        int variantIndex = 1;
+        while (expanded.size() < targetCount) {
+            for (Scenario template : scenarioTemplates) {
+                if (expanded.size() >= targetCount) {
+                    break;
+                }
+                expanded.add(variantScenario(template, variantIndex, numericSeed));
+            }
+            variantIndex++;
+        }
+        return expanded;
+    }
+
+    private static Scenario variantScenario(Scenario template, int variantIndex, long numericSeed) {
+        String variantTag = String.format(Locale.ROOT, "v%04d", variantIndex);
+        String variantId = variantTag + "." + template.id();
+        String variantDescription = template.description() + " [variant " + variantTag + "]";
+
+        List<ScenarioCommand> commands = new ArrayList<>(template.commands().size());
+        for (ScenarioCommand command : template.commands()) {
+            commands.add(variantCommand(command, variantIndex, variantTag, numericSeed));
+        }
+        return new Scenario(variantId, variantDescription, List.copyOf(commands));
+    }
+
+    private static ScenarioCommand variantCommand(
+        ScenarioCommand command,
+        int variantIndex,
+        String variantTag,
+        long numericSeed
+    ) {
+        Map<String, Object> payload = transformPayloadMap(
+            command.payload(),
+            null,
+            variantIndex,
+            variantTag,
+            numericSeed
+        );
+        return new ScenarioCommand(command.commandName(), payload);
+    }
+
+    private static Map<String, Object> transformPayloadMap(
+        Map<?, ?> source,
+        String parentKey,
+        int variantIndex,
+        String variantTag,
+        long numericSeed
+    ) {
+        Map<String, Object> transformed = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            Object value = transformPayloadValue(key, parentKey, entry.getValue(), variantIndex, variantTag, numericSeed);
+            transformed.put(key, value);
+        }
+        return Collections.unmodifiableMap(transformed);
+    }
+
+    private static List<Object> transformPayloadList(
+        List<?> source,
+        String parentKey,
+        int variantIndex,
+        String variantTag,
+        long numericSeed
+    ) {
+        List<Object> transformed = new ArrayList<>(source.size());
+        for (Object value : source) {
+            transformed.add(transformPayloadValue(null, parentKey, value, variantIndex, variantTag, numericSeed));
+        }
+        return Collections.unmodifiableList(transformed);
+    }
+
+    private static Object transformPayloadValue(
+        String key,
+        String parentKey,
+        Object value,
+        int variantIndex,
+        String variantTag,
+        long numericSeed
+    ) {
+        if (value instanceof Map<?, ?> mapValue) {
+            return transformPayloadMap(mapValue, key, variantIndex, variantTag, numericSeed);
+        }
+        if (value instanceof List<?> listValue) {
+            return transformPayloadList(listValue, key, variantIndex, variantTag, numericSeed);
+        }
+        if (value instanceof String stringValue) {
+            return transformStringValue(key, parentKey, stringValue, variantTag);
+        }
+        if (value instanceof Number numberValue) {
+            return transformNumericValue(key, numberValue, variantIndex, numericSeed);
+        }
+        return value;
+    }
+
+    private static Object transformStringValue(
+        String key,
+        String parentKey,
+        String value,
+        String variantTag
+    ) {
+        if ("collection".equals(key)) {
+            return value + "_" + variantTag;
+        }
+        if ("id".equals(key) && "lsid".equals(parentKey)) {
+            return value + "-" + variantTag;
+        }
+        if ("email".equals(key)) {
+            int atIndex = value.indexOf('@');
+            if (atIndex > 0 && atIndex < value.length() - 1) {
+                return value.substring(0, atIndex) + "+" + variantTag + value.substring(atIndex);
+            }
+        }
+        return value;
+    }
+
+    private static Object transformNumericValue(
+        String key,
+        Number value,
+        int variantIndex,
+        long numericSeed
+    ) {
+        if ("txnNumber".equals(key)) {
+            return value.longValue() + (long) variantIndex;
+        }
+        if ("_id".equals(key)) {
+            long seedOffset = Math.abs(numericSeed % 10_000L);
+            return value.longValue() + (long) variantIndex * 100_000L + seedOffset;
+        }
+        return value;
     }
 
     static List<RegressionSample> topRegressions(DifferentialReport report, int limit) {
@@ -311,6 +471,7 @@ public final class RealMongodCorpusRunner {
         System.out.println("  --mongo-uri=<uri>         MongoDB connection URI (or env JONGODB_REAL_MONGOD_URI)");
         System.out.println("  --output-dir=<path>       Output directory for JSON/MD artifacts");
         System.out.println("  --seed=<text>             Deterministic corpus seed");
+        System.out.println("  --scenario-count=<int>    Corpus size target (default: 2000)");
         System.out.println("  --top-regressions=<int>   Number of top regressions to extract");
         System.out.println("  --help                    Show this help message");
     }
@@ -353,12 +514,21 @@ public final class RealMongodCorpusRunner {
         private final Path outputDir;
         private final String mongoUri;
         private final String seed;
+        private final int scenarioCount;
         private final int topRegressionLimit;
 
         public RunConfig(Path outputDir, String mongoUri, String seed, int topRegressionLimit) {
+            this(outputDir, mongoUri, seed, DEFAULT_SCENARIO_COUNT, topRegressionLimit);
+        }
+
+        public RunConfig(Path outputDir, String mongoUri, String seed, int scenarioCount, int topRegressionLimit) {
             this.outputDir = Objects.requireNonNull(outputDir, "outputDir").normalize();
             this.mongoUri = requireText(mongoUri, "mongoUri");
             this.seed = requireText(seed, "seed");
+            if (scenarioCount <= 0) {
+                throw new IllegalArgumentException("scenarioCount must be > 0");
+            }
+            this.scenarioCount = scenarioCount;
             if (topRegressionLimit <= 0) {
                 throw new IllegalArgumentException("topRegressionLimit must be > 0");
             }
@@ -369,6 +539,7 @@ public final class RealMongodCorpusRunner {
             Path outputDir = DEFAULT_OUTPUT_DIR;
             String mongoUri = System.getenv(DEFAULT_MONGO_URI_ENV);
             String seed = DEFAULT_SEED;
+            int scenarioCount = DEFAULT_SCENARIO_COUNT;
             int topRegressionLimit = DEFAULT_TOP_REGRESSION_LIMIT;
 
             for (String arg : args) {
@@ -387,6 +558,10 @@ public final class RealMongodCorpusRunner {
                     seed = readValue(arg, "--seed=");
                     continue;
                 }
+                if (arg.startsWith("--scenario-count=")) {
+                    scenarioCount = parseInt(readValue(arg, "--scenario-count="), "scenario-count");
+                    continue;
+                }
                 if (arg.startsWith("--top-regressions=")) {
                     topRegressionLimit = parseInt(readValue(arg, "--top-regressions="), "top-regressions");
                     continue;
@@ -399,7 +574,7 @@ public final class RealMongodCorpusRunner {
                     "mongo-uri is required (set --mongo-uri or " + DEFAULT_MONGO_URI_ENV + ")"
                 );
             }
-            return new RunConfig(outputDir, mongoUri, seed, topRegressionLimit);
+            return new RunConfig(outputDir, mongoUri, seed, scenarioCount, topRegressionLimit);
         }
 
         public Path outputDir() {
@@ -412,6 +587,10 @@ public final class RealMongodCorpusRunner {
 
         public String seed() {
             return seed;
+        }
+
+        public int scenarioCount() {
+            return scenarioCount;
         }
 
         public int topRegressionLimit() {
