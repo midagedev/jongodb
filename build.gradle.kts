@@ -173,3 +173,23 @@ tasks.register<JavaExec>("finalReadinessEvidence") {
     args(if (generateMissingEvidence) "--generate-missing-evidence" else "--no-generate-missing-evidence")
     args(if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate")
 }
+
+tasks.register<JavaExec>("r2CompatibilityEvidence") {
+    group = "verification"
+    description = "Generates R2 compatibility scorecard and support manifest artifacts."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.R2CompatibilityScorecard")
+
+    val outputDir = (findProperty("r2CompatibilityOutputDir") as String?) ?: "build/reports/r2-compatibility"
+    val utfReport = (findProperty("r2CompatibilityUtfReport") as String?) ?: "build/reports/unified-spec/utf-differential-report.json"
+    val springMatrixJson = (findProperty("r2CompatibilitySpringMatrixJson") as String?)
+        ?: "build/reports/spring-matrix/spring-compatibility-matrix.json"
+    val failOnGate = (findProperty("r2CompatibilityFailOnGate") as String?)?.toBoolean() ?: true
+
+    args(
+        "--output-dir=$outputDir",
+        "--utf-report=$utfReport",
+        "--spring-matrix-json=$springMatrixJson",
+        if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
+    )
+}
