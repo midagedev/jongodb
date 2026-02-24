@@ -114,6 +114,56 @@ class UnifiedSpecCorpusRunnerTest {
         assertTrue(markdown.contains("## Replay Bundles"));
     }
 
+    @Test
+    void runAndWriteIncludesDistinctMismatchInReplayCases() throws IOException {
+        final Path specRoot = tempDir.resolve("distinct-specs");
+        Files.createDirectories(specRoot);
+        Files.writeString(
+                specRoot.resolve("distinct.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "distinct-mismatch-case",
+                      "operations": [
+                        {"name": "distinct", "arguments": {"fieldName": "tag", "filter": {"active": true}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final Clock fixedClock = Clock.fixed(Instant.parse("2026-02-23T10:20:30Z"), ZoneOffset.UTC);
+        final UnifiedSpecCorpusRunner runner = new UnifiedSpecCorpusRunner(
+                fixedClock,
+                new UnifiedSpecImporter(),
+                () -> new StubBackend("left-backend", scenario -> successResult(scenario.id())),
+                mongoUri -> new StubBackend("right-backend", scenario -> {
+                    if (scenario.description().equals("distinct-mismatch-case")) {
+                        return successResult("different-" + scenario.id());
+                    }
+                    return successResult(scenario.id());
+                }));
+
+        final Path outputDir = tempDir.resolve("distinct-out");
+        final UnifiedSpecCorpusRunner.RunResult result = runner.runAndWrite(new UnifiedSpecCorpusRunner.RunConfig(
+                specRoot,
+                outputDir,
+                "seed-distinct",
+                "mongodb://example",
+                10));
+
+        assertEquals(1, result.importResult().importedCount());
+        assertEquals(1, result.differentialReport().mismatchCount());
+        assertEquals(1, result.failureReplays().size());
+        assertEquals("distinct", result.failureReplays().get(0).commands().get(0).commandName());
+
+        final String markdown = Files.readString(UnifiedSpecCorpusRunner.artifactPaths(outputDir).markdownArtifact());
+        assertTrue(markdown.contains("distinct-mismatch-case"));
+    }
+
     private static ScenarioOutcome successResult(final String marker) {
         return ScenarioOutcome.success(List.of(Map.of(
                 "ok", 1,

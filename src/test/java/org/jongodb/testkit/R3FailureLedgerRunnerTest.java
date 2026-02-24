@@ -57,19 +57,21 @@ class R3FailureLedgerRunnerTest {
         final R3FailureLedgerRunner.RunResult second = runner.run(config);
 
         assertEquals(extractFailureIds(first), extractFailureIds(second));
-        assertEquals(3, first.entries().size());
+        assertEquals(4, first.entries().size());
         assertEquals(1, first.byTrack().get("txn"));
         assertEquals(1, first.byTrack().get("aggregation"));
         assertEquals(1, first.byTrack().get("query_update"));
+        assertEquals(1, first.byTrack().get("distinct"));
 
         final R3FailureLedgerRunner.ArtifactPaths artifactPaths = R3FailureLedgerRunner.artifactPaths(config.outputDir());
         assertTrue(Files.exists(artifactPaths.jsonArtifact()));
         assertTrue(Files.exists(artifactPaths.markdownArtifact()));
 
         final Document json = Document.parse(Files.readString(artifactPaths.jsonArtifact()));
-        assertEquals(3, json.getInteger("failureCount"));
-        assertEquals(3, json.getList("entries", Document.class).size());
+        assertEquals(4, json.getInteger("failureCount"));
+        assertEquals(4, json.getList("entries", Document.class).size());
         assertEquals(1, json.get("byTrack", Document.class).getInteger("txn"));
+        assertEquals(1, json.get("byTrack", Document.class).getInteger("distinct"));
         assertTrue(R3FailureLedgerRunner.hasGateFailure(first));
     }
 
@@ -163,6 +165,12 @@ class R3FailureLedgerRunnerTest {
                       "description": "error-case",
                       "operations": [
                         {"name": "find", "arguments": {"filter": {"status": "pending"}}}
+                      ]
+                    },
+                    {
+                      "description": "mismatch-distinct",
+                      "operations": [
+                        {"name": "distinct", "arguments": {"fieldName": "tag", "filter": {"active": true}}}
                       ]
                     }
                   ]
