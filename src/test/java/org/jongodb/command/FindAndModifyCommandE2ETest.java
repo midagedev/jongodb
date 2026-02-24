@@ -51,6 +51,29 @@ class FindAndModifyCommandE2ETest {
         assertEquals(1L, countAfter.getInt64("n").getValue());
     }
 
+    @Test
+    void removeModeSupportsProjectionAliasAndRejectsProjectionConflicts() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alpha\",\"tier\":2}]}"));
+
+        final BsonDocument projectionResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{\"_id\":1},\"remove\":true,\"projection\":{\"name\":1,\"_id\":0}}"));
+        assertEquals(1.0, projectionResponse.get("ok").asNumber().doubleValue());
+        assertEquals("alpha", projectionResponse.get("value").asDocument().getString("name").getValue());
+        assertEquals(false, projectionResponse.get("value").asDocument().containsKey("_id"));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2,\"name\":\"beta\",\"tier\":3}]}"));
+        final BsonDocument conflictingProjection = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{\"_id\":2},\"remove\":true,\"fields\":{\"name\":1},\"projection\":{\"tier\":1}}"));
+        assertCommandError(conflictingProjection, "BadValue");
+
+        final BsonDocument projectionTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{\"_id\":2},\"remove\":true,\"projection\":1}"));
+        assertCommandError(projectionTypeMismatch, "TypeMismatch");
+    }
+
     private static void assertCommandError(final BsonDocument response, final String codeName) {
         assertEquals(0.0, response.get("ok").asNumber().doubleValue());
         assertEquals(codeName, response.getString("codeName").getValue());

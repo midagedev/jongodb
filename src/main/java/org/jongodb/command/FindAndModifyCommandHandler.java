@@ -64,14 +64,17 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             sort = sortValue.asDocument();
         }
 
-        final BsonValue fieldsValue = command.containsKey("fields")
-                ? command.get("fields")
-                : command.get("projection");
+        if (command.containsKey("fields") && command.containsKey("projection")) {
+            return CommandErrors.badValue("fields and projection cannot both be specified");
+        }
+        final BsonValue fieldsValue = command.containsKey("projection")
+                ? command.get("projection")
+                : command.get("fields");
         final ProjectionSpec projectionSpec;
         if (fieldsValue == null) {
             projectionSpec = ProjectionSpec.none();
         } else if (!fieldsValue.isDocument()) {
-            return CommandErrors.typeMismatch("fields must be a document");
+            return CommandErrors.typeMismatch("projection must be a document");
         } else {
             try {
                 projectionSpec = parseProjectionSpec(fieldsValue.asDocument());
