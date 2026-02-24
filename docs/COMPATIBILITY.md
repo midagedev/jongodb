@@ -12,7 +12,7 @@ This page describes implemented behavior in this repository. It is a code-level 
 | `ping` | Supported | Returns `{ok: 1}` |
 | `buildInfo` | Partial | Stable subset of fields |
 | `getParameter` | Partial | Only selected parameters |
-| `insert` | Supported | Single and batch insert |
+| `insert` | Partial | Single/batch insert supported; unsupported bulk modes are skipped in differential corpus |
 | `find` | Partial | Core filter support; not full query language |
 | `aggregate` | Partial | Tier-1/Tier-2 subset |
 | `getMore` | Supported | Cursor paging |
@@ -76,6 +76,19 @@ Not supported:
 - `arrayFilters`
 - positional updates (`$`, `$[]`, `$[<id>]`)
 - update operators outside the supported set
+- pipeline updates (`u` as array)
+- replacement updates with `multi=true`
+
+## R3 Query/Update Corpus Exclusions
+
+The R3 failure-ledger runner currently treats the following UTF cases as unsupported and excludes them from
+differential parity counts:
+
+- unordered `insertMany` (`ordered=false`)
+- documents containing dot or dollar-prefixed field paths in insert payloads
+- update operations using `arrayFilters`
+- update pipeline form (`u` as an array pipeline)
+- replacement updates requested with `multi=true`
 
 ## Index Semantics
 

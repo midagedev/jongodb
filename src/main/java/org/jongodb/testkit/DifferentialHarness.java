@@ -199,17 +199,25 @@ public final class DifferentialHarness {
         for (String key : keys) {
             boolean hasLeft = leftNormalized.containsKey(key);
             boolean hasRight = rightNormalized.containsKey(key);
+            final String keyPath = path + "." + key;
+            if (isEphemeralPath(keyPath)) {
+                continue;
+            }
             if (!hasLeft || !hasRight) {
                 entries.add(new DiffEntry(
-                    path + "." + key,
+                    keyPath,
                     leftNormalized.get(key),
                     rightNormalized.get(key),
                     "missing key"
                 ));
                 continue;
             }
-            compareValue(path + "." + key, leftNormalized.get(key), rightNormalized.get(key), entries);
+            compareValue(keyPath, leftNormalized.get(key), rightNormalized.get(key), entries);
         }
+    }
+
+    private static boolean isEphemeralPath(final String path) {
+        return path.endsWith(".cursor.ns");
     }
 
     private static void compareList(

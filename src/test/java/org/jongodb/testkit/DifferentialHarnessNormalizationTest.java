@@ -62,6 +62,41 @@ class DifferentialHarnessNormalizationTest {
         assertEquals(0, report.mismatchCount());
     }
 
+    @Test
+    void ignoresCursorNamespaceDifferencesInSuccessComparison() {
+        Scenario scenario = new Scenario("s3", "cursor namespace normalization", List.of(new ScenarioCommand("find", Map.of())));
+        DifferentialBackend left = new StaticBackend(
+            "left",
+            ScenarioOutcome.success(
+                List.of(
+                    Map.of(
+                        "ok",
+                        1,
+                        "cursor",
+                        Map.of("id", 0, "ns", "app.users")
+                    )
+                )
+            )
+        );
+        DifferentialBackend right = new StaticBackend(
+            "right",
+            ScenarioOutcome.success(
+                List.of(
+                    Map.of(
+                        "ok",
+                        1,
+                        "cursor",
+                        Map.of("id", 0, "ns", "testkit_s3.users")
+                    )
+                )
+            )
+        );
+
+        DifferentialReport report = new DifferentialHarness(left, right).run(List.of(scenario));
+
+        assertEquals(0, report.mismatchCount());
+    }
+
     private static final class StaticBackend implements DifferentialBackend {
         private final String name;
         private final ScenarioOutcome outcome;
