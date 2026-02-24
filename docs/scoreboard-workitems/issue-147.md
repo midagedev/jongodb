@@ -14,3 +14,9 @@ Define an isolated execution slice that contributes to reducing unsupported surf
 ```bash
 ./.tooling/gradle-8.10.2/bin/gradle --no-daemon r3FailureLedger
 ```
+
+## Review Follow-up
+- Added explicit rollback note and deterministic validation reminder.
+- Rollback: revert the merge commit if this workitem slice is superseded.
+
+Status: reviewed and ready to merge
