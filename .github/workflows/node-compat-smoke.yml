@@ -48,7 +48,7 @@ jobs:
         id: classpath
         shell: bash
         run: |
-          CLASSPATH=$(./.tooling/gradle-8.10.2/bin/gradle --no-daemon -q printLauncherClasspath | tail -n 1)
+          CLASSPATH=$(gradle --no-daemon -q printLauncherClasspath | tail -n 1)
           if [[ -z "$CLASSPATH" ]]; then
             echo "Failed to resolve launcher classpath."
             exit 1
