@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -395,12 +396,57 @@ class UnifiedSpecImporterTest {
         assertEquals("findAndModify", scenario.commands().get(2).commandName());
 
         assertEquals("users", scenario.commands().get(0).payload().get("countDocuments"));
-        assertEquals(true, ((java.util.Map<?, ?>) scenario.commands().get(0).payload().get("filter")).get("active"));
+        assertEquals(true, ((java.util.Map<?, ?>) scenario.commands().get(0).payload().get("query")).get("active"));
         assertEquals("tag", scenario.commands().get(1).payload().get("key"));
         assertEquals("users", scenario.commands().get(1).payload().get("distinct"));
         assertEquals("users", scenario.commands().get(2).payload().get("findAndModify"));
         assertEquals(true, scenario.commands().get(2).payload().get("remove"));
         assertTrue(scenario.commands().get(2).payload().containsKey("fields"));
+    }
+
+    @Test
+    void importsCountAliasWithQueryAndExecutesThroughWireBackend() throws IOException {
+        Files.writeString(
+                tempDir.resolve("count-alias-integration.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "count alias importer and execution",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [
+                          {"_id": 1, "active": true},
+                          {"_id": 2, "active": true},
+                          {"_id": 3, "active": false}
+                        ]}},
+                        {"name": "count", "arguments": {"query": {"active": true}, "skip": 1, "limit": 1}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        final ScenarioCommand countCommand = scenario.commands().get(1);
+        assertEquals("countDocuments", countCommand.commandName());
+        assertTrue(countCommand.payload().containsKey("query"));
+        assertTrue(!countCommand.payload().containsKey("filter"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> countResult = outcome.commandResults().get(1);
+        assertEquals(1L, ((Number) countResult.get("n")).longValue());
+        assertEquals(1L, ((Number) countResult.get("count")).longValue());
     }
 
     @Test

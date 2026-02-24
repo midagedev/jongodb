@@ -296,7 +296,7 @@ public final class UnifiedSpecImporter {
         if (arguments.containsKey("filter")) {
             payload.put("filter", deepCopyValue(arguments.get("filter")));
         } else if (arguments.containsKey("query")) {
-            payload.put("filter", deepCopyValue(arguments.get("query")));
+            payload.put("query", deepCopyValue(arguments.get("query")));
         } else {
             payload.put("filter", Map.of());
         }
