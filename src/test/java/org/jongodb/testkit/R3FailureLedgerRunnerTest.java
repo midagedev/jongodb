@@ -72,6 +72,8 @@ class R3FailureLedgerRunnerTest {
         assertEquals(4, json.getList("entries", Document.class).size());
         assertEquals(1, json.get("byTrack", Document.class).getInteger("txn"));
         assertEquals(1, json.get("byTrack", Document.class).getInteger("distinct"));
+        final String markdown = Files.readString(artifactPaths.markdownArtifact());
+        assertTrue(markdown.contains("distinct: 1"));
         assertTrue(R3FailureLedgerRunner.hasGateFailure(first));
     }
 
