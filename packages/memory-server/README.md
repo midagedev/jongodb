@@ -28,19 +28,32 @@ Rough performance expectation (not a guarantee):
 - cold CI/dev machine: often much faster because there is no `mongod` artifact fetch/unpack
 - warm cache environment: startup-phase wins are usually smaller
 
-Observed benchmark (NestJS integration suite subset, duplicated for load):
+Observed benchmarks (NestJS integration suite subset, same machine):
 
-- workload: 9 suites / 102 test cases (`--runInBand`), same machine
-- `mongodb-memory-server` real time:
-  - run1: `28.17s`
-  - run2: `27.19s`
-  - average: `27.68s`
-- `jongodb` native binary real time:
-  - run1: `12.35s`
-  - run2: `12.04s`
-  - average: `12.20s`
-
-In this benchmark, native binary mode was about `55.9%` faster (`15.48s` less wall clock).
+- Benchmark A: suite-scoped lifecycle (historical)
+  - workload: `9 suites / 102 tests` (`--runInBand`)
+  - server boots: `9` times per run (once per suite)
+  - `mongodb-memory-server` real:
+    - run1: `28.17s`
+    - run2: `27.19s`
+    - average: `27.68s`
+  - `jongodb` native real:
+    - run1: `12.35s`
+    - run2: `12.04s`
+    - average: `12.20s`
+  - delta: about `55.9%` faster (`15.48s` less wall clock)
+- Benchmark B: single-boot lifecycle (current)
+  - workload: `45 suites / 510 tests` (`--runInBand`)
+  - server boots: `1` time per run (shared for full Jest process)
+  - `mongodb-memory-server` real:
+    - run1: `92.40s`
+    - run2: `91.84s`
+    - average: `92.12s`
+  - `jongodb` native real:
+    - run1: `33.03s`
+    - run2: `32.90s`
+    - average: `32.97s`
+  - delta: about `64.2%` faster (`59.15s` less wall clock)
 
 Your actual delta depends on test shape, I/O, and query workload.
 
