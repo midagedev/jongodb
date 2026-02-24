@@ -119,4 +119,63 @@ class UnifiedSpecImporterTest {
         assertEquals(0, result.unsupportedCount());
         assertEquals(UnifiedSpecImporter.SkipKind.INVALID, result.skippedCases().get(0).kind());
     }
+
+    @Test
+    void marksKnownUnsupportedQueryUpdateFeaturesAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("unsupported-query-update.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "insertMany ordered false",
+                      "operations": [
+                        {
+                          "name": "insertMany",
+                          "arguments": {
+                            "ordered": false,
+                            "documents": [{"_id": 1}, {"_id": 1}]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "description": "update with arrayFilters",
+                      "operations": [
+                        {
+                          "name": "updateOne",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": {"$set": {"items.$[e].qty": 1}},
+                            "arrayFilters": [{"e.qty": {"$gt": 2}}]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "description": "update pipeline",
+                      "operations": [
+                        {
+                          "name": "updateMany",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$set": {"a": 1}}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(3, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().allMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
+    }
 }

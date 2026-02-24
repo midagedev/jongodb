@@ -224,8 +224,14 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        if (Boolean.FALSE.equals(arguments.get("ordered"))) {
+            throw new UnsupportedOperationException("unsupported UTF insertOne option: ordered=false");
+        }
         final Map<String, Object> document =
                 asStringObjectMap(arguments.get("document"), "insertOne.arguments.document");
+        if (containsUnsupportedKeyPath(document)) {
+            throw new UnsupportedOperationException("unsupported UTF insertOne document keys: dot or dollar path");
+        }
         final Map<String, Object> payload = commandEnvelope("insert", database, collection);
         payload.put("documents", List.of(deepCopyValue(document)));
         return new ScenarioCommand("insert", immutableMap(payload));
@@ -235,10 +241,17 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        if (Boolean.FALSE.equals(arguments.get("ordered"))) {
+            throw new UnsupportedOperationException("unsupported UTF insertMany option: ordered=false");
+        }
         final List<Object> documents = asList(arguments.get("documents"), "insertMany.arguments.documents");
         final List<Object> copied = new ArrayList<>(documents.size());
         for (final Object document : documents) {
-            copied.add(deepCopyValue(asStringObjectMap(document, "insertMany document")));
+            final Map<String, Object> mapped = asStringObjectMap(document, "insertMany document");
+            if (containsUnsupportedKeyPath(mapped)) {
+                throw new UnsupportedOperationException("unsupported UTF insertMany document keys: dot or dollar path");
+            }
+            copied.add(deepCopyValue(mapped));
         }
         final Map<String, Object> payload = commandEnvelope("insert", database, collection);
         payload.put("documents", List.copyOf(copied));
@@ -295,6 +308,15 @@ public final class UnifiedSpecImporter {
         if (rawUpdate == null) {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
+        if (rawUpdate instanceof List<?>) {
+            throw new UnsupportedOperationException("unsupported UTF update pipeline");
+        }
+        if (arguments.containsKey("arrayFilters")) {
+            throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
+        }
+        if (multi && isReplacementDocument(rawUpdate)) {
+            throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
+        }
 
         final Map<String, Object> updateEntry = new LinkedHashMap<>();
         updateEntry.put("q", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
@@ -308,6 +330,41 @@ public final class UnifiedSpecImporter {
         final Map<String, Object> payload = commandEnvelope("update", database, collection);
         payload.put("updates", List.of(immutableMap(updateEntry)));
         return new ScenarioCommand("update", immutableMap(payload));
+    }
+
+    private static boolean isReplacementDocument(final Object rawUpdate) {
+        if (!(rawUpdate instanceof Map<?, ?> mapped) || mapped.isEmpty()) {
+            return false;
+        }
+        for (final Object key : mapped.keySet()) {
+            if (!(key instanceof String field) || !field.startsWith("$")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsUnsupportedKeyPath(final Object value) {
+        if (value instanceof Map<?, ?> mapValue) {
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                final String key = String.valueOf(entry.getKey());
+                if (key.startsWith("$") || key.contains(".")) {
+                    return true;
+                }
+                if (containsUnsupportedKeyPath(entry.getValue())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (containsUnsupportedKeyPath(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static ScenarioCommand delete(
