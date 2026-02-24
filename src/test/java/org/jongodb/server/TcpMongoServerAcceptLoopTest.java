@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import org.jongodb.command.EngineBackedCommandStore;
+import org.jongodb.command.TopologyProfile;
 import org.jongodb.engine.InMemoryEngineStore;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,8 @@ final class TcpMongoServerAcceptLoopTest {
                 new EngineBackedCommandStore(new InMemoryEngineStore()),
                 "127.0.0.1",
                 serverSocket,
+                TopologyProfile.STANDALONE,
+                "jongodb-rs0",
                 4,
                 1L,
                 4L)) {
@@ -54,6 +57,8 @@ final class TcpMongoServerAcceptLoopTest {
                 new EngineBackedCommandStore(new InMemoryEngineStore()),
                 "127.0.0.1",
                 serverSocket,
+                TopologyProfile.STANDALONE,
+                "jongodb-rs0",
                 3,
                 1L,
                 4L)) {

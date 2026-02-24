@@ -22,6 +22,7 @@ const BUNDLED_BINARY_PACKAGE_PREFIX = "@jongodb/memory-server-bin";
 type LogLevel = "silent" | "info" | "debug";
 type LaunchMode = "auto" | "binary" | "java";
 type DatabaseNameStrategy = "static" | "worker";
+type TopologyProfile = "standalone" | "singleNodeReplicaSet";
 
 export interface JongodbMemoryServerOptions {
   host?: string;
@@ -36,6 +37,8 @@ export interface JongodbMemoryServerOptions {
   classpath?: string | string[];
   binaryPath?: string;
   launchMode?: LaunchMode;
+  topologyProfile?: TopologyProfile;
+  replicaSetName?: string;
   env?: Record<string, string>;
   logLevel?: LogLevel;
 }
@@ -75,11 +78,15 @@ export async function startJongodbMemoryServer(
   const host = normalizeHost(options.host);
   const port = normalizePort(options.port);
   const databaseName = resolveDatabaseName(options);
+  const topologyProfile = normalizeTopologyProfile(options.topologyProfile);
+  const replicaSetName = normalizeReplicaSetName(options.replicaSetName);
   const logLevel = options.logLevel ?? "silent";
   const launchConfigs = resolveLaunchConfigs(options, {
     host,
     port,
     databaseName,
+    topologyProfile,
+    replicaSetName,
   });
   const launchErrors: string[] = [];
 
@@ -217,7 +224,13 @@ async function startWithLaunchConfig(
 
 function resolveLaunchConfigs(
   options: JongodbMemoryServerOptions,
-  context: { host: string; port: number; databaseName: string }
+  context: {
+    host: string;
+    port: number;
+    databaseName: string;
+    topologyProfile: TopologyProfile;
+    replicaSetName: string;
+  }
 ): SpawnLaunchConfig[] {
   const mode = options.launchMode ?? "auto";
   if (mode !== "auto" && mode !== "binary" && mode !== "java") {
@@ -280,24 +293,50 @@ function resolveLaunchConfigs(
 function toBinaryLaunchConfig(
   binaryPath: string,
   source: string,
-  context: { host: string; port: number; databaseName: string }
+  context: {
+    host: string;
+    port: number;
+    databaseName: string;
+    topologyProfile: TopologyProfile;
+    replicaSetName: string;
+  }
 ): SpawnLaunchConfig {
+  const args = [
+    `--host=${context.host}`,
+    `--port=${context.port}`,
+    `--database=${context.databaseName}`,
+    `--topology-profile=${context.topologyProfile}`,
+  ];
+  if (context.topologyProfile === "singleNodeReplicaSet") {
+    args.push(`--replica-set-name=${context.replicaSetName}`);
+  }
   return {
     mode: "binary",
     command: binaryPath,
-    args: [
-      `--host=${context.host}`,
-      `--port=${context.port}`,
-      `--database=${context.databaseName}`,
-    ],
+    args,
     source,
   };
 }
 
 function toJavaLaunchConfig(
   java: { javaPath: string; classpath: string; launcherClass: string; source: string },
-  context: { host: string; port: number; databaseName: string }
+  context: {
+    host: string;
+    port: number;
+    databaseName: string;
+    topologyProfile: TopologyProfile;
+    replicaSetName: string;
+  }
 ): SpawnLaunchConfig {
+  const launcherArgs = [
+    `--host=${context.host}`,
+    `--port=${context.port}`,
+    `--database=${context.databaseName}`,
+    `--topology-profile=${context.topologyProfile}`,
+  ];
+  if (context.topologyProfile === "singleNodeReplicaSet") {
+    launcherArgs.push(`--replica-set-name=${context.replicaSetName}`);
+  }
   return {
     mode: "java",
     command: java.javaPath,
@@ -305,9 +344,7 @@ function toJavaLaunchConfig(
       "-cp",
       java.classpath,
       java.launcherClass,
-      `--host=${context.host}`,
-      `--port=${context.port}`,
-      `--database=${context.databaseName}`,
+      ...launcherArgs,
     ],
     source: java.source,
   };
@@ -498,6 +535,26 @@ function normalizePort(port: number | undefined): number {
   const normalized = port ?? 0;
   if (!Number.isInteger(normalized) || normalized < 0 || normalized > 65535) {
     throw new Error("port must be an integer between 0 and 65535.");
+  }
+  return normalized;
+}
+
+function normalizeTopologyProfile(
+  profile: TopologyProfile | undefined
+): TopologyProfile {
+  const normalized = profile ?? "standalone";
+  if (normalized !== "standalone" && normalized !== "singleNodeReplicaSet") {
+    throw new Error(
+      `topologyProfile must be one of: standalone, singleNodeReplicaSet (got: ${String(profile)}).`
+    );
+  }
+  return normalized;
+}
+
+function normalizeReplicaSetName(replicaSetName: string | undefined): string {
+  const normalized = replicaSetName?.trim();
+  if (normalized === undefined || normalized.length === 0) {
+    return "jongodb-rs0";
   }
   return normalized;
 }

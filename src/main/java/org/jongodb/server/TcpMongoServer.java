@@ -25,6 +25,7 @@ import org.bson.io.BasicOutputBuffer;
 import org.jongodb.command.CommandDispatcher;
 import org.jongodb.command.CommandStore;
 import org.jongodb.command.EngineBackedCommandStore;
+import org.jongodb.command.TopologyProfile;
 import org.jongodb.engine.InMemoryEngineStore;
 import org.jongodb.wire.OpMsg;
 import org.jongodb.wire.OpMsgCodec;
@@ -46,6 +47,8 @@ public final class TcpMongoServer implements AutoCloseable {
     private static final int DEFAULT_MAX_ACCEPT_FAILURES = 8;
     private static final long DEFAULT_ACCEPT_BACKOFF_BASE_MILLIS = 10L;
     private static final long DEFAULT_ACCEPT_BACKOFF_MAX_MILLIS = 500L;
+    private static final TopologyProfile DEFAULT_TOPOLOGY_PROFILE = TopologyProfile.STANDALONE;
+    private static final String DEFAULT_REPLICA_SET_NAME = "jongodb-rs0";
 
     private final CommandDispatcher dispatcher;
     private final OpMsgCodec opMsgCodec = new OpMsgCodec();
@@ -55,6 +58,8 @@ public final class TcpMongoServer implements AutoCloseable {
     private final List<Socket> clientSockets = new CopyOnWriteArrayList<>();
     private final Thread acceptThread;
     private final String host;
+    private final TopologyProfile topologyProfile;
+    private final String replicaSetName;
     private final int maxConsecutiveAcceptFailures;
     private final long acceptBackoffBaseMillis;
     private final long acceptBackoffMaxMillis;
@@ -67,23 +72,60 @@ public final class TcpMongoServer implements AutoCloseable {
         return new TcpMongoServer(host, port);
     }
 
+    public static TcpMongoServer inMemoryReplicaSet(final String host, final int port) {
+        return new TcpMongoServer(host, port, TopologyProfile.SINGLE_NODE_REPLICA_SET, DEFAULT_REPLICA_SET_NAME);
+    }
+
+    public static TcpMongoServer inMemoryReplicaSet(final String host, final int port, final String replicaSetName) {
+        return new TcpMongoServer(host, port, TopologyProfile.SINGLE_NODE_REPLICA_SET, replicaSetName);
+    }
+
     public TcpMongoServer() {
-        this(new EngineBackedCommandStore(new InMemoryEngineStore()), DEFAULT_HOST, DEFAULT_PORT);
+        this(
+                new EngineBackedCommandStore(new InMemoryEngineStore()),
+                DEFAULT_HOST,
+                DEFAULT_PORT,
+                DEFAULT_TOPOLOGY_PROFILE,
+                DEFAULT_REPLICA_SET_NAME);
     }
 
     public TcpMongoServer(final String host, final int port) {
-        this(new EngineBackedCommandStore(new InMemoryEngineStore()), host, port);
+        this(
+                new EngineBackedCommandStore(new InMemoryEngineStore()),
+                host,
+                port,
+                DEFAULT_TOPOLOGY_PROFILE,
+                DEFAULT_REPLICA_SET_NAME);
+    }
+
+    public TcpMongoServer(
+            final String host,
+            final int port,
+            final TopologyProfile topologyProfile,
+            final String replicaSetName) {
+        this(new EngineBackedCommandStore(new InMemoryEngineStore()), host, port, topologyProfile, replicaSetName);
     }
 
     public TcpMongoServer(final CommandStore commandStore) {
-        this(commandStore, DEFAULT_HOST, DEFAULT_PORT);
+        this(commandStore, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_TOPOLOGY_PROFILE, DEFAULT_REPLICA_SET_NAME);
     }
 
     public TcpMongoServer(final CommandStore commandStore, final String host, final int port) {
+        this(commandStore, host, port, DEFAULT_TOPOLOGY_PROFILE, DEFAULT_REPLICA_SET_NAME);
+    }
+
+    public TcpMongoServer(
+            final CommandStore commandStore,
+            final String host,
+            final int port,
+            final TopologyProfile topologyProfile,
+            final String replicaSetName) {
         this(
                 Objects.requireNonNull(commandStore, "commandStore"),
                 normalizeHost(host),
                 newServerSocket(normalizeHost(host), normalizePort(port)),
+                Objects.requireNonNull(topologyProfile, "topologyProfile"),
+                normalizeReplicaSetName(replicaSetName),
                 DEFAULT_MAX_ACCEPT_FAILURES,
                 DEFAULT_ACCEPT_BACKOFF_BASE_MILLIS,
                 DEFAULT_ACCEPT_BACKOFF_MAX_MILLIS);
@@ -93,12 +135,20 @@ public final class TcpMongoServer implements AutoCloseable {
             final CommandStore commandStore,
             final String host,
             final ServerSocket serverSocket,
+            final TopologyProfile topologyProfile,
+            final String replicaSetName,
             final int maxConsecutiveAcceptFailures,
             final long acceptBackoffBaseMillis,
             final long acceptBackoffMaxMillis) {
-        this.dispatcher = new CommandDispatcher(Objects.requireNonNull(commandStore, "commandStore"));
         this.host = normalizeHost(host);
         this.serverSocket = Objects.requireNonNull(serverSocket, "serverSocket");
+        this.topologyProfile = Objects.requireNonNull(topologyProfile, "topologyProfile");
+        this.replicaSetName = normalizeReplicaSetName(replicaSetName);
+        this.dispatcher = new CommandDispatcher(
+                Objects.requireNonNull(commandStore, "commandStore"),
+                this.topologyProfile,
+                this.host + ":" + this.serverSocket.getLocalPort(),
+                this.replicaSetName);
         this.maxConsecutiveAcceptFailures = normalizeMaxAcceptFailures(maxConsecutiveAcceptFailures);
         this.acceptBackoffBaseMillis = normalizeBackoff(acceptBackoffBaseMillis, "acceptBackoffBaseMillis");
         this.acceptBackoffMaxMillis = normalizeBackoff(acceptBackoffMaxMillis, "acceptBackoffMaxMillis");
@@ -127,9 +177,21 @@ public final class TcpMongoServer implements AutoCloseable {
         return serverSocket.getLocalPort();
     }
 
+    public TopologyProfile topologyProfile() {
+        return topologyProfile;
+    }
+
+    public String replicaSetName() {
+        return replicaSetName;
+    }
+
     public String connectionString(final String database) {
         final String normalizedDatabase = normalizeDatabase(database);
-        return "mongodb://" + host + ":" + port() + "/" + normalizedDatabase;
+        final String base = "mongodb://" + host + ":" + port() + "/" + normalizedDatabase;
+        if (topologyProfile.replicaSetSemanticsEnabled()) {
+            return base + "?replicaSet=" + replicaSetName;
+        }
+        return base;
     }
 
     @Override
@@ -452,6 +514,13 @@ public final class TcpMongoServer implements AutoCloseable {
             return DEFAULT_HOST;
         }
         return host.trim();
+    }
+
+    private static String normalizeReplicaSetName(final String replicaSetName) {
+        if (replicaSetName == null || replicaSetName.isBlank()) {
+            return DEFAULT_REPLICA_SET_NAME;
+        }
+        return replicaSetName.trim();
     }
 
     private static int normalizePort(final int port) {

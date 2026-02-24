@@ -17,12 +17,22 @@ public final class CommandDispatcher {
     private final CommandStore globalStore;
     private final SessionTransactionPool sessionPool;
     private final TransactionCommandValidator transactionValidator;
+    private final TopologyProfile topologyProfile;
     private final ThreadLocal<CommandStore> dispatchStore = new ThreadLocal<>();
 
     public CommandDispatcher(final CommandStore store) {
+        this(store, TopologyProfile.STANDALONE, "127.0.0.1:27017", "jongodb-rs0");
+    }
+
+    public CommandDispatcher(
+            final CommandStore store,
+            final TopologyProfile topologyProfile,
+            final String helloPrimaryAddress,
+            final String replicaSetName) {
         this.globalStore = Objects.requireNonNull(store, "store");
         this.sessionPool = new SessionTransactionPool();
         this.transactionValidator = new TransactionCommandValidator(sessionPool);
+        this.topologyProfile = Objects.requireNonNull(topologyProfile, "topologyProfile");
         final CursorRegistry cursorRegistry = new CursorRegistry();
         final CommandStore routedStore = new RoutingCommandStore(() -> {
             final CommandStore selectedStore = dispatchStore.get();
@@ -30,8 +40,8 @@ public final class CommandDispatcher {
         });
 
         final Map<String, CommandHandler> configuredHandlers = new HashMap<>();
-        configuredHandlers.put("hello", new HelloCommandHandler());
-        configuredHandlers.put("ismaster", new HelloCommandHandler());
+        configuredHandlers.put("hello", new HelloCommandHandler(this.topologyProfile, helloPrimaryAddress, replicaSetName));
+        configuredHandlers.put("ismaster", new HelloCommandHandler(this.topologyProfile, helloPrimaryAddress, replicaSetName));
         configuredHandlers.put("ping", new PingCommandHandler());
         configuredHandlers.put("buildinfo", new BuildInfoCommandHandler());
         configuredHandlers.put("getparameter", new GetParameterCommandHandler());
@@ -71,6 +81,11 @@ public final class CommandDispatcher {
         final ValidationResult validation = transactionValidator.validate(commandName, command);
         if (validation.error() != null) {
             return validation.error();
+        }
+
+        final BsonDocument topologyError = TopologyProfileValidator.validate(topologyProfile, commandName, command);
+        if (topologyError != null) {
+            return topologyError;
         }
 
         if (!validation.transactional()) {

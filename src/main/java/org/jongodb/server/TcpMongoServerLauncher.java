@@ -2,6 +2,7 @@ package org.jongodb.server;
 
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
+import org.jongodb.command.TopologyProfile;
 
 /**
  * Command-line launcher for starting a {@link TcpMongoServer} in a dedicated JVM process.
@@ -19,7 +20,11 @@ public final class TcpMongoServerLauncher {
         final CountDownLatch stopLatch = new CountDownLatch(1);
         final TcpMongoServer server;
         try {
-            server = TcpMongoServer.inMemory(config.host(), config.port());
+            server = new TcpMongoServer(
+                    config.host(),
+                    config.port(),
+                    config.topologyProfile(),
+                    config.replicaSetName());
             server.start();
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
@@ -45,11 +50,18 @@ public final class TcpMongoServerLauncher {
         }
     }
 
-    private record LaunchConfig(String host, int port, String database) {
+    private record LaunchConfig(
+            String host,
+            int port,
+            String database,
+            TopologyProfile topologyProfile,
+            String replicaSetName) {
         private static LaunchConfig parse(final String[] args) {
             String host = "127.0.0.1";
             int port = 0;
             String database = "test";
+            TopologyProfile topologyProfile = TopologyProfile.STANDALONE;
+            String replicaSetName = "jongodb-rs0";
 
             for (final String arg : args) {
                 if (arg == null || arg.isBlank()) {
@@ -67,10 +79,18 @@ public final class TcpMongoServerLauncher {
                     database = requireValue(arg, "--database=");
                     continue;
                 }
+                if (arg.startsWith("--topology-profile=")) {
+                    topologyProfile = TopologyProfile.parse(requireValue(arg, "--topology-profile="));
+                    continue;
+                }
+                if (arg.startsWith("--replica-set-name=")) {
+                    replicaSetName = requireValue(arg, "--replica-set-name=");
+                    continue;
+                }
                 throw new IllegalArgumentException("unsupported argument: " + arg);
             }
 
-            return new LaunchConfig(host, port, database);
+            return new LaunchConfig(host, port, database, topologyProfile, replicaSetName);
         }
 
         private static String requireValue(final String arg, final String prefix) {

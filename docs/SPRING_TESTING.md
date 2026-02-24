@@ -108,8 +108,8 @@ Keep Testcontainers/real `mongod` for tests that require:
 
 Not covered by this contract:
 - distributed transaction semantics
-- replica-set and deployment-level transaction behavior
-- advanced commit retry semantics across network/process failures
+- multi-node replica-set and deployment-level transaction behavior
+- advanced commit retry semantics across real network/process failures
 
 ## Troubleshooting
 

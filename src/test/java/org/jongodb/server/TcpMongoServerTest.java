@@ -20,6 +20,7 @@ import org.bson.RawBsonDocument;
 import org.bson.codecs.BsonDocumentCodec;
 import org.bson.codecs.EncoderContext;
 import org.bson.io.BasicOutputBuffer;
+import org.jongodb.command.TopologyProfile;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 
@@ -39,6 +40,27 @@ final class TcpMongoServerTest {
                 final org.bson.Document found = users.find(new org.bson.Document("_id", id)).first();
                 assertNotNull(found);
                 assertEquals("alice", found.getString("name"));
+            }
+        }
+    }
+
+    @Test
+    void replicaSetProfileEmitsReplicaSetUriAndHandshakeFields() {
+        try (TcpMongoServer server = TcpMongoServer.inMemoryReplicaSet("127.0.0.1", 0, "rs-test")) {
+            server.start();
+
+            assertEquals(TopologyProfile.SINGLE_NODE_REPLICA_SET, server.topologyProfile());
+            assertEquals(
+                    "mongodb://" + server.host() + ":" + server.port() + "/app?replicaSet=rs-test",
+                    server.connectionString("app"));
+
+            try (MongoClient client = MongoClients.create(server.connectionString("app"))) {
+                final BsonDocument hello = BsonDocument.parse(client.getDatabase("admin")
+                        .runCommand(BsonDocument.parse("{\"hello\":1}"))
+                        .toJson());
+                assertEquals(1.0, hello.getNumber("ok").doubleValue(), 0.0);
+                assertEquals("rs-test", hello.getString("setName").getValue());
+                assertEquals(server.host() + ":" + server.port(), hello.getString("primary").getValue());
             }
         }
     }

@@ -29,6 +29,33 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer supports singleNodeReplicaSet topology profile",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const server = await startJongodbMemoryServer({
+        launchMode: "binary",
+        binaryPath,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "replica_profile",
+        topologyProfile: "singleNodeReplicaSet",
+        replicaSetName: "rs-test",
+      });
+
+      try {
+        assert.match(
+          server.uri,
+          /^mongodb:\/\/127\.0\.0\.1:\d+\/replica_profile\?replicaSet=rs-test$/u
+        );
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer supports JONGODB_BINARY_PATH in binary mode",
   { concurrency: false },
   async () => {
@@ -141,6 +168,34 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer propagates replica-set profile args in java mode",
+  { concurrency: false },
+  async () => {
+    await withFakeLaunchers(async ({ fakeJavaPath }) => {
+      const server = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpath: "ignored-classpath-for-fake-java",
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_replica",
+        topologyProfile: "singleNodeReplicaSet",
+        replicaSetName: "rs-java",
+      });
+
+      try {
+        assert.match(
+          server.uri,
+          /^mongodb:\/\/127\.0\.0\.1:\d+\/java_replica\?replicaSet=rs-java$/u
+        );
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer reports both launch failures when auto mode cannot start",
   { concurrency: false },
   async () => {
@@ -233,8 +288,14 @@ const valueOf = (name, fallback) => {
 const host = valueOf("--host", "127.0.0.1");
 const portRaw = Number(valueOf("--port", "0"));
 const db = valueOf("--database", "test");
+const topologyProfile = valueOf("--topology-profile", "standalone");
+const replicaSetName = valueOf("--replica-set-name", "jongodb-rs0");
 const port = Number.isInteger(portRaw) && portRaw > 0 ? portRaw : 27017;
-console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db);
+const query =
+  topologyProfile === "singleNodeReplicaSet"
+    ? "?replicaSet=" + replicaSetName
+    : "";
+console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db + query);
 const keepAlive = setInterval(() => {}, 1000);
 const shutdown = () => {
   clearInterval(keepAlive);
@@ -255,8 +316,14 @@ const valueOf = (name, fallback) => {
 const host = valueOf("--host", "127.0.0.1");
 const portRaw = Number(valueOf("--port", "0"));
 const db = valueOf("--database", "test");
+const topologyProfile = valueOf("--topology-profile", "standalone");
+const replicaSetName = valueOf("--replica-set-name", "jongodb-rs0");
 const port = Number.isInteger(portRaw) && portRaw > 0 ? portRaw : 27017;
-console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db);
+const query =
+  topologyProfile === "singleNodeReplicaSet"
+    ? "?replicaSet=" + replicaSetName
+    : "";
+console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db + query);
 const keepAlive = setInterval(() => {}, 1000);
 const shutdown = () => {
   clearInterval(keepAlive);

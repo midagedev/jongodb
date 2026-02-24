@@ -121,6 +121,7 @@ Current state:
 - framework-agnostic runtime helper (`./runtime`)
 - launcher modes: `auto` / `binary` / `java`
 - standalone launcher process management
+- optional single-node replica-set semantic profile (`topologyProfile=singleNodeReplicaSet`)
 - platform binary package targets: darwin-arm64, linux-x64-gnu, win32-x64
 - Jest/Vitest/Nest-Jest helpers
 - CI release workflow: `.github/workflows/npm-node-release.yml`
@@ -144,8 +145,8 @@ Deterministic conflict policy:
 
 Out of scope:
 - distributed transaction semantics
-- replica-set deployment behavior
-- advanced retry transaction semantics across process/network faults
+- multi-node replica-set deployment behavior (elections/lag/step-down)
+- advanced retry semantics across real process/network faults
 
 ## Compatibility Snapshot
 
@@ -156,7 +157,8 @@ This project targets integration-test compatibility for common Spring data paths
 | Command surface | 22 handlers | Mix of `Supported` and `Partial` |
 | Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced parity incomplete |
 | Aggregation | Core stages + selected Tier-2 stages | Full operator coverage not implemented |
-| Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) |
+| Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) + deterministic retry labels/contracts |
+| Deployment profile | Standalone + single-node replica-set semantic profile | Replica-set profile exposes primary-only handshake/URI semantics for driver compatibility |
 | Wire protocol | `OP_MSG` + `OP_QUERY` | In-process ingress and standalone TCP launcher mode, with OP_QUERY namespace-based `$db` fallback |
 
 Support manifest summary:
@@ -206,7 +208,7 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 - partial query and aggregation parity
 - collation/TTL are currently metadata-focused, not full runtime parity
 - limited update operator coverage
-- no replica-set or sharded topology semantics
+- no multi-node replica-set or sharded topology semantics
 
 Unsupported branches are standardized progressively as:
 - `codeName=NotImplemented`

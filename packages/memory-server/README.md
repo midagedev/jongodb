@@ -234,6 +234,8 @@ Core:
 - `classpath`: Java classpath string or string array
 - `javaPath`: Java executable path (default: `java`)
 - `launcherClass`: Java launcher class (default: `org.jongodb.server.TcpMongoServerLauncher`)
+- `topologyProfile`: `standalone` | `singleNodeReplicaSet` (default: `standalone`)
+- `replicaSetName`: replica-set name for `singleNodeReplicaSet` profile (default: `jongodb-rs0`)
 - `databaseName`: base DB name (default: `test`)
 - `databaseNameSuffix`: suffix appended to `databaseName` (example: `_ci`)
 - `databaseNameStrategy`: `static` | `worker` (default: `static`)
@@ -248,6 +250,15 @@ Runtime helper options:
 - `envVarName`: single target env key (default: `MONGODB_URI`)
 - `envVarNames`: multiple target env keys (example: `["MONGODB_URI", "DATABASE_URL"]`)
 - `envTarget`: optional scoped env object (default: `process.env`)
+
+Replica-set profile example:
+
+```ts
+const runtime = createJongodbEnvRuntime({
+  topologyProfile: "singleNodeReplicaSet",
+  replicaSetName: "rs-test",
+});
+```
 
 Scoped env example:
 
