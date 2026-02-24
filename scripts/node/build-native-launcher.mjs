@@ -8,6 +8,9 @@ const args = parseArgs(process.argv.slice(2));
 const output = requireValue(args, "output");
 const mainClass = args.mainClass ?? "org.jongodb.server.TcpMongoServerLauncher";
 const gradleCmd = args.gradle ?? "gradle";
+const optimizationProfile = resolveOptimizationProfile(
+  args.optimizationProfile ?? process.env.JONGODB_NATIVE_OPTIMIZATION
+);
 
 const classpath = args.classpath ?? resolveClasspathFromGradle(gradleCmd);
 
@@ -17,6 +20,7 @@ const nativeImageArgs = [
   "--no-fallback",
   "--install-exit-handlers",
   "--report-unsupported-elements-at-runtime",
+  ...optimizationProfile.nativeImageArgs,
   "-cp",
   classpath,
   mainClass,
@@ -26,6 +30,7 @@ const nativeImageArgs = [
 console.log(`[native-image] output=${output}`);
 console.log(`[native-image] mainClass=${mainClass}`);
 console.log(`[native-image] classpathLength=${classpath.length}`);
+console.log(`[native-image] optimizationProfile=${optimizationProfile.name}`);
 
 const nativeImage = runNativeImage(nativeImageArgs);
 
@@ -148,6 +153,40 @@ function resolveClasspathFromGradle(gradleCmd) {
     throw new Error("Gradle did not return a launcher classpath.");
   }
   return classpath;
+}
+
+function resolveOptimizationProfile(requested) {
+  const normalized = (requested ?? "size").trim().toLowerCase();
+  if (normalized === "size") {
+    return {
+      name: "size",
+      nativeImageArgs: [
+        "-O1",
+        "--gc=serial",
+        "-H:IncludeLocales=en",
+      ],
+    };
+  }
+  if (normalized === "balanced") {
+    return {
+      name: "balanced",
+      nativeImageArgs: [
+        "-O2",
+        "--gc=serial",
+      ],
+    };
+  }
+  if (normalized === "speed") {
+    return {
+      name: "speed",
+      nativeImageArgs: [
+        "-O3",
+      ],
+    };
+  }
+  throw new Error(
+    `Unsupported optimization profile '${requested}'. Use one of: size, balanced, speed.`
+  );
 }
 
 function parseArgs(argv) {
