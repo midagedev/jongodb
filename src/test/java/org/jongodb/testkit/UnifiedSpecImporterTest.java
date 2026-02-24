@@ -362,6 +362,48 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsCountDistinctAndFindOneAndDeleteOperations() throws IOException {
+        Files.writeString(
+                tempDir.resolve("crud-more.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "count distinct and findOneAndDelete",
+                      "operations": [
+                        {"name": "count", "arguments": {"query": {"active": true}, "limit": 3}},
+                        {"name": "distinct", "arguments": {"fieldName": "tag", "filter": {"active": true}}},
+                        {"name": "findOneAndDelete", "arguments": {"filter": {"_id": 1}, "sort": {"_id": 1}, "projection": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        assertEquals("countDocuments", scenario.commands().get(0).commandName());
+        assertEquals("distinct", scenario.commands().get(1).commandName());
+        assertEquals("findAndModify", scenario.commands().get(2).commandName());
+
+        assertEquals("users", scenario.commands().get(0).payload().get("countDocuments"));
+        assertEquals(true, ((java.util.Map<?, ?>) scenario.commands().get(0).payload().get("filter")).get("active"));
+        assertEquals("tag", scenario.commands().get(1).payload().get("key"));
+        assertEquals("users", scenario.commands().get(1).payload().get("distinct"));
+        assertEquals("users", scenario.commands().get(2).payload().get("findAndModify"));
+        assertEquals(true, scenario.commands().get(2).payload().get("remove"));
+        assertTrue(scenario.commands().get(2).payload().containsKey("fields"));
+    }
+
+    @Test
     void appliesTransactionEnvelopeWithCreateEntitiesSessions() throws IOException {
         Files.writeString(
                 tempDir.resolve("transactions.yml"),

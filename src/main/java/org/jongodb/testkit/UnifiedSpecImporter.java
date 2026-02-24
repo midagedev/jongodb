@@ -217,12 +217,15 @@ public final class UnifiedSpecImporter {
             case "insertMany" -> insertMany(arguments, database, collection);
             case "find" -> find(arguments, database, collection);
             case "aggregate" -> aggregate(arguments, database, collection);
+            case "count" -> countDocuments(arguments, database, collection);
             case "countDocuments" -> countDocuments(arguments, database, collection);
+            case "distinct" -> distinct(arguments, database, collection);
             case "updateOne" -> update(arguments, database, collection, false);
             case "updateMany" -> update(arguments, database, collection, true);
             case "replaceOne" -> replaceOne(arguments, database, collection);
             case "deleteOne" -> delete(arguments, database, collection, 1);
             case "deleteMany" -> delete(arguments, database, collection, 0);
+            case "findOneAndDelete" -> findOneAndDelete(arguments, database, collection);
             case "findOneAndUpdate" -> findOneAndUpdate(arguments, database, collection);
             case "findOneAndReplace" -> findOneAndReplace(arguments, database, collection);
             case "bulkWrite" -> bulkWrite(arguments, database, collection);
@@ -290,12 +293,43 @@ public final class UnifiedSpecImporter {
             final String database,
             final String collection) {
         final Map<String, Object> payload = commandEnvelope("countDocuments", database, collection);
-        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        if (arguments.containsKey("filter")) {
+            payload.put("filter", deepCopyValue(arguments.get("filter")));
+        } else if (arguments.containsKey("query")) {
+            payload.put("filter", deepCopyValue(arguments.get("query")));
+        } else {
+            payload.put("filter", Map.of());
+        }
         copyIfPresent(arguments, payload, "skip");
         copyIfPresent(arguments, payload, "limit");
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("countDocuments", immutableMap(payload));
+    }
+
+    private static ScenarioCommand distinct(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> payload = commandEnvelope("distinct", database, collection);
+        final String key = firstNonBlank(
+                trimToEmpty(arguments.get("key")),
+                trimToEmpty(arguments.get("fieldName")),
+                trimToEmpty(arguments.get("field")));
+        if (key == null) {
+            throw new IllegalArgumentException("distinct operation requires key/fieldName argument");
+        }
+        payload.put("key", key);
+        if (arguments.containsKey("filter")) {
+            payload.put("query", deepCopyValue(arguments.get("filter")));
+        } else if (arguments.containsKey("query")) {
+            payload.put("query", deepCopyValue(arguments.get("query")));
+        } else {
+            payload.put("query", Map.of());
+        }
+        copyIfPresent(arguments, payload, "hint");
+        copyIfPresent(arguments, payload, "collation");
+        return new ScenarioCommand("distinct", immutableMap(payload));
     }
 
     private static ScenarioCommand aggregate(
@@ -490,6 +524,22 @@ public final class UnifiedSpecImporter {
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("findOneAndUpdate", immutableMap(payload));
+    }
+
+    private static ScenarioCommand findOneAndDelete(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> payload = commandEnvelope("findAndModify", database, collection);
+        payload.put("query", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("remove", true);
+        copyIfPresent(arguments, payload, "sort");
+        if (arguments.containsKey("projection")) {
+            payload.put("fields", deepCopyValue(arguments.get("projection")));
+        }
+        copyIfPresent(arguments, payload, "hint");
+        copyIfPresent(arguments, payload, "collation");
+        return new ScenarioCommand("findAndModify", immutableMap(payload));
     }
 
     private static ScenarioCommand findOneAndReplace(
