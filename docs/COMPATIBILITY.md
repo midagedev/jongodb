@@ -115,8 +115,9 @@ Current limitations:
 Supported:
 - session + transaction envelope validation (`lsid`, `txnNumber`, `autocommit=false`)
 - start/commit/abort flow
-- transaction snapshot publish on commit
+- namespace-aware commit merge for transaction writes
 - expected transaction error labels for no-such-transaction cases
+- deterministic conflict rule: transactional writes win when transactional and non-transactional paths touch the same `_id`
 
 Current scope:
 - single in-memory process semantics
