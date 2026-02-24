@@ -17,8 +17,8 @@ Status date: 2026-02-24
 
 ## Current Release-Line Notes
 
-- `main` is ahead of `v0.1.1` with unreleased PRs: `#86`, `#87`, `#88`, `#89`, `#91`.
-- Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse `v0.1.1` evidence.
+- `main` is ahead of `v0.1.2`.
+- Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate
 
@@ -35,5 +35,6 @@ Before creating a release tag:
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |
 | --- | --- | --- | --- | --- |
+| `0.1.2` | `2026-02-24` | `2ace4a4` | `io.github.midagedev:jongodb:0.1.2` | run `22338690663` |
 | `0.1.1` | `2026-02-24` | `f4a8bbb` | `io.github.midagedev:jongodb:0.1.1` | run `22335420545` |
 | `0.1.0` | `2026-02-24` | `df774da` | `io.github.midagedev:jongodb:0.1.0` | run `22334177236` |

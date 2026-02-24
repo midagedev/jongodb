@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-02-24
+
+### Added
+- Added real-mongod differential execution adapter path for UTF `bulkWrite` scenarios.
+- Added transaction regression coverage for:
+  - repeated `commitTransaction` replay behavior
+  - `abortTransaction` after `commitTransaction`
+  - commit-time write conflict handling across concurrent transactions
+- Added explicit engine exception type for commit-time write conflict detection.
+
+### Fixed
+- Resolved remaining official UTF differential mismatches for imported `crud`, `transactions`, and `sessions` suites.
+- Fixed `bulkWrite` update validation to require atomic-modifier style updates.
+- Fixed `replaceOne` validation parity in real-mongod differential backend.
+- Fixed null `_id` upsert result propagation so update/replace upsert counters align with reference behavior.
+
+### Changed
+- Added default `_id` unique index behavior to the in-memory collection store.
+- Strengthened transaction terminal-state handling (`COMMITTED`/`ABORTED`) for retry and post-terminal command semantics.
+- Updated compatibility scorecard snapshot to current `failureCount=0` R3 ledger evidence.
+- Default local project version moved to `0.1.3-SNAPSHOT`.
+
 ## [0.1.2] - 2026-02-24
 
 ### Added
