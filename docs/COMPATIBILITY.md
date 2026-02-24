@@ -26,6 +26,10 @@ Certification context:
 | `listIndexes` | Partial | Metadata round-trip |
 | `update` | Partial | Operator set intentionally limited |
 | `delete` | Supported | `limit` 0/1 behavior |
+| `countDocuments` | Partial | Filter + skip/limit + hint/collation/readConcern shape validation |
+| `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
+| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; operator updates only |
+| `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
 
 ## Query Operators
