@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,17 +13,37 @@ export function resolveTestClasspath(): string {
   const currentDir = path.dirname(currentFile);
   const packageDir = path.resolve(currentDir, "..", "..", "..");
   const repoRoot = path.resolve(packageDir, "..", "..");
-  const gradle = path.resolve(repoRoot, ".tooling", "gradle-8.10.2", "bin", "gradle");
+  const repoLocalGradle = path.resolve(
+    repoRoot,
+    ".tooling",
+    "gradle-8.10.2",
+    "bin",
+    "gradle"
+  );
+  const gradle =
+    process.env.JONGODB_TEST_GRADLE_CMD?.trim() ||
+    (existsSync(repoLocalGradle) ? repoLocalGradle : "gradle");
 
-  const output = execFileSync(
-    gradle,
-    ["--no-daemon", "-q", "printLauncherClasspath"],
-    {
+  let output: string;
+  try {
+    output = execFileSync(gradle, ["--no-daemon", "-q", "printLauncherClasspath"], {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      throw new Error(
+        [
+          "Failed to resolve test classpath via Gradle.",
+          `Attempted command: ${gradle} --no-daemon -q printLauncherClasspath`,
+          "Set JONGODB_TEST_CLASSPATH directly to bypass Gradle resolution.",
+          `Cause: ${error.message}`,
+        ].join(" ")
+      );
     }
-  );
+    throw error;
+  }
 
   const lines = output
     .split(/\r?\n/u)
