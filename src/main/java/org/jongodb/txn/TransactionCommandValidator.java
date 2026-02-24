@@ -28,6 +28,7 @@ public final class TransactionCommandValidator {
                     "distinct",
                     "aggregate",
                     "findandmodify",
+                    "count",
                     "countdocuments",
                     "replaceone",
                     "findoneandupdate",

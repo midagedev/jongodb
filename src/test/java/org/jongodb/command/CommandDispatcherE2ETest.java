@@ -187,6 +187,24 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void countCommandAliasUsesSameExecutionPath() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(
+                BsonDocument.parse("{\"_id\":1}"),
+                BsonDocument.parse("{\"_id\":2}"),
+                BsonDocument.parse("{\"_id\":3}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"count\":\"users\",\"$db\":\"app\",\"query\":{\"role\":\"member\"},\"skip\":1,\"limit\":1}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1L, response.getInt64("n").getValue());
+        assertEquals(1L, response.getInt64("count").getValue());
+        assertEquals("member", store.lastFindFilter.getString("role").getValue());
+    }
+
+    @Test
     void countDocumentsCommandRejectsInvalidPayloadShapes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
 
