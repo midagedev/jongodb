@@ -1,20 +1,54 @@
 # @jongodb/memory-server
 
-Start and stop a local `jongodb` process for Node integration tests and expose a MongoDB URI.
+Node test runtime adapter for `jongodb`.
 
-## Where It Fits
+It starts a local `jongodb` launcher process, exposes a MongoDB URI, and manages process lifecycle for test runners.
 
-- test runners: Jest, Vitest, Mocha, Node test runner
-- server frameworks: NestJS, Express, Fastify
-- MongoDB data layers: MongoDB driver, Mongoose, Prisma (Mongo), TypeORM (Mongo)
+## Scope
 
-This package is framework-agnostic. NestJS support is a convenience wrapper, not a hard dependency.
+- integration-test runtime only
+- launcher lifecycle management (start/stop/detach)
+- framework-agnostic base helper
+- Jest/Vitest/Nest Jest convenience helpers
+
+This package is not a production MongoDB server.
+
+## Why This vs Embedded MongoDB (`mongodb-memory-server`)
+
+`@jongodb/memory-server` can run in native binary mode instead of booting a full `mongod` test binary.
+
+Practical effects:
+
+- no `mongod` binary download/extract step in cold environments
+- lower launcher startup overhead in many integration-test loops
+- fewer environment issues tied to `mongod` binary provisioning
+
+Rough performance expectation (not a guarantee):
+
+- cold CI/dev machine: often much faster because there is no `mongod` artifact fetch/unpack
+- warm cache environment: startup-phase wins are usually smaller
+
+Observed benchmark (crown-server integration suite subset, duplicated for load):
+
+- workload: 9 suites / 102 tests (`--runInBand`), same machine
+- `mongodb-memory-server` real time:
+  - run1: `28.17s`
+  - run2: `27.19s`
+  - average: `27.68s`
+- `jongodb` native binary real time:
+  - run1: `12.35s`
+  - run2: `12.04s`
+  - average: `12.20s`
+
+In this benchmark, native binary mode was about `55.9%` faster (`15.48s` less wall clock).
+
+Your actual delta depends on test shape, I/O, and query workload.
 
 ## Requirements
 
 - Node.js 20+
 - one launcher runtime:
-  - native binary (`binaryPath`, `JONGODB_BINARY_PATH`, or bundled platform package), or
+  - native binary, or
   - Java 17+ with `jongodb` classpath
 
 ## Install
@@ -23,69 +57,9 @@ This package is framework-agnostic. NestJS support is a convenience wrapper, not
 npm i -D @jongodb/memory-server
 ```
 
-## Launcher Runtime Selection
+## Quick Start (Recommended)
 
-Default mode is `launchMode: "auto"`:
-
-1. try binary runtime (`binaryPath`, `JONGODB_BINARY_PATH`, bundled platform package)
-2. fallback to Java runtime (`classpath`, `JONGODB_CLASSPATH`)
-
-You can force behavior with:
-- `launchMode: "binary"`
-- `launchMode: "java"`
-
-## Native Binary Mode
-
-Binary mode can be configured with:
-
-1. `binaryPath` option
-2. `JONGODB_BINARY_PATH` environment variable
-3. installed platform package candidate (optional dependency)
-
-Current platform package naming convention:
-- `@jongodb/memory-server-bin-darwin-arm64`
-- `@jongodb/memory-server-bin-darwin-x64`
-- `@jongodb/memory-server-bin-linux-x64-gnu`
-- `@jongodb/memory-server-bin-linux-x64-musl`
-- `@jongodb/memory-server-bin-linux-arm64-gnu`
-- `@jongodb/memory-server-bin-linux-arm64-musl`
-- `@jongodb/memory-server-bin-win32-x64`
-- `@jongodb/memory-server-bin-win32-arm64`
-
-Binary mode example:
-
-```ts
-import { startJongodbMemoryServer } from "@jongodb/memory-server";
-
-const server = await startJongodbMemoryServer({
-  launchMode: "binary",
-  binaryPath: process.env.JONGODB_BINARY_PATH
-});
-```
-
-## Java Classpath Mode
-
-Pass Java classpath in one of two ways:
-
-1. `startJongodbMemoryServer({ classpath: "..." })`
-2. `JONGODB_CLASSPATH` environment variable
-
-Repository helper command:
-
-```bash
-./.tooling/gradle-8.10.2/bin/gradle -q printLauncherClasspath
-```
-
-If startup is slow, resolve classpath once and reuse it for the whole test run:
-
-```bash
-export JONGODB_CLASSPATH="$(./.tooling/gradle-8.10.2/bin/gradle -q printLauncherClasspath)"
-npm run test:e2e
-```
-
-## Recommended Base API (`runtime`)
-
-Use this when you want one lifecycle pattern across frameworks and runners.
+Use `createJongodbEnvRuntime` and keep one runtime per test process.
 
 ```ts
 import { beforeAll, afterAll } from "@jest/globals";
@@ -109,10 +83,74 @@ afterAll(async () => {
 ```
 
 Behavior:
-- `setup()` starts the server and writes `process.env[envVarName]`
-- `teardown()` stops the server and restores previous env value
 
-## Runner Convenience APIs
+- `setup()` starts launcher and writes `process.env[envVarName]`
+- `teardown()` stops launcher and restores previous env value
+
+## Launcher Modes
+
+`launchMode` values:
+
+- `auto` (default): binary first, Java fallback
+- `binary`: binary only, fail fast if binary not resolvable
+- `java`: Java only, fail fast if classpath not configured
+
+In `auto` mode, launch failures are attempted in order and reported with source tags.
+
+## Binary Runtime
+
+Binary resolution order:
+
+1. `options.binaryPath`
+2. `JONGODB_BINARY_PATH`
+3. bundled platform package (if installed)
+
+Current bundled package targets:
+
+- `@jongodb/memory-server-bin-darwin-arm64`
+- `@jongodb/memory-server-bin-linux-x64-gnu`
+- `@jongodb/memory-server-bin-win32-x64`
+
+Version policy:
+
+- binary package versions are pinned to the core package version (`optionalDependencies`)
+- if a bundled binary is not installed/available for your version, `auto` mode can still run with Java fallback
+
+Binary-only example:
+
+```ts
+import { startJongodbMemoryServer } from "@jongodb/memory-server";
+
+const server = await startJongodbMemoryServer({
+  launchMode: "binary",
+  binaryPath: process.env.JONGODB_BINARY_PATH
+});
+```
+
+## Java Runtime
+
+Provide classpath by:
+
+1. `startJongodbMemoryServer({ classpath: "..." })`, or
+2. `JONGODB_CLASSPATH`
+
+Repository helper command (when using this repo launcher build):
+
+```bash
+./.tooling/gradle-8.10.2/bin/gradle -q printLauncherClasspath
+```
+
+## Standalone Launcher Contract
+
+Binary and Java launchers follow one contract:
+
+- readiness line on stdout: `JONGODB_URI=mongodb://...`
+- optional failure line on stderr: `JONGODB_START_FAILURE=...`
+- process remains alive until terminated by signal (`SIGTERM`/`SIGINT`)
+
+The adapter relies on this contract for deterministic startup/teardown handling.
+
+## Runner Helpers
 
 ### Jest (per-file hooks)
 
@@ -165,232 +203,79 @@ registerJongodbForVitest({ beforeAll, afterAll }, {
 });
 ```
 
-### Mocha (or any runner with before/after hooks)
+### NestJS (Jest E2E)
 
 ```ts
-import { before, after } from "mocha";
-import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
+import { beforeAll, afterAll } from "@jest/globals";
+import { registerJongodbForNestJest } from "@jongodb/memory-server/nestjs";
 
-const runtime = createJongodbEnvRuntime({
+registerJongodbForNestJest({ beforeAll, afterAll }, {
   launchMode: "auto",
   binaryPath: process.env.JONGODB_BINARY_PATH,
   classpath: process.env.JONGODB_CLASSPATH,
   envVarName: "MONGODB_URI"
 });
-
-before(async () => {
-  await runtime.setup();
-});
-
-after(async () => {
-  await runtime.teardown();
-});
 ```
 
-## Framework Integration Patterns
+## Common Integration Patterns
 
-### NestJS (Jest E2E example)
+- NestJS + Mongoose: `MongooseModule.forRootAsync({ useFactory: () => ({ uri: process.env.MONGODB_URI }) })`
+- Express/Fastify: inject `process.env.MONGODB_URI` into DB bootstrap before app init
+- Prisma (Mongo): set `envVarName: "DATABASE_URL"` for runtime helper
+- TypeORM (Mongo): pass runtime URI as `url`
 
-```ts
-import { beforeAll, afterAll, describe, it, expect } from "@jest/globals";
-import { Test } from "@nestjs/testing";
-import { INestApplication } from "@nestjs/common";
-import { registerJongodbForNestJest } from "@jongodb/memory-server/nestjs";
-import { AppModule } from "../src/app.module";
-
-describe("App (e2e)", () => {
-  let app: INestApplication;
-
-  registerJongodbForNestJest({ beforeAll, afterAll }, {
-    launchMode: "auto",
-    binaryPath: process.env.JONGODB_BINARY_PATH,
-    classpath: process.env.JONGODB_CLASSPATH,
-    envVarName: "MONGODB_URI",
-    databaseName: "nest_e2e"
-  });
-
-  beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule]
-    }).compile();
-    app = moduleRef.createNestApplication();
-    await app.init();
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  it("health check", async () => {
-    expect(app).toBeDefined();
-  });
-});
-```
-
-Nest config (`forRootAsync`) pattern:
-
-```ts
-MongooseModule.forRootAsync({
-  useFactory: () => ({
-    uri: process.env.MONGODB_URI
-  })
-})
-```
-
-### Express/Fastify pattern
-
-Framework side only needs a Mongo URI from env or config.
-
-```ts
-import { beforeAll, afterAll } from "@jest/globals";
-import request from "supertest";
-import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
-import { createApp } from "../src/app";
-
-const runtime = createJongodbEnvRuntime({
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI",
-  databaseName: "http_e2e"
-});
-
-let app: Awaited<ReturnType<typeof createApp>>;
-
-beforeAll(async () => {
-  await runtime.setup();
-  app = await createApp({ mongoUri: process.env.MONGODB_URI! });
-});
-
-afterAll(async () => {
-  await app.close();
-  await runtime.teardown();
-});
-
-it("GET /health", async () => {
-  await request(app.server).get("/health").expect(200);
-});
-```
-
-## ORM/ODM Integration Patterns
-
-### Mongoose
-
-```ts
-import mongoose from "mongoose";
-import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
-
-const runtime = createJongodbEnvRuntime({
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI",
-  databaseName: "mongoose_test"
-});
-
-await runtime.setup();
-await mongoose.connect(process.env.MONGODB_URI!);
-```
-
-### Prisma (MongoDB connector)
-
-Set `envVarName: "DATABASE_URL"` so Prisma uses the expected variable.
-
-`schema.prisma`:
-
-```prisma
-datasource db {
-  provider = "mongodb"
-  url      = env("DATABASE_URL")
-}
-```
-
-`test setup`:
-
-```ts
-import { PrismaClient } from "@prisma/client";
-import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
-
-const runtime = createJongodbEnvRuntime({
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "DATABASE_URL",
-  databaseName: "prisma_test"
-});
-
-await runtime.setup();
-const prisma = new PrismaClient();
-```
-
-### TypeORM (MongoDB)
-
-```ts
-import { DataSource } from "typeorm";
-import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
-
-const runtime = createJongodbEnvRuntime({
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI",
-  databaseName: "typeorm_test"
-});
-
-await runtime.setup();
-
-const dataSource = new DataSource({
-  type: "mongodb",
-  url: process.env.MONGODB_URI!,
-  database: "typeorm_test"
-});
-await dataSource.initialize();
-```
-
-## Options
-
-Common runtime options:
-- `launchMode`: `auto` | `binary` | `java` (default: `auto`)
-- `binaryPath`: path to standalone launcher binary (optional)
-- `classpath`: Java classpath string or array (required unless `JONGODB_CLASSPATH` is set)
-- `databaseName`: default database in generated URI (default: `test`)
-- `host`: bind host (default: `127.0.0.1`)
-- `port`: bind port, `0` for random (default: `0`)
-- `startupTimeoutMs`: startup timeout (default: `15000`)
-- `stopTimeoutMs`: graceful stop timeout before SIGKILL (default: `5000`)
-- `javaPath`: Java executable path (default: `java`)
-- `launcherClass`: launcher class (default: `org.jongodb.server.TcpMongoServerLauncher`)
-- `envVarName`: env key written by helpers (default: `MONGODB_URI`)
-
-Parallel test tip:
-- use unique `databaseName` per worker/process to avoid data collisions
-
-## Troubleshooting
-
-- `No launcher runtime configured`: set binary path/env or Java classpath/env
-- `Binary launch mode requested but no binary was found`: set `binaryPath` or `JONGODB_BINARY_PATH`
-- `Java launch mode requested but Java classpath is not configured`: set `classpath` or `JONGODB_CLASSPATH`
-- `spawn ... ENOENT`: binary path/java executable is missing on `PATH`
-- `startup timeout`: launcher could not initialize or failed to emit `JONGODB_URI=...`
-- slow startup on CI: resolve classpath once at workflow level and reuse env
-
-## API
+## API Surface
 
 Main export (`@jongodb/memory-server`):
+
 - `startJongodbMemoryServer(options?)`
 
 Runtime export (`@jongodb/memory-server/runtime`):
+
 - `createJongodbEnvRuntime(options?)`
 
 Jest export (`@jongodb/memory-server/jest`):
+
 - `registerJongodbForJest(hooks, options?)`
 - `createJestGlobalSetup(options?)`
 - `createJestGlobalTeardown(options?)`
 - `readJestGlobalState(options?)`
 - `readJestGlobalUri(options?)`
 
-NestJS export (`@jongodb/memory-server/nestjs`):
+Nest export (`@jongodb/memory-server/nestjs`):
+
 - `registerJongodbForNestJest(hooks, options?)`
 
 Vitest export (`@jongodb/memory-server/vitest`):
+
 - `registerJongodbForVitest(hooks, options?)`
+
+## Options Reference
+
+Core options:
+
+- `launchMode`: `auto` | `binary` | `java` (default: `auto`)
+- `binaryPath`: binary executable path
+- `classpath`: Java classpath string or string array
+- `javaPath`: Java executable path (default: `java`)
+- `launcherClass`: Java launcher class (default: `org.jongodb.server.TcpMongoServerLauncher`)
+- `databaseName`: default DB in generated URI (default: `test`)
+- `host`: bind host (default: `127.0.0.1`)
+- `port`: bind port (`0` for ephemeral, default: `0`)
+- `startupTimeoutMs`: startup timeout (default: `15000`)
+- `stopTimeoutMs`: stop timeout before forced kill (default: `5000`)
+- `env`: additional child process env vars
+- `logLevel`: `silent` | `info` | `debug` (default: `silent`)
+- `envVarName` (runtime/jest/vitest helpers): target env key (default: `MONGODB_URI`)
+
+## Troubleshooting
+
+- `No launcher runtime configured`: set binary path/env or classpath/env
+- `Binary launch mode requested but no binary was found`: provide `binaryPath` or `JONGODB_BINARY_PATH`
+- `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
+- `spawn ... ENOENT`: missing binary/java executable path
+- startup timeout: launcher did not emit `JONGODB_URI=...`
+
+Parallel test tip:
+
+- use unique `databaseName` per worker/process to avoid data collisions

@@ -2,7 +2,8 @@
 
 In-memory MongoDB-compatible backend for fast Spring integration tests.
 
-`jongodb` targets fast, deterministic Spring Boot test execution without starting a MongoDB container or external process.
+`jongodb` targets fast, deterministic Spring Boot test execution without Docker/container bootstrap.
+It supports both in-process test bootstrap and standalone TCP launcher mode.
 It is not a production MongoDB replacement.
 
 Latest release: `0.1.3`  
@@ -105,22 +106,29 @@ Requirements:
 - Java 17+
 - Gradle 8+
 
-## Node Adapter Status
+## Standalone TCP Launcher
 
-Node.js adapter work is tracked in issue `#106` and lives under `packages/memory-server`.
+`jongodb` can run as a standalone TCP process and expose a standard `mongodb://` URI.
+
+For detailed launcher usage (Java/binary runtime selection and framework examples), see:
+- `packages/memory-server/README.md`
+
+## Node Adapter
+
+Node adapter package: `@jongodb/memory-server` (source under `packages/memory-server`).
 
 Current state:
-- package exists (`@jongodb/memory-server`)
-- framework-agnostic runtime helper is implemented (`./runtime`)
-- launcher mode supports `auto` / `binary` / `java`
-- platform binary package scaffolds exist (`@jongodb/memory-server-bin-*`)
-- runtime process manager is implemented (`#108`)
-- Jest/Vitest helpers are implemented (`#109`)
-- compatibility smoke suite is implemented (`#110`)
-- release workflow exists (`.github/workflows/npm-node-release.yml`)
+- framework-agnostic runtime helper (`./runtime`)
+- launcher modes: `auto` / `binary` / `java`
+- standalone launcher process management
+- platform binary package targets: darwin-arm64, linux-x64-gnu, win32-x64
+- Jest/Vitest/Nest-Jest helpers
+- CI release workflow: `.github/workflows/npm-node-release.yml`
 
 Node runtime note:
-- provide Java classpath via `classpath` option or `JONGODB_CLASSPATH`
+- default `auto` mode: binary first, then Java classpath fallback
+- Java runtime requires `classpath` option or `JONGODB_CLASSPATH`
+- detailed usage/examples: `packages/memory-server/README.md`
 
 ## Transaction Contract (Current)
 
@@ -149,7 +157,7 @@ This project targets integration-test compatibility for common Spring data paths
 | Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced parity incomplete |
 | Aggregation | Core stages + selected Tier-2 stages | Full operator coverage not implemented |
 | Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) |
-| Wire protocol | `OP_MSG` in-process ingress | No standalone external server process |
+| Wire protocol | `OP_MSG` + `OP_QUERY` | In-process ingress and standalone TCP launcher mode |
 
 Support manifest summary:
 - `Supported`: 7
@@ -195,10 +203,10 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 
 ## Known Limitations
 
-- no standalone external TCP server process (in-process ingress)
 - partial query and aggregation parity
 - collation/TTL are currently metadata-focused, not full runtime parity
 - limited update operator coverage
+- no replica-set or sharded topology semantics
 
 Unsupported branches are standardized progressively as:
 - `codeName=NotImplemented`
