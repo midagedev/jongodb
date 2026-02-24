@@ -69,7 +69,14 @@ final class ScenarioBsonCodec {
     }
 
     static BsonDocument toRealMongodCommandDocument(ScenarioCommand command, String defaultDatabase) {
-        BsonDocument commandDocument = toCommandDocument(command, defaultDatabase);
+        Objects.requireNonNull(command, "command");
+        final BsonDocument commandDocument = switch (command.commandName()) {
+            case "countDocuments" -> translateCountDocumentsCommand(command, defaultDatabase);
+            case "replaceOne" -> translateReplaceOneCommand(command, defaultDatabase);
+            case "findOneAndUpdate" -> translateFindOneAndUpdateCommand(command, defaultDatabase);
+            case "findOneAndReplace" -> translateFindOneAndReplaceCommand(command, defaultDatabase);
+            default -> toCommandDocument(command, defaultDatabase);
+        };
         commandDocument.remove("$db");
         commandDocument.remove("lsid");
         ensureTxnNumberIsLong(commandDocument);
@@ -243,6 +250,190 @@ final class ScenarioBsonCodec {
             return;
         }
         commandDocument.put("txnNumber", new BsonInt64(txnNumberValue.asNumber().longValue()));
+    }
+
+    private static BsonDocument translateCountDocumentsCommand(
+            final ScenarioCommand command,
+            final String defaultDatabase) {
+        final BsonDocument source = toCommandDocument(command, defaultDatabase);
+        final BsonValue collection = source.get("countDocuments");
+        if (!(collection instanceof BsonString collectionName)) {
+            return source;
+        }
+
+        final BsonDocument translated = new BsonDocument("aggregate", new BsonString(collectionName.getValue()));
+        final BsonValue filter = source.containsKey("filter") ? source.get("filter") : source.get("query");
+        final BsonArray pipeline = new BsonArray();
+        pipeline.add(new BsonDocument("$match", asDocumentOrEmpty(filter)));
+        if (source.containsKey("skip")) {
+            pipeline.add(new BsonDocument("$skip", source.get("skip")));
+        }
+        if (source.containsKey("limit")) {
+            pipeline.add(new BsonDocument("$limit", source.get("limit")));
+        }
+        pipeline.add(new BsonDocument(
+                "$group",
+                new BsonDocument()
+                        .append("_id", new BsonInt32(1))
+                        .append("n", new BsonDocument("$sum", new BsonInt32(1)))));
+        translated.put("pipeline", pipeline);
+        translated.put("cursor", new BsonDocument());
+        copyFields(
+                source,
+                translated,
+                "$db",
+                "hint",
+                "collation",
+                "readConcern",
+                "txnNumber",
+                "autocommit",
+                "startTransaction",
+                "lsid");
+        return translated;
+    }
+
+    private static BsonDocument translateReplaceOneCommand(
+            final ScenarioCommand command,
+            final String defaultDatabase) {
+        final BsonDocument source = toCommandDocument(command, defaultDatabase);
+        final BsonValue collection = source.get("replaceOne");
+        if (!(collection instanceof BsonString collectionName)) {
+            return source;
+        }
+
+        final BsonDocument translated = new BsonDocument("update", new BsonString(collectionName.getValue()));
+        final BsonDocument updateEntry = new BsonDocument()
+                .append("q", asDocumentOrEmpty(source.get("filter")))
+                .append("u", source.get("replacement", new BsonDocument()))
+                .append("multi", BsonBoolean.FALSE)
+                .append("upsert", BsonBoolean.valueOf(readBoolean(source.get("upsert"), false)));
+        appendIfPresent(source, updateEntry, "hint");
+        appendIfPresent(source, updateEntry, "collation");
+        translated.put("updates", new BsonArray(List.of(updateEntry)));
+        copyFields(
+                source,
+                translated,
+                "$db",
+                "readConcern",
+                "writeConcern",
+                "txnNumber",
+                "autocommit",
+                "startTransaction",
+                "lsid");
+        return translated;
+    }
+
+    private static BsonDocument translateFindOneAndUpdateCommand(
+            final ScenarioCommand command,
+            final String defaultDatabase) {
+        final BsonDocument source = toCommandDocument(command, defaultDatabase);
+        final BsonValue collection = source.get("findOneAndUpdate");
+        if (!(collection instanceof BsonString collectionName)) {
+            return source;
+        }
+
+        final BsonDocument translated = new BsonDocument()
+                .append("findAndModify", new BsonString(collectionName.getValue()))
+                .append("query", asDocumentOrEmpty(source.get("filter")))
+                .append("update", source.get("update", new BsonDocument()))
+                .append("remove", BsonBoolean.FALSE)
+                .append("new", BsonBoolean.valueOf(readReturnDocumentAsAfter(source)));
+        appendIfPresent(source, translated, "sort");
+        if (source.containsKey("projection")) {
+            translated.put("fields", source.get("projection"));
+        }
+        appendIfPresent(source, translated, "upsert");
+        appendIfPresent(source, translated, "hint");
+        appendIfPresent(source, translated, "collation");
+        copyFields(
+                source,
+                translated,
+                "$db",
+                "readConcern",
+                "writeConcern",
+                "txnNumber",
+                "autocommit",
+                "startTransaction",
+                "lsid");
+        return translated;
+    }
+
+    private static BsonDocument translateFindOneAndReplaceCommand(
+            final ScenarioCommand command,
+            final String defaultDatabase) {
+        final BsonDocument source = toCommandDocument(command, defaultDatabase);
+        final BsonValue collection = source.get("findOneAndReplace");
+        if (!(collection instanceof BsonString collectionName)) {
+            return source;
+        }
+
+        final BsonDocument translated = new BsonDocument()
+                .append("findAndModify", new BsonString(collectionName.getValue()))
+                .append("query", asDocumentOrEmpty(source.get("filter")))
+                .append("update", source.get("replacement", new BsonDocument()))
+                .append("remove", BsonBoolean.FALSE)
+                .append("new", BsonBoolean.valueOf(readReturnDocumentAsAfter(source)));
+        appendIfPresent(source, translated, "sort");
+        if (source.containsKey("projection")) {
+            translated.put("fields", source.get("projection"));
+        }
+        appendIfPresent(source, translated, "upsert");
+        appendIfPresent(source, translated, "hint");
+        appendIfPresent(source, translated, "collation");
+        copyFields(
+                source,
+                translated,
+                "$db",
+                "readConcern",
+                "writeConcern",
+                "txnNumber",
+                "autocommit",
+                "startTransaction",
+                "lsid");
+        return translated;
+    }
+
+    private static void copyFields(
+            final BsonDocument source,
+            final BsonDocument target,
+            final String... keys) {
+        for (final String key : keys) {
+            appendIfPresent(source, target, key);
+        }
+    }
+
+    private static void appendIfPresent(
+            final BsonDocument source,
+            final BsonDocument target,
+            final String key) {
+        if (!source.containsKey(key)) {
+            return;
+        }
+        target.put(key, source.get(key));
+    }
+
+    private static BsonDocument asDocumentOrEmpty(final BsonValue value) {
+        if (value != null && value.isDocument()) {
+            return value.asDocument();
+        }
+        return new BsonDocument();
+    }
+
+    private static boolean readBoolean(final BsonValue value, final boolean defaultValue) {
+        if (value == null || !value.isBoolean()) {
+            return defaultValue;
+        }
+        return value.asBoolean().getValue();
+    }
+
+    private static boolean readReturnDocumentAsAfter(final BsonDocument source) {
+        final BsonValue returnDocument = source.get("returnDocument");
+        if (returnDocument != null && returnDocument.isString()) {
+            final String value = returnDocument.asString().getValue();
+            return "after".equalsIgnoreCase(value);
+        }
+        final BsonValue newValue = source.get("new");
+        return readBoolean(newValue, false);
     }
 
     private static Object toJavaValue(BsonValue value) {

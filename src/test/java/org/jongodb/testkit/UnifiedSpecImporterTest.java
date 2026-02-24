@@ -322,4 +322,145 @@ class UnifiedSpecImporterTest {
         assertTrue(result.skippedCases().stream().allMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
     }
+
+    @Test
+    void importsCrudParityOperationsMappedToCommandLayer() throws IOException {
+        Files.writeString(
+                tempDir.resolve("crud-parity.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "crud parity operations",
+                      "operations": [
+                        {"name": "countDocuments", "arguments": {"filter": {"active": true}, "limit": 2}},
+                        {"name": "replaceOne", "arguments": {"filter": {"_id": 1}, "replacement": {"name": "neo"}, "upsert": true}},
+                        {"name": "findOneAndUpdate", "arguments": {"filter": {"_id": 1}, "update": {"$set": {"tier": 2}}, "returnDocument": "after"}},
+                        {"name": "findOneAndReplace", "arguments": {"filter": {"_id": 1}, "replacement": {"name": "trinity"}, "returnDocument": "before"}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(4, scenario.commands().size());
+        assertEquals("countDocuments", scenario.commands().get(0).commandName());
+        assertEquals("replaceOne", scenario.commands().get(1).commandName());
+        assertEquals("findOneAndUpdate", scenario.commands().get(2).commandName());
+        assertEquals("findOneAndReplace", scenario.commands().get(3).commandName());
+        assertEquals("users", scenario.commands().get(0).payload().get("countDocuments"));
+        assertEquals("users", scenario.commands().get(1).payload().get("replaceOne"));
+    }
+
+    @Test
+    void appliesTransactionEnvelopeWithCreateEntitiesSessions() throws IOException {
+        Files.writeString(
+                tempDir.resolve("transactions.yml"),
+                """
+                schemaVersion: "1.3"
+                createEntities:
+                  - client:
+                      id: client0
+                  - database:
+                      id: database0
+                      client: client0
+                      databaseName: tx-db
+                  - collection:
+                      id: collection0
+                      database: database0
+                      collectionName: tx-coll
+                  - session:
+                      id: session0
+                      client: client0
+                tests:
+                  - description: txn envelope
+                    operations:
+                      - object: session0
+                        name: startTransaction
+                        arguments:
+                          readConcern:
+                            level: majority
+                      - object: collection0
+                        name: insertOne
+                        arguments:
+                          session: session0
+                          document:
+                            _id: 1
+                      - object: collection0
+                        name: countDocuments
+                        arguments:
+                          session: session0
+                          filter: {}
+                      - object: session0
+                        name: commitTransaction
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+
+        final ScenarioCommand first = scenario.commands().get(0);
+        assertEquals("insert", first.commandName());
+        assertEquals("tx-coll", first.payload().get("insert"));
+        assertEquals("tx-db", first.payload().get("$db"));
+        assertEquals(true, first.payload().get("startTransaction"));
+        assertEquals(false, first.payload().get("autocommit"));
+        assertEquals(1L, first.payload().get("txnNumber"));
+
+        final Object lsid = first.payload().get("lsid");
+        assertTrue(lsid instanceof java.util.Map<?, ?>);
+        final java.util.Map<?, ?> lsidMap = (java.util.Map<?, ?>) lsid;
+        assertEquals("session0", lsidMap.get("id"));
+        assertTrue(first.payload().containsKey("readConcern"));
+
+        final ScenarioCommand second = scenario.commands().get(1);
+        assertEquals("countDocuments", second.commandName());
+        assertEquals(false, second.payload().get("autocommit"));
+        assertEquals(1L, second.payload().get("txnNumber"));
+
+        final ScenarioCommand third = scenario.commands().get(2);
+        assertEquals("commitTransaction", third.commandName());
+        assertEquals("admin", third.payload().get("$db"));
+        assertEquals(1L, third.payload().get("txnNumber"));
+    }
+
+    @Test
+    void marksFailPointAsUnsupportedByPolicy() throws IOException {
+        Files.writeString(
+                tempDir.resolve("failpoint.yml"),
+                """
+                tests:
+                  - description: failpoint policy
+                    operations:
+                      - object: testRunner
+                        name: failPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: alwaysOn
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported-by-policy UTF operation: failPoint")));
+    }
 }

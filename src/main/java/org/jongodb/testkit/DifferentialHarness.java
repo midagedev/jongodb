@@ -217,7 +217,7 @@ public final class DifferentialHarness {
     }
 
     private static boolean isEphemeralPath(final String path) {
-        return path.endsWith(".cursor.ns");
+        return path.endsWith(".cursor.ns") || path.endsWith(".cursor.id");
     }
 
     private static void compareList(
