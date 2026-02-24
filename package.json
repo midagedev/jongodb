@@ -1,0 +1,13 @@
+{
+  "name": "jongodb-workspace",
+  "private": true,
+  "description": "Workspace scripts for jongodb Node adapter packages.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "node:build": "npm run --workspace @jongodb/memory-server build",
+    "node:test": "npm run --workspace @jongodb/memory-server test",
+    "node:typecheck": "npm run --workspace @jongodb/memory-server typecheck"
+  }
+}
