@@ -268,18 +268,21 @@ class CommandDispatcherE2ETest {
                         + "{\"_id\":3,\"v\":1.0},"
                         + "{\"_id\":4,\"v\":\"1\"},"
                         + "{\"_id\":5,\"v\":{\"a\":1}},"
-                        + "{\"_id\":6,\"v\":{\"a\":1}}"
+                        + "{\"_id\":6,\"v\":{\"a\":1}},"
+                        + "{\"_id\":7,\"v\":true},"
+                        + "{\"_id\":8,\"v\":true}"
                         + "]}"));
 
         final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
                 "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"v\",\"query\":{}}"));
         assertEquals(1.0, response.get("ok").asNumber().doubleValue());
-        assertEquals(5, response.getArray("values").size());
+        assertEquals(6, response.getArray("values").size());
         assertEquals(true, response.getArray("values").get(0).isInt32());
         assertEquals(true, response.getArray("values").get(1).isInt64());
         assertEquals(true, response.getArray("values").get(2).isDouble());
         assertEquals(true, response.getArray("values").get(3).isString());
         assertEquals(true, response.getArray("values").get(4).isDocument());
+        assertEquals(true, response.getArray("values").get(5).isBoolean());
     }
 
     @Test
