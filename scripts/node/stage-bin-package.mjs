@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { chmodSync, copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
 const workspace = resolve(requireValue(args, "workspace"));
-const binary = resolve(requireValue(args, "binary"));
+const binary = resolveBinaryPath(resolve(requireValue(args, "binary")));
 
 const packageJsonPath = join(workspace, "package.json");
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
@@ -61,4 +61,17 @@ function requireValue(parsed, key) {
     throw new Error(`--${key} is required`);
   }
   return value.trim();
+}
+
+function resolveBinaryPath(requested) {
+  if (existsSync(requested)) {
+    return requested;
+  }
+  if (process.platform === "win32" && !requested.toLowerCase().endsWith(".exe")) {
+    const withExe = `${requested}.exe`;
+    if (existsSync(withExe)) {
+      return withExe;
+    }
+  }
+  throw new Error(`Binary file not found: ${requested}`);
 }
