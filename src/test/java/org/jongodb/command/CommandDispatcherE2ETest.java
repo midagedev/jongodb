@@ -300,11 +300,13 @@ class CommandDispatcherE2ETest {
                 "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"name\",\"query\":{},\"hint\":\"name_1\"}"));
         assertEquals(1.0, stringHint.get("ok").asNumber().doubleValue());
         assertEquals(2, stringHint.getArray("values").size());
+        assertEquals(0, store.lastFindFilter.size());
 
         final BsonDocument documentHint = dispatcher.dispatch(BsonDocument.parse(
                 "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"name\",\"query\":{},\"hint\":{\"name\":1}}"));
         assertEquals(1.0, documentHint.get("ok").asNumber().doubleValue());
         assertEquals(2, documentHint.getArray("values").size());
+        assertEquals(0, store.lastFindFilter.size());
     }
 
     @Test
