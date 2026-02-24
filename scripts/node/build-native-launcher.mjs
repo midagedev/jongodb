@@ -46,21 +46,21 @@ if (nativeImage.status !== 0) {
 }
 
 function runNativeImage(nativeImageArgs) {
-  let lastEnoentResult = null;
-  for (const command of resolveNativeImageCommands()) {
-    console.log(`[native-image] command=${command}`);
-    const result = spawnSync(command, nativeImageArgs, {
+  let lastSpawnErrorResult = null;
+  for (const candidate of resolveNativeImageCommands(nativeImageArgs)) {
+    console.log(`[native-image] command=${candidate.display}`);
+    const result = spawnSync(candidate.command, candidate.args, {
       stdio: "inherit",
       shell: false,
     });
-    if (result.error?.code === "ENOENT") {
-      lastEnoentResult = result;
+    if (result.error?.code === "ENOENT" || result.error?.code === "EINVAL") {
+      lastSpawnErrorResult = result;
       continue;
     }
     return result;
   }
-  if (lastEnoentResult !== null) {
-    return lastEnoentResult;
+  if (lastSpawnErrorResult !== null) {
+    return lastSpawnErrorResult;
   }
   return spawnSync("native-image", nativeImageArgs, {
     stdio: "inherit",
@@ -68,27 +68,58 @@ function runNativeImage(nativeImageArgs) {
   });
 }
 
-function resolveNativeImageCommands() {
+function resolveNativeImageCommands(nativeImageArgs) {
   const candidates = [];
   if (process.platform === "win32") {
-    pushIfExists(candidates, process.env.GRAALVM_HOME, "native-image.cmd");
-    pushIfExists(candidates, process.env.JAVA_HOME, "native-image.cmd");
+    candidates.push({
+      display: "native-image",
+      command: "native-image",
+      args: nativeImageArgs,
+    });
+    pushIfExists(candidates, process.env.GRAALVM_HOME, nativeImageArgs, "native-image.cmd");
+    pushIfExists(candidates, process.env.JAVA_HOME, nativeImageArgs, "native-image.cmd");
   } else {
-    pushIfExists(candidates, process.env.GRAALVM_HOME, "native-image");
-    pushIfExists(candidates, process.env.JAVA_HOME, "native-image");
+    pushIfExists(candidates, process.env.GRAALVM_HOME, nativeImageArgs, "native-image");
+    pushIfExists(candidates, process.env.JAVA_HOME, nativeImageArgs, "native-image");
+    candidates.push({
+      display: "native-image",
+      command: "native-image",
+      args: nativeImageArgs,
+    });
   }
-  candidates.push("native-image");
-  return [...new Set(candidates)];
+  const dedup = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.display)) {
+      continue;
+    }
+    seen.add(candidate.display);
+    dedup.push(candidate);
+  }
+  return dedup;
 }
 
-function pushIfExists(candidates, home, binaryName) {
+function pushIfExists(candidates, home, nativeImageArgs, binaryName) {
   if (typeof home !== "string" || home.trim().length === 0) {
     return;
   }
   const candidate = join(home, "bin", binaryName);
-  if (existsSync(candidate)) {
-    candidates.push(candidate);
+  if (!existsSync(candidate)) {
+    return;
   }
+  if (process.platform === "win32") {
+    candidates.push({
+      display: `cmd.exe /c ${candidate}`,
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", candidate, ...nativeImageArgs],
+    });
+    return;
+  }
+  candidates.push({
+    display: candidate,
+    command: candidate,
+    args: nativeImageArgs,
+  });
 }
 
 function resolveClasspathFromGradle(gradleCmd) {
