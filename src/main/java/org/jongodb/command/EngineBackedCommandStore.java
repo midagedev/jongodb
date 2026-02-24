@@ -26,9 +26,16 @@ public final class EngineBackedCommandStore implements CommandStore {
     private static final CodecRegistry DOCUMENT_CODEC_REGISTRY = CodecRegistries.fromCodecs(DOCUMENT_CODEC);
 
     private final EngineStore engineStore;
+    private final InMemoryEngineStore transactionBaselineSnapshot;
 
     public EngineBackedCommandStore(final EngineStore engineStore) {
+        this(engineStore, null);
+    }
+
+    private EngineBackedCommandStore(
+            final EngineStore engineStore, final InMemoryEngineStore transactionBaselineSnapshot) {
         this.engineStore = Objects.requireNonNull(engineStore, "engineStore");
+        this.transactionBaselineSnapshot = transactionBaselineSnapshot;
     }
 
     @Override
@@ -36,7 +43,9 @@ public final class EngineBackedCommandStore implements CommandStore {
         if (!(engineStore instanceof InMemoryEngineStore inMemoryEngineStore)) {
             throw new IllegalStateException("transaction snapshots require InMemoryEngineStore");
         }
-        return new EngineBackedCommandStore(inMemoryEngineStore.snapshot());
+        final InMemoryEngineStore baselineSnapshot = inMemoryEngineStore.snapshot();
+        final InMemoryEngineStore transactionStore = baselineSnapshot.snapshot();
+        return new EngineBackedCommandStore(transactionStore, baselineSnapshot);
     }
 
     @Override
@@ -48,6 +57,10 @@ public final class EngineBackedCommandStore implements CommandStore {
         if (!(snapshot instanceof EngineBackedCommandStore engineSnapshot)
                 || !(engineSnapshot.engineStore instanceof InMemoryEngineStore inMemorySnapshot)) {
             throw new IllegalArgumentException("snapshot must be an EngineBackedCommandStore backed by InMemoryEngineStore");
+        }
+        if (engineSnapshot.transactionBaselineSnapshot != null) {
+            inMemoryEngineStore.mergeTransactionSnapshot(engineSnapshot.transactionBaselineSnapshot, inMemorySnapshot);
+            return;
         }
         inMemoryEngineStore.replaceWith(inMemorySnapshot);
     }

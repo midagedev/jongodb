@@ -47,6 +47,65 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return new InMemoryCollectionStore(this);
     }
 
+    synchronized CollectionState snapshotState() {
+        return new CollectionState(copyDocuments(documents), listIndexes());
+    }
+
+    synchronized void replaceState(final CollectionState state) {
+        Objects.requireNonNull(state, "state");
+
+        final List<Document> copiedDocuments = copyDocuments(state.documents());
+        final Map<String, IndexMetadata> copiedIndexes = toIndexMetadataMap(state.indexes());
+        validateUniqueConstraints(copiedDocuments, copiedIndexes.values());
+
+        documents.clear();
+        documents.addAll(copiedDocuments);
+        indexesByName.clear();
+        indexesByName.putAll(copiedIndexes);
+    }
+
+    static boolean statesEqual(final CollectionState left, final CollectionState right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.documents().equals(right.documents()) && left.indexes().equals(right.indexes());
+    }
+
+    static CollectionState mergeTransactionState(
+            final CollectionState baselineState,
+            final CollectionState transactionState,
+            final CollectionState currentState) {
+        final CollectionState baseline = baselineState == null ? emptyState() : baselineState;
+        final CollectionState transaction = transactionState == null ? emptyState() : transactionState;
+        final CollectionState current = currentState == null ? emptyState() : currentState;
+
+        final List<Document> mergedDocuments = new ArrayList<>(copyDocuments(current.documents()));
+        final List<Document> removedDocuments = diffDocuments(baseline.documents(), transaction.documents());
+        for (final Document removedDocument : removedDocuments) {
+            final Object removedId = removedDocument.get("_id");
+            if (removedId != null && removeFirstDocumentById(mergedDocuments, removedId)) {
+                continue;
+            }
+            removeFirstDocumentByCanonical(mergedDocuments, removedDocument);
+        }
+
+        final List<Document> addedDocuments = diffDocuments(transaction.documents(), baseline.documents());
+        for (final Document addedDocument : addedDocuments) {
+            final Object addedId = addedDocument.get("_id");
+            if (addedId != null) {
+                removeFirstDocumentById(mergedDocuments, addedId);
+            }
+            mergedDocuments.add(DocumentCopies.copy(addedDocument));
+        }
+
+        final List<CollectionStore.IndexDefinition> mergedIndexes = mergeIndexes(
+                baseline.indexes(),
+                transaction.indexes(),
+                current.indexes());
+
+        return new CollectionState(mergedDocuments, mergedIndexes);
+    }
+
     @Override
     public synchronized void insertMany(List<Document> documents) {
         Objects.requireNonNull(documents, "documents");
@@ -468,7 +527,140 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return (Map<String, Object>) source;
     }
 
+    private static CollectionState emptyState() {
+        return new CollectionState(List.of(), List.of());
+    }
+
+    private static List<Document> copyDocuments(final List<Document> source) {
+        final List<Document> copied = new ArrayList<>(source.size());
+        for (final Document document : source) {
+            copied.add(DocumentCopies.copy(Objects.requireNonNull(document, "document")));
+        }
+        return List.copyOf(copied);
+    }
+
+    private static List<Document> diffDocuments(final List<Document> source, final List<Document> subtract) {
+        final Map<String, Integer> subtractCounts = new HashMap<>();
+        for (final Document document : subtract) {
+            subtractCounts.merge(canonicalDocumentKey(document), 1, Integer::sum);
+        }
+
+        final List<Document> difference = new ArrayList<>();
+        for (final Document document : source) {
+            final String key = canonicalDocumentKey(document);
+            final Integer remaining = subtractCounts.get(key);
+            if (remaining == null || remaining == 0) {
+                difference.add(DocumentCopies.copy(document));
+                continue;
+            }
+            if (remaining == 1) {
+                subtractCounts.remove(key);
+            } else {
+                subtractCounts.put(key, remaining - 1);
+            }
+        }
+        return difference;
+    }
+
+    private static boolean removeFirstDocumentById(final List<Document> documents, final Object targetId) {
+        final Iterator<Document> iterator = documents.iterator();
+        while (iterator.hasNext()) {
+            final Document candidate = iterator.next();
+            if (Objects.deepEquals(candidate.get("_id"), targetId)) {
+                iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean removeFirstDocumentByCanonical(final List<Document> documents, final Document targetDocument) {
+        final String targetKey = canonicalDocumentKey(targetDocument);
+        final Iterator<Document> iterator = documents.iterator();
+        while (iterator.hasNext()) {
+            final Document candidate = iterator.next();
+            if (targetKey.equals(canonicalDocumentKey(candidate))) {
+                iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String canonicalDocumentKey(final Document document) {
+        return document.toJson();
+    }
+
+    private static List<CollectionStore.IndexDefinition> mergeIndexes(
+            final List<CollectionStore.IndexDefinition> baselineIndexes,
+            final List<CollectionStore.IndexDefinition> transactionIndexes,
+            final List<CollectionStore.IndexDefinition> currentIndexes) {
+        final Map<String, CollectionStore.IndexDefinition> baselineByName = indexByName(baselineIndexes);
+        final Map<String, CollectionStore.IndexDefinition> transactionByName = indexByName(transactionIndexes);
+        final LinkedHashMap<String, CollectionStore.IndexDefinition> mergedByName = new LinkedHashMap<>(indexByName(currentIndexes));
+
+        for (final Map.Entry<String, CollectionStore.IndexDefinition> baselineEntry : baselineByName.entrySet()) {
+            final String name = baselineEntry.getKey();
+            if (transactionByName.containsKey(name)) {
+                continue;
+            }
+            mergedByName.remove(name);
+        }
+
+        for (final CollectionStore.IndexDefinition transactionIndex : transactionIndexes) {
+            mergedByName.put(transactionIndex.name(), transactionIndex);
+        }
+
+        return List.copyOf(mergedByName.values());
+    }
+
+    private static Map<String, CollectionStore.IndexDefinition> indexByName(
+            final List<CollectionStore.IndexDefinition> indexes) {
+        final LinkedHashMap<String, CollectionStore.IndexDefinition> byName = new LinkedHashMap<>();
+        for (final CollectionStore.IndexDefinition index : indexes) {
+            byName.put(requireNonBlankIndexName(index.name()), index);
+        }
+        return byName;
+    }
+
+    private static Map<String, IndexMetadata> toIndexMetadataMap(final List<CollectionStore.IndexDefinition> definitions) {
+        final LinkedHashMap<String, IndexMetadata> byName = new LinkedHashMap<>();
+        for (final CollectionStore.IndexDefinition definition : definitions) {
+            final String name = requireNonBlankIndexName(definition.name());
+            if (byName.containsKey(name)) {
+                throw new IllegalArgumentException("duplicate index name: " + name);
+            }
+
+            final Document key = requireNonEmptyIndexKey(definition.key());
+            final List<String> uniqueFieldPaths = definition.unique() ? indexFieldPaths(key) : List.of();
+            final Document partialFilterExpression = definition.partialFilterExpression() == null
+                    ? null
+                    : DocumentCopies.copy(definition.partialFilterExpression());
+            final Document collation =
+                    definition.collation() == null ? null : DocumentCopies.copy(definition.collation());
+            byName.put(
+                    name,
+                    new IndexMetadata(
+                            name,
+                            key,
+                            definition.unique(),
+                            definition.sparse(),
+                            partialFilterExpression,
+                            collation,
+                            definition.expireAfterSeconds(),
+                            uniqueFieldPaths));
+        }
+        return byName;
+    }
+
     private record UpdatePreview(Document updatedDocument, boolean modified) {}
+
+    record CollectionState(List<Document> documents, List<CollectionStore.IndexDefinition> indexes) {
+        CollectionState {
+            documents = documents == null ? List.of() : copyDocuments(documents);
+            indexes = indexes == null ? List.of() : List.copyOf(indexes);
+        }
+    }
 
     private record IndexMetadata(
             String name,

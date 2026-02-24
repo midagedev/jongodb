@@ -85,6 +85,21 @@ Keep Testcontainers/real `mongod` for tests that require:
 - advanced transaction/retry semantics outside current support scope
 - deployment-level behavior
 
+## Transaction Contract (Current)
+
+| Scenario | Support | Notes |
+| --- | --- | --- |
+| Single-template transactional path | Supported | `startTransaction` -> CRUD -> `commitTransaction` / `abortTransaction` |
+| Multi-template same transaction manager path | Supported | Multiple namespaces can participate in one transaction envelope |
+| Out-of-scope write, different namespace during open transaction | Supported | Non-transactional writes are preserved after commit |
+| Out-of-scope write, same namespace with different `_id` | Supported | Non-transactional writes are preserved after commit |
+| Same `_id` touched by both transactional and non-transactional writes | Deterministic | Commit applies the transactional version for that `_id` |
+
+Not covered by this contract:
+- distributed transaction semantics
+- replica-set and deployment-level transaction behavior
+- advanced commit retry semantics across network/process failures
+
 ## Troubleshooting
 
 - If you see `codeName=NotImplemented` with `UnsupportedFeature`, the test is using an unsupported feature path.

@@ -29,6 +29,11 @@ class SpringCompatibilityMatrixRunnerTest {
 
     @Test
     void accountsScenarioResultsAcrossTargetAndSurfaceMatrix() {
+        final int scenarioCount = SpringCompatibilityMatrixRunner.defaultScenarios().size();
+        final int transactionScenarioCount = (int) SpringCompatibilityMatrixRunner.defaultScenarios().stream()
+            .filter(scenario -> scenario.surface() == SpringCompatibilityMatrixRunner.SpringSurface.TRANSACTION_TEMPLATE)
+            .count();
+
         SpringCompatibilityMatrixRunner runner = new SpringCompatibilityMatrixRunner(
             Clock.fixed(Instant.parse("2026-02-23T15:30:00Z"), ZoneOffset.UTC),
             target -> new StubEndpoint(target.id(), true),
@@ -43,23 +48,23 @@ class SpringCompatibilityMatrixRunnerTest {
 
         SpringCompatibilityMatrixRunner.MatrixReport report = runner.run(config);
 
-        assertEquals(10, report.totalCells());
-        assertEquals(9, report.passCount());
+        assertEquals(scenarioCount * 2, report.totalCells());
+        assertEquals((scenarioCount * 2) - 1, report.passCount());
         assertEquals(1, report.failCount());
-        assertEquals(9.0d / 10.0d, report.passRate(), 1e-9);
+        assertEquals(((scenarioCount * 2) - 1.0d) / (scenarioCount * 2.0d), report.passRate(), 1e-9);
 
         Map<String, SpringCompatibilityMatrixRunner.TargetSummary> targetSummary =
             toMap(report.targetSummaries(), SpringCompatibilityMatrixRunner.TargetSummary::targetId);
-        assertEquals(5, targetSummary.get(TARGET_BOOT_27).passCount());
+        assertEquals(scenarioCount, targetSummary.get(TARGET_BOOT_27).passCount());
         assertEquals(0, targetSummary.get(TARGET_BOOT_27).failCount());
-        assertEquals(4, targetSummary.get(TARGET_BOOT_32).passCount());
+        assertEquals(scenarioCount - 1, targetSummary.get(TARGET_BOOT_32).passCount());
         assertEquals(1, targetSummary.get(TARGET_BOOT_32).failCount());
 
         Map<SpringCompatibilityMatrixRunner.SpringSurface, SpringCompatibilityMatrixRunner.SurfaceSummary> surfaceSummary =
             toMap(report.surfaceSummaries(), SpringCompatibilityMatrixRunner.SurfaceSummary::surface);
         SpringCompatibilityMatrixRunner.SurfaceSummary transactionSummary =
             surfaceSummary.get(SpringCompatibilityMatrixRunner.SpringSurface.TRANSACTION_TEMPLATE);
-        assertEquals(1, transactionSummary.passCount());
+        assertEquals((transactionScenarioCount * 2) - 1, transactionSummary.passCount());
         assertEquals(1, transactionSummary.failCount());
 
         List<SpringCompatibilityMatrixRunner.FailureSample> failures = report.failureMinimization(3);
@@ -97,15 +102,17 @@ class SpringCompatibilityMatrixRunnerTest {
         assertTrue(json.contains("\"targetSummary\""));
         assertTrue(json.contains("\"surfaceSummary\""));
         assertTrue(json.contains("\"scenarioId\":\"spring.mongo-template.basic-crud\""));
+        assertTrue(json.contains("\"scenarioId\":\"spring.transaction-template.multi-template.same-manager\""));
         assertTrue(json.contains("\"failureMinimization\":[]"));
 
         assertTrue(markdown.contains("# Spring Data Mongo Compatibility Matrix"));
         assertTrue(markdown.contains("## Matrix"));
         assertTrue(markdown.contains("## Failure Minimization"));
+        assertTrue(markdown.contains("spring.transaction-template.out-of-scope.same-namespace-interleaving"));
         assertTrue(markdown.contains("| spring.transaction-template.commit | TransactionTemplate | PASS | PASS |"));
 
         assertEquals(0, report.failCount());
-        assertEquals(10, report.passCount());
+        assertEquals(SpringCompatibilityMatrixRunner.defaultScenarios().size() * 2, report.passCount());
     }
 
     private static <K, V> Map<K, V> toMap(List<V> values, Function<V, K> keyMapper) {

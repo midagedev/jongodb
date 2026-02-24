@@ -726,6 +726,31 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void abortTransactionPreservesOutOfTransactionWrites() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"txn-user\"}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outOfTransactionInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"tenantMappings\",\"$db\":\"app\",\"documents\":[{\"_id\":101,\"tenantId\":\"t-1\"}]}"));
+        assertEquals(1.0, outOfTransactionInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument abortResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, abortResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument usersFind =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(0, usersFind.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument mappingFind = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"tenantMappings\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(1, mappingFind.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
     void commitTransactionDoesNotDropOutOfTransactionWritesFromDifferentCollection() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
@@ -769,6 +794,38 @@ class CommandDispatcherE2ETest {
         final BsonDocument usersFind =
                 dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
         assertEquals(2, usersFind.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
+    void commitTransactionUsesTransactionalVersionWhenSameIdIsChangedOutsideTransaction() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument seedResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"seed\"}]}"));
+        assertEquals(1.0, seedResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"$set\":{\"name\":\"txn\"}},\"multi\":false}],\"lsid\":{\"id\":\"session-3\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outOfTransactionUpdate = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"_id\":1},\"u\":{\"$set\":{\"name\":\"outside\"}},\"multi\":false}]}"));
+        assertEquals(1.0, outOfTransactionUpdate.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-3\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument usersFind =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        assertEquals(
+                "txn",
+                usersFind.getDocument("cursor")
+                        .getArray("firstBatch")
+                        .get(0)
+                        .asDocument()
+                        .getString("name")
+                        .getValue());
     }
 
     @Test

@@ -511,6 +511,155 @@ public final class SpringCompatibilityMatrixRunner {
                 )
             ),
             new SpringScenario(
+                "spring.transaction-template.multi-template.same-manager",
+                SpringSurface.TRANSACTION_TEMPLATE,
+                "Single transaction writes across two template-backed namespaces",
+                scenario(
+                    "spring.transaction-template.multi-template.same-manager",
+                    "start transaction + write namespace A/B + commit",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_txn_users",
+                            "documents",
+                            List.of(payload("_id", 11, "name", "txn-user")),
+                            "lsid",
+                            payload("id", "spring-session-tx-2"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false,
+                            "startTransaction",
+                            true
+                        )
+                    ),
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_txn_tenant_mappings",
+                            "documents",
+                            List.of(payload("_id", 12, "tenantId", "tenant-a")),
+                            "lsid",
+                            payload("id", "spring-session-tx-2"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false
+                        )
+                    ),
+                    command(
+                        "commitTransaction",
+                        payload(
+                            "lsid",
+                            payload("id", "spring-session-tx-2"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false
+                        )
+                    ),
+                    command("find", payload("collection", "spring_txn_users", "filter", payload("_id", 11))),
+                    command("find", payload("collection", "spring_txn_tenant_mappings", "filter", payload("_id", 12)))
+                )
+            ),
+            new SpringScenario(
+                "spring.transaction-template.out-of-scope.namespace-interleaving",
+                SpringSurface.TRANSACTION_TEMPLATE,
+                "Transactional namespace commit preserves non-transactional writes in other namespace",
+                scenario(
+                    "spring.transaction-template.out-of-scope.namespace-interleaving",
+                    "start transaction + out-of-scope write + commit",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_txn_scope_users",
+                            "documents",
+                            List.of(payload("_id", 21, "state", "txn")),
+                            "lsid",
+                            payload("id", "spring-session-tx-3"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false,
+                            "startTransaction",
+                            true
+                        )
+                    ),
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_txn_scope_mappings",
+                            "documents",
+                            List.of(payload("_id", 22, "state", "outside"))
+                        )
+                    ),
+                    command(
+                        "commitTransaction",
+                        payload(
+                            "lsid",
+                            payload("id", "spring-session-tx-3"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false
+                        )
+                    ),
+                    command("find", payload("collection", "spring_txn_scope_users", "filter", payload("_id", 21))),
+                    command("find", payload("collection", "spring_txn_scope_mappings", "filter", payload("_id", 22)))
+                )
+            ),
+            new SpringScenario(
+                "spring.transaction-template.out-of-scope.same-namespace-interleaving",
+                SpringSurface.TRANSACTION_TEMPLATE,
+                "Transactional commit preserves non-transactional writes in same namespace when ids differ",
+                scenario(
+                    "spring.transaction-template.out-of-scope.same-namespace-interleaving",
+                    "start transaction + out-of-scope write same namespace + commit",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_txn_scope_same_namespace",
+                            "documents",
+                            List.of(payload("_id", 31, "state", "txn")),
+                            "lsid",
+                            payload("id", "spring-session-tx-4"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false,
+                            "startTransaction",
+                            true
+                        )
+                    ),
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_txn_scope_same_namespace",
+                            "documents",
+                            List.of(payload("_id", 32, "state", "outside"))
+                        )
+                    ),
+                    command(
+                        "commitTransaction",
+                        payload(
+                            "lsid",
+                            payload("id", "spring-session-tx-4"),
+                            "txnNumber",
+                            1,
+                            "autocommit",
+                            false
+                        )
+                    ),
+                    command("find", payload("collection", "spring_txn_scope_same_namespace", "filter", payload()))
+                )
+            ),
+            new SpringScenario(
                 "spring.repository.aggregation-lookup",
                 SpringSurface.REPOSITORY,
                 "Repository aggregation with $lookup join",

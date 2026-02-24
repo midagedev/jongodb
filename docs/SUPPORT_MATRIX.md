@@ -26,7 +26,7 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 | `index.unique-sparse-partial` | index | Supported | Unique/sparse/partial |
 | `index.collation-metadata` | index | Supported | Collation metadata round-trip |
 | `index.collation-semantic` | index | Unsupported | Locale-aware comparison semantics |
-| `transactions-single-session` | transaction | Supported | Session + txn command flow |
+| `transactions-single-session` | transaction | Supported | Session + txn flow with namespace-aware commit merge and deterministic same-`_id` resolution |
 | `transactions-retryable-advanced` | transaction | Partial | Partial compatibility |
 | `protocol-unsupported-contract` | protocol | Supported | NotImplemented + UnsupportedFeature labels |
 
@@ -35,4 +35,3 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 - The matrix is intended for test-environment substitution scenarios.
 - Unsupported UTF coverage is tracked in `docs/COMPATIBILITY_SCORECARD.md` with reason counts.
 - New feature expansion should update both this matrix and `docs/COMPATIBILITY.md`.
-

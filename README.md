@@ -91,6 +91,14 @@ Requirements:
 - It is suitable when your test bootstrap can route command/wire messages in-process.
 - For tests that must connect through standard `mongodb://` endpoint semantics, keep a real/embedded `mongod` backend for that test profile.
 
+### Spring Transaction Contract (Current)
+
+- Supported: single transaction manager flow with one or multiple MongoTemplate/Repository paths in the same transaction envelope.
+- Supported: non-transactional writes in a different namespace while a transaction is open are preserved after commit.
+- Supported: non-transactional writes in the same namespace with different `_id` values are preserved after commit.
+- Deterministic policy: if transactional and non-transactional writes touch the same `_id`, the transactional version is applied at commit.
+- Out of scope: distributed transactions, replica-set semantics, and advanced retryable transaction behavior.
+
 ### Spring Boot Test Setup (Initializer)
 
 ```java
@@ -126,7 +134,7 @@ It does not target full MongoDB server parity.
 | Support manifest | 7 `Supported`, 4 `Partial`, 1 `Unsupported` feature groups | Source: `docs/SUPPORT_MATRIX.md` |
 | Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced expression/operator parity is incomplete |
 | Aggregation | Core stages + selected Tier-2 stages | Expression depth and many advanced operators are missing |
-| Transactions | Single-process session/transaction flow (`start`/`commit`/`abort`) | No distributed/replica-set semantics |
+| Transactions | Single-process session/transaction flow (`start`/`commit`/`abort`) | Namespace-aware commit merge preserves out-of-transaction interleavings for different namespaces and different `_id` values |
 | Wire protocol | `OP_MSG` in-process ingress | No external TCP server process |
 
 Detailed boundaries:
