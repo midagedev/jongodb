@@ -110,6 +110,7 @@ Requirements:
 Supported in current scope:
 - single transaction-manager flow with one or multiple MongoTemplate/Repository paths
 - transactional commit/abort lifecycle (`startTransaction` / `commitTransaction` / `abortTransaction`)
+- transaction-scoped snapshot reads for `find`, `aggregate`, and `countDocuments`
 - out-of-transaction writes in different namespaces are preserved at commit
 - out-of-transaction writes in same namespace with different `_id` are preserved at commit
 
@@ -130,7 +131,7 @@ This project targets integration-test compatibility for common Spring data paths
 | Command surface | 22 handlers | Mix of `Supported` and `Partial` |
 | Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced parity incomplete |
 | Aggregation | Core stages + selected Tier-2 stages | Full operator coverage not implemented |
-| Transactions | Single-process session/transaction flow | Namespace-aware commit merge |
+| Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) |
 | Wire protocol | `OP_MSG` in-process ingress | No standalone external server process |
 
 Support manifest summary:
