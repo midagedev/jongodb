@@ -18,6 +18,7 @@
 - [`12-r2-scorecard-manifest.md`](./12-r2-scorecard-manifest.md): R2 scorecard/support manifest 산출 규격
 - [`13-r2-canary-certification.md`](./13-r2-canary-certification.md): R2 외부 canary 인증 산출 규격
 - [`14-r3-issue-50-protocol-parity-baseline.md`](./14-r3-issue-50-protocol-parity-baseline.md): R3 failure ledger 기준 protocol parity baseline
+- [`15-r3-issue-53-transaction-baseline.md`](./15-r3-issue-53-transaction-baseline.md): R3 transaction/session baseline과 unsupported surface
 
 ## 권장 읽기 순서
 
@@ -35,6 +36,7 @@
 12. `12-r2-scorecard-manifest.md`로 R2 산출물 포맷 고정
 13. `13-r2-canary-certification.md`로 외부 canary 인증 기준 고정
 14. `14-r3-issue-50-protocol-parity-baseline.md`로 R3 protocol baseline 확인
+15. `15-r3-issue-53-transaction-baseline.md`로 R3 transaction/session baseline 확인
 
 ## 리서치 스냅샷
 
