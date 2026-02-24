@@ -73,6 +73,11 @@ Current ledger gate status:
 | `unsupported UTF operation: count` | 12 |
 | `unsupported UTF update pipeline` | 10 |
 
+Notes:
+
+- UTF importer now supports subset adapters for `runCommand` and `clientBulkWrite` (`#229`, `#231`).
+- The counts above are from the latest frozen snapshot; rerunning the ledger will shift those categories toward narrower unsupported reasons (for example unsupported command names/options).
+
 ## Policy Exclusions
 
 - `failPoint` remains a policy exclusion for deterministic in-process execution.
@@ -82,6 +87,8 @@ Current ledger gate status:
 
 - `#100`: transaction operation adapter coverage (`startTransaction` and lifecycle wiring) - completed.
 - `#101`: unified CRUD adapter coverage (`bulkWrite`, `findOneAndUpdate`, `findOneAndReplace`, `countDocuments`, `replaceOne`) - completed.
+- `#229`: UTF `runCommand` subset adapter (`ping`, `buildInfo`, `listIndexes`, `count`) - completed.
+- `#231`: UTF `clientBulkWrite` subset adapter (ordered single-namespace rewrite to `bulkWrite`) - completed.
 - `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction
