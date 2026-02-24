@@ -81,6 +81,17 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         }
 
         final BsonValue updateValue = command.get("update");
+        if (remove) {
+            if (updateValue != null) {
+                return CommandErrors.badValue("update is not allowed when remove=true");
+            }
+            if (command.containsKey("new")) {
+                return CommandErrors.badValue("new is not allowed when remove=true");
+            }
+            if (command.containsKey("upsert")) {
+                return CommandErrors.badValue("upsert is not allowed when remove=true");
+            }
+        }
         if (!remove && (updateValue == null || !updateValue.isDocument())) {
             return CommandErrors.typeMismatch("update must be a document");
         }
