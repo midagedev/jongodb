@@ -34,6 +34,7 @@ import org.jongodb.wire.OpMsgCodec;
  */
 public final class TcpMongoServer implements AutoCloseable {
     private static final String DEFAULT_HOST = "127.0.0.1";
+    private static final int DEFAULT_PORT = 0;
     private static final int HEADER_LENGTH = 16;
     private static final int OP_REPLY_FIELDS_LENGTH = 20;
     private static final int OP_REPLY = 1;
@@ -53,15 +54,29 @@ public final class TcpMongoServer implements AutoCloseable {
         return new TcpMongoServer();
     }
 
+    public static TcpMongoServer inMemory(final String host, final int port) {
+        return new TcpMongoServer(host, port);
+    }
+
     public TcpMongoServer() {
-        this(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        this(new EngineBackedCommandStore(new InMemoryEngineStore()), DEFAULT_HOST, DEFAULT_PORT);
+    }
+
+    public TcpMongoServer(final String host, final int port) {
+        this(new EngineBackedCommandStore(new InMemoryEngineStore()), host, port);
     }
 
     public TcpMongoServer(final CommandStore commandStore) {
+        this(commandStore, DEFAULT_HOST, DEFAULT_PORT);
+    }
+
+    public TcpMongoServer(final CommandStore commandStore, final String host, final int port) {
         Objects.requireNonNull(commandStore, "commandStore");
+        final String normalizedHost = normalizeHost(host);
+        final int normalizedPort = normalizePort(port);
         this.dispatcher = new CommandDispatcher(commandStore);
-        this.host = DEFAULT_HOST;
-        this.serverSocket = newServerSocket(host);
+        this.host = normalizedHost;
+        this.serverSocket = newServerSocket(normalizedHost, normalizedPort);
         this.acceptThread = new Thread(this::acceptLoop, "jongodb-tcp-accept");
         this.acceptThread.setDaemon(true);
     }
@@ -106,11 +121,12 @@ public final class TcpMongoServer implements AutoCloseable {
         }
     }
 
-    private static ServerSocket newServerSocket(final String host) {
+    private static ServerSocket newServerSocket(final String host, final int port) {
         try {
-            return new ServerSocket(0, 50, InetAddress.getByName(host));
+            return new ServerSocket(port, 50, InetAddress.getByName(host));
         } catch (final IOException ioException) {
-            throw new IllegalStateException("failed to allocate TCP server socket", ioException);
+            throw new IllegalStateException(
+                    "failed to allocate TCP server socket host=" + host + " port=" + port, ioException);
         }
     }
 
@@ -314,5 +330,19 @@ public final class TcpMongoServer implements AutoCloseable {
             return "test";
         }
         return database.trim();
+    }
+
+    private static String normalizeHost(final String host) {
+        if (host == null || host.isBlank()) {
+            return DEFAULT_HOST;
+        }
+        return host.trim();
+    }
+
+    private static int normalizePort(final int port) {
+        if (port < 0 || port > 65535) {
+            throw new IllegalArgumentException("port must be between 0 and 65535: " + port);
+        }
+        return port;
     }
 }
