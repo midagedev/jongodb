@@ -11,6 +11,12 @@ signing:
   active: RELEASE
   pgp:
     armored: true
+    mode: COMMAND
+    command:
+      keyName: 80E58188D82E4E1C
+      args:
+        - --pinentry-mode
+        - loopback
 
 deploy:
   maven:
