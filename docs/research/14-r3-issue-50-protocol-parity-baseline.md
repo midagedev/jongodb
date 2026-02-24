@@ -1,6 +1,7 @@
 # R3 Issue #50: Protocol/Wire Parity Baseline
 
 Date: 2026-02-24
+Status: implemented and certified
 
 ## Objective
 
@@ -20,7 +21,7 @@ gradle r3FailureLedger \
 
 4. Inspect `build/reports/r3-failure-ledger/r3-failure-ledger.json`.
 
-## Baseline Result
+## Baseline Result (early local snapshot)
 
 - `failureCount`: 104
 - `byTrack`:
@@ -28,6 +29,15 @@ gradle r3FailureLedger \
   - `query_update`: 60
   - `protocol`: 0
   - `txn`: 0
+
+## Current Certification Snapshot
+
+From GitHub Actions run `22332937657` (`R3 Failure Ledger`):
+
+- `failureCount`: 0
+- `suiteCount`: 3
+- `byTrack`: empty
+- `byStatus`: empty
 
 ## Conclusion for Issue #50
 

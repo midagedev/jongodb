@@ -1,6 +1,7 @@
 # R3 Issue #58: External Canary Certification Flow
 
 Date: 2026-02-24
+Status: implemented and certified
 
 ## Objective
 
@@ -31,6 +32,10 @@ gradle r3CanaryCertificationEvidence \
 
 - `build/reports/r3-canary/r2-canary-certification.json`
 - `build/reports/r3-canary/r2-canary-certification.md`
+
+Certification reference:
+- GitHub Actions run `22332937633` (`R3 External Canary Certification`)
+- summary: `overallStatus=PASS`, `projectCount=3`, `rollbackSuccess=3`
 
 ## Notes
 

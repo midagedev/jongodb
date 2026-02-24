@@ -1,6 +1,7 @@
 # R3 Issue #53: Session/Transaction Baseline and Unsupported Surface
 
 Date: 2026-02-24
+Status: implemented baseline; advanced coverage intentionally partial
 
 ## Objective
 
@@ -29,6 +30,10 @@ gradle r3FailureLedger \
   - `error`: 0
   - `unsupported`: 396
   - `skipped`: 35
+
+Certification reference:
+- GitHub Actions run `22332937657` (`R3 Failure Ledger`)
+- artifact: `r3-failure-ledger/r3-failure-ledger.json`
 
 ## Conclusion for Issue #53
 

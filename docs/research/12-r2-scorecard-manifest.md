@@ -1,5 +1,7 @@
 # R2 Compatibility Scorecard + Support Manifest
 
+Status: active (still used for R3 release evidence composition).
+
 ## Purpose
 - Aggregate R2 readiness from UTF differential and Spring matrix evidence.
 - Publish a deterministic support manifest (`supported/partial/unsupported`) for release decisions.
@@ -28,3 +30,6 @@
 ## Notes
 - Missing artifacts are reported as `MISSING` gate status.
 - `--fail-on-gate` exits non-zero when any gate is `FAIL` or `MISSING`.
+- R3 certification documents still consume this generator output:
+  - `docs/SUPPORT_MATRIX.md`
+  - `docs/COMPATIBILITY_SCORECARD.md`

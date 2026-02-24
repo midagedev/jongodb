@@ -1,8 +1,13 @@
 # Compatibility Matrix
 
-Status date: 2026-02-23
+Status date: 2026-02-24
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
+
+Certification context:
+- final scorecard: `docs/COMPATIBILITY_SCORECARD.md`
+- support boundary: `docs/SUPPORT_MATRIX.md`
+- release sign-off checklist: `docs/RELEASE_CHECKLIST.md`
 
 ## Command-Level Compatibility
 

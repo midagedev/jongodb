@@ -14,3 +14,4 @@ Runtime and compatibility:
 
 Research and design notes:
 - `docs/research/README.md`
+- `docs/research/17-reference-implementation-status.md`

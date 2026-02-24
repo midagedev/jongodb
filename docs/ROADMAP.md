@@ -30,18 +30,6 @@ Completed:
 - R2 compatibility scorecard and support manifest generators
 - canary certification evidence aggregator (input-driven)
 
-## In Progress
-
-### R2 Parity Hardening
-
-Target outcomes:
-- increase query/expression parity depth
-- increase aggregation expression/operator depth
-- reduce unsupported coverage in high-frequency Spring usage paths
-
-Primary measure:
-- lower mismatch/error counts in UTF and real differential runs
-
 ## R3 Certification (Completed)
 
 Completed:
@@ -50,18 +38,26 @@ Completed:
 - external canary certification gate for 3 Spring projects
 - final scorecard/support manifest publication
 
-## Remaining Exit Criteria for R2 Sign-Off
+## Current Focus
 
-1. Run canary evidence with real project data for at least 3 Spring projects.
-2. Verify rollback rehearsal success for all canary projects.
-3. Run scorecard and canary gates in one CI pass with no FAIL/MISSING.
+### R4 Compatibility Expansion
 
-## Planned Next (Post-R2)
+Target outcomes:
+- reduce unsupported surface in official UTF suites
+- increase transaction/retry semantics coverage for supported scenario bands
+- increase Spring project cutover confidence on more app profiles
+
+Primary measures:
+- lower `unsupported` counts in UTF shard artifacts
+- preserve zero mismatch/error on imported differential cases
+- maintain green canary certification for at least 3 external projects
+
+## Planned Next
 
 - Expand collation semantics beyond metadata round-trip.
-- Implement TTL runtime behavior (not only index metadata).
-- Expand update/operator coverage.
-- Continue closing gaps against official spec suites.
+- Implement TTL runtime behavior beyond index metadata registration.
+- Expand update/operator coverage (`arrayFilters`, positional updates, pipeline updates).
+- Expand supported transaction operations in unified suites while preserving deterministic behavior.
 
 ## Out of Scope (Current Phase)
 

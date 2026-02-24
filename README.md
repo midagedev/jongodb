@@ -2,74 +2,23 @@
 
 `jongodb` is an in-memory MongoDB-compatible command engine for integration testing.
 
-The current implementation is focused on:
-- deterministic command handling
-- in-process wire command ingress (`OP_MSG`)
-- differential testing against real `mongod`
-- release-readiness evidence artifacts
+It is designed for fast, deterministic integration-test backends.
+It is not a production MongoDB replacement.
 
-It is not a full drop-in replacement for production MongoDB.
+Status snapshot (2026-02-24): active development with R3 certification evidence published.
 
-Status snapshot (2026-02-24): active development, R3 certification evidence published.
+## Use It / Do Not Use It
 
-## Compatibility Level (Current)
-
-This project targets integration-test compatibility for common Spring data paths.
-It does not target full MongoDB server parity.
-
-| Area | Current level | Notes |
-| --- | --- | --- |
-| Command surface | 16 command handlers implemented | Mix of `Supported` and `Partial` behaviors by command |
-| R2 support manifest | 7 `Supported`, 4 `Partial`, 1 `Unsupported` feature groups | Source: `R2CompatibilityScorecard` default manifest |
-| Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced expression/operator parity is incomplete |
-| Aggregation | Core stages + selected Tier-2 stages | Expression depth and many advanced operators are missing |
-| Transactions | Single-process session/transaction flow (`start`/`commit`/`abort`) | No distributed/replica-set semantics |
-| Wire protocol | `OP_MSG` in-process ingress | No external TCP server process |
-
-Recommended usage:
-- fast integration tests that need deterministic command behavior
-- Spring projects that use common CRUD and basic aggregation paths
-
-Not a fit yet:
-- full MongoDB compatibility requirements
-- heavy use of advanced update operators, collation semantics, or TTL runtime behavior
-
-## R3 Certification Snapshot (2026-02-24)
-
-| Gate | Result | Evidence |
-| --- | --- | --- |
-| Official UTF sharded differential | PASS | Run `22332998372` |
-| R3 failure ledger | PASS | Run `22332937657` |
-| External Spring canary certification | PASS | Run `22332937633` |
-| Compatibility scorecard | PASS | `docs/COMPATIBILITY_SCORECARD.md` |
-| Support boundary manifest | Published | `docs/SUPPORT_MATRIX.md` |
-
-Certification references:
-- `docs/COMPATIBILITY_SCORECARD.md`
-- `docs/SUPPORT_MATRIX.md`
-- `docs/RELEASE_CHECKLIST.md`
-
-## Scope
-
-Core packages:
-- `src/main/java/org/jongodb/command`: command handlers and dispatcher
-- `src/main/java/org/jongodb/engine`: in-memory storage/query/aggregation engine
-- `src/main/java/org/jongodb/server`: in-process wire command ingress
-- `src/main/java/org/jongodb/testkit`: differential harness and evidence generators
+| Decision | When |
+| --- | --- |
+| Use it | You want fast in-memory integration tests with deterministic behavior and in-process command/wire handling |
+| Use it | Your tests focus on common CRUD, basic aggregation, and single-process transaction flows |
+| Do not use it | You need full MongoDB feature parity or production-grade distributed behavior |
+| Do not use it | Your test harness strictly requires an external TCP MongoDB endpoint |
 
 ## Quick Start
 
-Requirements:
-- Java 17+
-- Gradle 8+ (this repository currently does not include `gradlew`)
-
-Run tests:
-
-```bash
-gradle test
-```
-
-Use the latest release from Maven Central in another project:
+### 1) Add dependency
 
 ```kotlin
 dependencies {
@@ -77,7 +26,9 @@ dependencies {
 }
 ```
 
-Use the command dispatcher directly:
+### 2) Pick integration mode
+
+Command API mode:
 
 ```java
 import org.bson.BsonDocument;
@@ -94,7 +45,7 @@ BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
 ));
 ```
 
-Use wire ingress (`OP_MSG`) in-process:
+Wire `OP_MSG` mode (in-process):
 
 ```java
 import org.bson.BsonDocument;
@@ -114,16 +65,71 @@ OpMsg response = codec.decode(ingress.handle(codec.encode(request)));
 System.out.println(response.body().toJson());
 ```
 
-## Command Support Snapshot
+### 3) Run tests
 
-Implemented command handlers:
+```bash
+gradle test
+```
+
+Requirements:
+- Java 17+
+- Gradle 8+
+- This repository currently does not include `gradlew`
+
+## Spring Integration Notes
+
+- `jongodb` is currently an in-process backend (no external TCP server process).
+- It is suitable when your test bootstrap can route command/wire messages in-process.
+- For tests that must connect through standard `mongodb://` endpoint semantics, keep a real/embedded `mongod` backend for that test profile.
+
+## Compatibility Snapshot (Current)
+
+This project targets integration-test compatibility for common Spring data paths.
+It does not target full MongoDB server parity.
+
+| Area | Current level | Notes |
+| --- | --- | --- |
+| Command surface | 17 command handlers implemented | Mix of `Supported` and `Partial` behaviors by command |
+| Support manifest | 7 `Supported`, 4 `Partial`, 1 `Unsupported` feature groups | Source: `docs/SUPPORT_MATRIX.md` |
+| Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced expression/operator parity is incomplete |
+| Aggregation | Core stages + selected Tier-2 stages | Expression depth and many advanced operators are missing |
+| Transactions | Single-process session/transaction flow (`start`/`commit`/`abort`) | No distributed/replica-set semantics |
+| Wire protocol | `OP_MSG` in-process ingress | No external TCP server process |
+
+Detailed boundaries:
+- `docs/COMPATIBILITY.md`
+- `docs/SUPPORT_MATRIX.md`
+
+## R3 Certification Snapshot (2026-02-24)
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Official UTF sharded differential | PASS | Run `22332998372` |
+| R3 failure ledger | PASS | Run `22332937657` |
+| External Spring canary certification | PASS | Run `22332937633` |
+| Compatibility scorecard | PASS | `docs/COMPATIBILITY_SCORECARD.md` |
+| Support boundary manifest | Published | `docs/SUPPORT_MATRIX.md` |
+
+Certification references:
+- `docs/COMPATIBILITY_SCORECARD.md`
+- `docs/SUPPORT_MATRIX.md`
+- `docs/RELEASE_CHECKLIST.md`
+
+## Migration Checklist (From mongo-java-server / Similar Backends)
+
+1. Replace test dependency with `io.github.midagedev:jongodb:<version>`.
+2. Switch test bootstrap to in-process command/wire mode.
+3. Run integration tests and classify failures:
+   - expected unsupported: `codeName=NotImplemented`, `errorLabels=["UnsupportedFeature"]`
+   - unexpected regression: behavior mismatch vs current baseline
+4. Keep a fallback profile for tests requiring unsupported features.
+
+## Implemented Command Handlers
+
 - `hello`, `isMaster`, `ping`, `buildInfo`, `getParameter`
 - `insert`, `find`, `aggregate`, `getMore`, `killCursors`
-- `createIndexes`, `listIndexes`, `update`, `delete`
+- `createIndexes`, `listIndexes`, `update`, `delete`, `findAndModify`
 - `commitTransaction`, `abortTransaction`
-
-Details:
-- `docs/COMPATIBILITY.md`
 
 ## Notable Limitations
 
@@ -139,16 +145,24 @@ Unsupported paths are increasingly standardized with:
 
 Coverage is still being expanded.
 
+## Scope
+
+Core packages:
+- `src/main/java/org/jongodb/command`: command handlers and dispatcher
+- `src/main/java/org/jongodb/engine`: in-memory storage/query/aggregation engine
+- `src/main/java/org/jongodb/server`: in-process wire command ingress
+- `src/main/java/org/jongodb/testkit`: differential harness and evidence generators
+
 ## Evidence Tasks
 
-Verification tasks (Gradle):
-- `gradle m3GateEvidence`
-- `gradle realMongodDifferentialBaseline -PrealMongodUri=<uri>`
+Key verification tasks:
 - `gradle springCompatibilityMatrixEvidence`
 - `gradle utfCorpusEvidence -PutfSpecRoot=<path> -PutfMongoUri=<uri>`
-- `gradle r2CompatibilityEvidence`
-- `gradle r2CanaryCertificationEvidence -Pr2CanaryInputJson=<path>`
-- `gradle finalReadinessEvidence`
+- `gradle r3FailureLedger -Pr3SpecRepoRoot=<path> -Pr3FailureLedgerMongoUri=<uri> -Pr3FailureLedgerFailOnFailures=true`
+- `gradle r3CanaryCertificationEvidence -Pr3CanaryInputJson=<path>`
+
+Full task list and artifact paths:
+- `docs/USAGE.md`
 
 ## Maven Central Publishing
 

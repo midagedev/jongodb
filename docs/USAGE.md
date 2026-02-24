@@ -66,6 +66,11 @@ OpMsg res = codec.decode(ingress.handle(codec.encode(req)));
 
 ## Verification and Evidence Tasks
 
+Current certified reference runs (2026-02-24):
+- Official Suite Sharded: `22332998372`
+- R3 Failure Ledger: `22332937657`
+- R3 External Canary Certification: `22332937633`
+
 Run differential baseline against real MongoDB:
 
 ```bash
@@ -122,6 +127,10 @@ Run R3 external canary certification from canary result JSON:
 gradle r3CanaryCertificationEvidence \
   -Pr3CanaryInputJson="testkit/canary/r3/projects.sample.json"
 ```
+
+Note:
+- `r3CanaryCertificationEvidence` currently reuses `R2CanaryCertification` output naming.
+- Artifact file names are still `r2-canary-certification.json/.md` under the `r3-canary` directory.
 
 Run final readiness aggregation:
 
@@ -187,7 +196,7 @@ GitHub Actions workflow:
 
 ## Canary Input Format
 
-`r2CanaryCertificationEvidence` expects a JSON file with this shape:
+`r2CanaryCertificationEvidence` and `r3CanaryCertificationEvidence` expect a JSON file with this shape:
 
 ```json
 {

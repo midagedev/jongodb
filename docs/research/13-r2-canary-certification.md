@@ -1,5 +1,7 @@
 # R2 External Spring Canary Certification
 
+Status: active (logic reused by R3 canary certification task).
+
 ## Purpose
 - Validate practical replacement readiness on real Spring projects.
 - Enforce minimum project count and rollback rehearsal success.
@@ -35,3 +37,5 @@
 ## Notes
 - This generator evaluates provided project results; it does not execute projects itself.
 - Use it as the final evidence pack validator before R2 sign-off.
+- R3 task `r3CanaryCertificationEvidence` reuses this generator and writes output under
+  `build/reports/r3-canary/` with the same file names (`r2-canary-certification.json/.md`).
