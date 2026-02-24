@@ -190,13 +190,13 @@ jobs:
           fi
 
       - name: npm publish dry-run
-        run: npm publish "${{ matrix.workspace_dir }}" --access public --provenance --dry-run
+        run: npm publish "./${{ matrix.workspace_dir }}" --access public --provenance --dry-run
 
       - name: npm publish
         if: needs.meta.outputs.should_publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish "${{ matrix.workspace_dir }}" --access public --provenance
+        run: npm publish "./${{ matrix.workspace_dir }}" --access public --provenance
 
   publish-core:
     name: Publish @jongodb/memory-server
