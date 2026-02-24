@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const args = parseArgs(process.argv.slice(2));
@@ -25,14 +25,70 @@ const nativeImageArgs = [
 
 console.log(`[native-image] output=${output}`);
 console.log(`[native-image] mainClass=${mainClass}`);
+console.log(`[native-image] classpathLength=${classpath.length}`);
 
-const nativeImage = spawnSync("native-image", nativeImageArgs, {
-  stdio: "inherit",
-  shell: false,
-});
+const nativeImage = runNativeImage(nativeImageArgs);
+
+if (nativeImage.error !== undefined) {
+  console.error(`[native-image] failed to start: ${nativeImage.error.message}`);
+  if (nativeImage.error.code === "ENOENT") {
+    console.error(
+      "[native-image] command not found. Ensure GraalVM native-image is installed and available on PATH."
+    );
+    console.error(`[native-image] GRAALVM_HOME=${process.env.GRAALVM_HOME ?? "<unset>"}`);
+    console.error(`[native-image] JAVA_HOME=${process.env.JAVA_HOME ?? "<unset>"}`);
+  }
+  process.exit(1);
+}
 
 if (nativeImage.status !== 0) {
   process.exit(nativeImage.status ?? 1);
+}
+
+function runNativeImage(nativeImageArgs) {
+  let lastEnoentResult = null;
+  for (const command of resolveNativeImageCommands()) {
+    console.log(`[native-image] command=${command}`);
+    const result = spawnSync(command, nativeImageArgs, {
+      stdio: "inherit",
+      shell: false,
+    });
+    if (result.error?.code === "ENOENT") {
+      lastEnoentResult = result;
+      continue;
+    }
+    return result;
+  }
+  if (lastEnoentResult !== null) {
+    return lastEnoentResult;
+  }
+  return spawnSync("native-image", nativeImageArgs, {
+    stdio: "inherit",
+    shell: false,
+  });
+}
+
+function resolveNativeImageCommands() {
+  const candidates = [];
+  if (process.platform === "win32") {
+    pushIfExists(candidates, process.env.GRAALVM_HOME, "native-image.cmd");
+    pushIfExists(candidates, process.env.JAVA_HOME, "native-image.cmd");
+  } else {
+    pushIfExists(candidates, process.env.GRAALVM_HOME, "native-image");
+    pushIfExists(candidates, process.env.JAVA_HOME, "native-image");
+  }
+  candidates.push("native-image");
+  return [...new Set(candidates)];
+}
+
+function pushIfExists(candidates, home, binaryName) {
+  if (typeof home !== "string" || home.trim().length === 0) {
+    return;
+  }
+  const candidate = join(home, "bin", binaryName);
+  if (existsSync(candidate)) {
+    candidates.push(candidate);
+  }
 }
 
 function resolveClasspathFromGradle(gradleCmd) {
