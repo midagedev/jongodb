@@ -322,6 +322,15 @@ tasks.register<JavaExec>("r2CompatibilityEvidence") {
     )
 }
 
+tasks.register("printLauncherClasspath") {
+    group = "help"
+    description = "Prints the runtime classpath required for TcpMongoServerLauncher."
+    dependsOn("classes")
+    doLast {
+        println(sourceSets["main"].runtimeClasspath.asPath)
+    }
+}
+
 tasks.register<JavaExec>("r2CanaryCertificationEvidence") {
     group = "verification"
     description = "Generates R2 canary certification artifacts from project canary results."

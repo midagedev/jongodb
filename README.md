@@ -111,8 +111,11 @@ Node.js adapter work is tracked in issue `#106` and lives under `packages/memory
 
 Current state:
 - package scaffold exists (`@jongodb/memory-server`)
-- runtime process manager is in progress (`#108`)
+- runtime process manager is implemented (`#108`)
 - Jest/Vitest helpers and compatibility smoke suites are planned (`#109`, `#110`)
+
+Node runtime note:
+- provide Java classpath via `classpath` option or `JONGODB_CLASSPATH`
 
 ## Transaction Contract (Current)
 

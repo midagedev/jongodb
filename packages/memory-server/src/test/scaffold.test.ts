@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { startJongodbMemoryServer } from "../index.js";
 
-test("startJongodbMemoryServer is scaffolded and explicitly not implemented", async () => {
+test("startJongodbMemoryServer fails fast when classpath is missing", async () => {
   await assert.rejects(async () => {
     await startJongodbMemoryServer();
-  }, /not implemented/i);
+  }, /classpath/i);
 });
