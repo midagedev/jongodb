@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "sourceRepoUrl": "https://github.com/mongodb/specifications.git",
+  "pinnedCommit": "99704fa8860777da1d919ef765af1e41e75f5859",
+  "generatedAtUtc": "2026-02-24T01:02:06Z",
+  "checkoutDir": "third_party/mongodb-specs/.checkout/specifications",
+  "includedSuiteRoots": [
+    "source/transactions/tests/unified",
+    "source/sessions/tests",
+    "source/crud/tests/unified",
+    "source/unified-test-format"
+  ]
+}
