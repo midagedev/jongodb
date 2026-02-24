@@ -2,10 +2,19 @@
 
 `jongodb` is an in-memory MongoDB-compatible command engine for integration testing.
 
+In-memory MongoDB-compatible test engine for Spring Boot integration tests.
+Practical alternative to MongoDB Testcontainers when fast deterministic test runs are required.
+
 It is designed for fast, deterministic integration-test backends.
 It is not a production MongoDB replacement.
 
 Status snapshot (2026-02-24): active development with R3 certification evidence published.
+
+Search terms:
+- in-memory MongoDB for Spring Boot tests
+- MongoDB Testcontainers alternative
+- embedded MongoDB replacement for integration tests
+- MongoDB-compatible wire protocol test backend
 
 ## Use It / Do Not Use It
 
