@@ -405,6 +405,258 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsRunCommandSubsetAndExecutesThroughWireBackend() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-command.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "runCommand subset",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [
+                          {"_id": 1, "active": true},
+                          {"_id": 2, "active": false}
+                        ]}},
+                        {"name": "runCommand", "arguments": {"command": {"count": "users", "query": {"active": true}}}},
+                        {"name": "runCommand", "arguments": {"command": {"ping": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        assertEquals("count", scenario.commands().get(1).commandName());
+        assertEquals("users", scenario.commands().get(1).payload().get("commandValue"));
+        assertEquals("ping", scenario.commands().get(2).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> countResult = outcome.commandResults().get(1);
+        assertEquals(1L, ((Number) countResult.get("n")).longValue());
+        assertEquals(1L, ((Number) countResult.get("count")).longValue());
+        final Map<String, Object> pingResult = outcome.commandResults().get(2);
+        assertEquals(1.0, ((Number) pingResult.get("ok")).doubleValue());
+    }
+
+    @Test
+    void importsRunCommandBuildInfoAndListIndexesSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-command-buildinfo-listindexes.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "runCommand buildInfo and listIndexes subset",
+                      "operations": [
+                        {"name": "createIndex", "arguments": {"key": {"name": 1}, "name": "name_1"}},
+                        {"name": "runCommand", "arguments": {"command": {"buildInfo": 1}}},
+                        {"name": "runCommand", "arguments": {"command": {"listIndexes": "users"}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        assertEquals("buildInfo", scenario.commands().get(1).commandName());
+        assertEquals("listIndexes", scenario.commands().get(2).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> buildInfoResult = outcome.commandResults().get(1);
+        assertEquals(1.0, ((Number) buildInfoResult.get("ok")).doubleValue());
+        assertTrue(outcome.commandResults().get(2).containsKey("cursor"));
+    }
+
+    @Test
+    void marksUnsupportedRunCommandNameAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-command-unsupported.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "runCommand unsupported command",
+                      "operations": [
+                        {"name": "runCommand", "arguments": {"command": {"replSetGetStatus": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF runCommand command")));
+    }
+
+    @Test
+    void importsClientBulkWriteAndExecutesThroughWireBackend() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite subset",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"models": [
+                          {"insertOne": {"namespace": "app.users", "document": {"_id": 1, "name": "alpha"}}},
+                          {"updateOne": {"namespace": "app.users", "filter": {"_id": 1}, "update": {"$set": {"name": "beta"}}}}
+                        ]}},
+                        {"name": "countDocuments", "arguments": {"filter": {}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        assertEquals("users", scenario.commands().get(0).payload().get("bulkWrite"));
+        assertEquals("app", scenario.commands().get(0).payload().get("$db"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> countResult = outcome.commandResults().get(1);
+        assertEquals(1L, ((Number) countResult.get("n")).longValue());
+        assertEquals(1L, ((Number) countResult.get("count")).longValue());
+    }
+
+    @Test
+    void marksClientBulkWriteMixedNamespacesAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-mixed-ns.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite mixed namespace",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"models": [
+                          {"insertOne": {"namespace": "app.users", "document": {"_id": 1}}},
+                          {"insertOne": {"namespace": "app.audit", "document": {"_id": 2}}}
+                        ]}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF clientBulkWrite mixed namespaces")));
+    }
+
+    @Test
+    void marksClientBulkWriteOrderedFalseAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-unordered.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite ordered false",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"ordered": false, "models": [
+                          {"insertOne": {"namespace": "app.users", "document": {"_id": 1}}}
+                        ]}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF clientBulkWrite option: ordered=false")));
+    }
+
+    @Test
+    void marksClientBulkWriteVerboseResultsAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-verbose-results.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite verboseResults true",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"verboseResults": true, "models": [
+                          {"insertOne": {"namespace": "app.users", "document": {"_id": 1}}}
+                        ]}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF clientBulkWrite option: verboseResults=true")));
+    }
+
+    @Test
     void importsCountAliasWithQueryAndExecutesThroughWireBackend() throws IOException {
         Files.writeString(
                 tempDir.resolve("count-alias-integration.json"),

@@ -23,6 +23,11 @@ public final class UnifiedSpecImporter {
     private static final String EXT_JSON = ".json";
     private static final String EXT_YAML = ".yaml";
     private static final String EXT_YML = ".yml";
+    private static final Map<String, String> SUPPORTED_RUN_COMMANDS = Map.of(
+            "ping", "ping",
+            "buildinfo", "buildInfo",
+            "listindexes", "listIndexes",
+            "count", "count");
 
     private final Yaml yaml;
 
@@ -229,7 +234,9 @@ public final class UnifiedSpecImporter {
             case "findOneAndUpdate" -> findOneAndUpdate(arguments, database, collection);
             case "findOneAndReplace" -> findOneAndReplace(arguments, database, collection);
             case "bulkWrite" -> bulkWrite(arguments, database, collection);
+            case "clientBulkWrite" -> clientBulkWrite(arguments, database, collection);
             case "createIndex" -> createIndex(arguments, database, collection);
+            case "runCommand" -> runCommand(arguments, database);
             default -> throw new UnsupportedOperationException("unsupported UTF operation: " + operationName);
         };
     }
@@ -655,6 +662,121 @@ public final class UnifiedSpecImporter {
         final Map<String, Object> payload = commandEnvelope("createIndexes", database, collection);
         payload.put("indexes", List.of(immutableMap(indexEntry)));
         return new ScenarioCommand("createIndexes", immutableMap(payload));
+    }
+
+    private static ScenarioCommand runCommand(final Map<String, Object> arguments, final String database) {
+        final Object commandValue = arguments.containsKey("command")
+                ? arguments.get("command")
+                : arguments.get("document");
+        final Map<String, Object> commandDocument = asStringObjectMap(commandValue, "runCommand.arguments.command");
+        if (commandDocument.isEmpty()) {
+            throw new IllegalArgumentException("runCommand.arguments.command must not be empty");
+        }
+
+        final String commandName = requireText(commandDocument.keySet().iterator().next(), "runCommand command name");
+        final String normalizedCommandName = commandName.toLowerCase(Locale.ROOT);
+        final String canonicalCommandName = SUPPORTED_RUN_COMMANDS.get(normalizedCommandName);
+        if (canonicalCommandName == null) {
+            throw new UnsupportedOperationException("unsupported UTF runCommand command: " + commandName);
+        }
+
+        final Object commandPayload = commandDocument.get(commandName);
+        final Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("commandValue", deepCopyValue(commandPayload == null ? 1 : commandPayload));
+        payload.put("$db", database);
+        for (final Map.Entry<String, Object> entry : commandDocument.entrySet()) {
+            if (entry.getKey().equals(commandName) || "$db".equals(entry.getKey())) {
+                continue;
+            }
+            payload.put(entry.getKey(), deepCopyValue(entry.getValue()));
+        }
+        return new ScenarioCommand(canonicalCommandName, immutableMap(payload));
+    }
+
+    private static ScenarioCommand clientBulkWrite(
+            final Map<String, Object> arguments,
+            final String defaultDatabase,
+            final String defaultCollection) {
+        final Object orderedValue = arguments.get("ordered");
+        if (orderedValue != null && !(orderedValue instanceof Boolean)) {
+            throw new IllegalArgumentException("clientBulkWrite.arguments.ordered must be a boolean");
+        }
+        if (Boolean.FALSE.equals(orderedValue)) {
+            throw new UnsupportedOperationException("unsupported UTF clientBulkWrite option: ordered=false");
+        }
+        if (Boolean.TRUE.equals(arguments.get("verboseResults"))) {
+            throw new UnsupportedOperationException("unsupported UTF clientBulkWrite option: verboseResults=true");
+        }
+
+        final Object modelsValue = arguments.containsKey("models")
+                ? arguments.get("models")
+                : arguments.containsKey("operations")
+                        ? arguments.get("operations")
+                        : arguments.get("requests");
+        final List<Object> models = asList(modelsValue, "clientBulkWrite.arguments.models");
+        if (models.isEmpty()) {
+            throw new IllegalArgumentException("clientBulkWrite.arguments.models must not be empty");
+        }
+
+        CollectionTarget namespace = null;
+        final List<Object> requests = new ArrayList<>(models.size());
+        for (final Object model : models) {
+            final Map<String, Object> requestDocument = asStringObjectMap(model, "clientBulkWrite model");
+            if (requestDocument.size() != 1) {
+                throw new IllegalArgumentException("clientBulkWrite model must contain exactly one operation");
+            }
+
+            final String operationName = requestDocument.keySet().iterator().next();
+            final Map<String, Object> operationArguments = asStringObjectMap(
+                    requestDocument.get(operationName),
+                    "clientBulkWrite model operation arguments");
+
+            final CollectionTarget currentNamespace = readClientBulkWriteNamespace(
+                    operationArguments,
+                    defaultDatabase,
+                    defaultCollection);
+            if (namespace == null) {
+                namespace = currentNamespace;
+            } else if (!namespace.equals(currentNamespace)) {
+                throw new UnsupportedOperationException("unsupported UTF clientBulkWrite mixed namespaces");
+            }
+
+            final Map<String, Object> normalizedOperation = new LinkedHashMap<>(operationArguments);
+            normalizedOperation.remove("namespace");
+            normalizedOperation.remove("ns");
+            requests.add(immutableMap(Map.of(operationName, deepCopyValue(normalizedOperation))));
+        }
+
+        final CollectionTarget resolved = namespace == null
+                ? new CollectionTarget(defaultDatabase, defaultCollection)
+                : namespace;
+        final Map<String, Object> bulkWriteArguments = new LinkedHashMap<>();
+        bulkWriteArguments.put("ordered", true);
+        bulkWriteArguments.put("requests", List.copyOf(requests));
+        return bulkWrite(bulkWriteArguments, resolved.database(), resolved.collection());
+    }
+
+    private static CollectionTarget readClientBulkWriteNamespace(
+            final Map<String, Object> operationArguments,
+            final String defaultDatabase,
+            final String defaultCollection) {
+        final String namespace = firstNonBlank(
+                trimToEmpty(operationArguments.get("namespace")),
+                trimToEmpty(operationArguments.get("ns")));
+        if (namespace == null) {
+            return new CollectionTarget(defaultDatabase, defaultCollection);
+        }
+
+        final int delimiter = namespace.indexOf('.');
+        if (delimiter <= 0 || delimiter >= namespace.length() - 1) {
+            throw new IllegalArgumentException("clientBulkWrite namespace must be '<db>.<collection>'");
+        }
+        final String database = namespace.substring(0, delimiter).trim();
+        final String collection = namespace.substring(delimiter + 1).trim();
+        if (database.isEmpty() || collection.isEmpty()) {
+            throw new IllegalArgumentException("clientBulkWrite namespace must be '<db>.<collection>'");
+        }
+        return new CollectionTarget(database, collection);
     }
 
     private static String defaultIndexName(final Map<String, Object> key) {

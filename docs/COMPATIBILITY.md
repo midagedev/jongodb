@@ -27,7 +27,10 @@ Certification context:
 | `update` | Partial | Operator set intentionally limited |
 | `delete` | Supported | `limit` 0/1 behavior |
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
+| `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
+| `count` | Partial | Alias path routed through `countDocuments` semantics in the test-backend profile |
 | `countDocuments` | Partial | Filter + skip/limit + hint/collation/readConcern shape validation |
+| `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `count`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; operator updates only; supports projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
@@ -99,7 +102,9 @@ differential parity counts:
 
 - unordered `insertMany` (`ordered=false`)
 - unordered `bulkWrite` (`ordered=false`)
+- `clientBulkWrite` with mixed namespaces, `ordered=false`, or `verboseResults=true`
 - documents containing dot or dollar-prefixed field paths in insert payloads
+- `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `count`)
 - update operations using `arrayFilters`
 - update pipeline form (`u` as an array pipeline)
 - replacement updates requested with `multi=true`
