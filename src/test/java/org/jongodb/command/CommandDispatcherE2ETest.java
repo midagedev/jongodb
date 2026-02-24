@@ -202,6 +202,10 @@ class CommandDispatcherE2ETest {
         assertEquals(1L, response.getInt64("n").getValue());
         assertEquals(1L, response.getInt64("count").getValue());
         assertEquals("member", store.lastFindFilter.getString("role").getValue());
+
+        final BsonDocument mixedCase = dispatcher.dispatch(BsonDocument.parse(
+                "{\"Count\":\"users\",\"$db\":\"app\",\"query\":{\"role\":\"member\"}}"));
+        assertEquals(1.0, mixedCase.get("ok").asNumber().doubleValue());
     }
 
     @Test
