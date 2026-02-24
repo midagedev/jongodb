@@ -102,11 +102,18 @@ export function createJestGlobalTeardown(
     const { stateFile } = splitLifecycleOptions(options);
     const state = await readJestGlobalState({ stateFile });
     if (state === null) {
+      await rm(stateFile, { force: true });
       return;
     }
 
-    await terminatePid(state.pid, options.killTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS);
-    await rm(stateFile, { force: true });
+    try {
+      await terminatePid(
+        state.pid,
+        options.killTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS
+      );
+    } finally {
+      await rm(stateFile, { force: true });
+    }
   };
 }
 
@@ -197,6 +204,13 @@ async function terminatePid(pid: number, timeoutMs: number): Promise<void> {
   }
 
   process.kill(pid, "SIGKILL");
+  await waitForProcessExit(pid, timeoutMs);
+
+  if (isProcessRunning(pid)) {
+    throw new Error(
+      `Unable to stop detached Jest process pid=${pid} after SIGKILL.`
+    );
+  }
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -233,4 +247,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessRunning(pid)) {
+      return;
+    }
+    await sleep(50);
+  }
 }
