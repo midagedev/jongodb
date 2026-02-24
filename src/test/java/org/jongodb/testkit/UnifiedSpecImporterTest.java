@@ -946,6 +946,32 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void strictProfileMarksTargetedFailPointAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("targeted-failpoint-strict.yml"),
+                """
+                tests:
+                  - description: targeted failpoint strict profile
+                    operations:
+                      - object: testRunner
+                        name: targetedFailPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: off
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF operation: targetedFailPoint")));
+    }
+
+    @Test
     void compatProfileImportsFailPointDisableOperationsAsNoop() throws IOException {
         Files.writeString(
                 tempDir.resolve("failpoint-compat.yml"),
