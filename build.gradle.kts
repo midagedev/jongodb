@@ -33,9 +33,13 @@ dependencies {
     api("org.mongodb:bson:4.11.2")
     implementation("org.mongodb:mongodb-driver-sync:4.11.2")
     implementation("org.yaml:snakeyaml:2.2")
+    compileOnly("org.springframework:spring-context:6.1.17")
+    compileOnly("org.springframework:spring-test:6.1.17")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.springframework:spring-context:6.1.17")
+    testImplementation("org.springframework:spring-test:6.1.17")
 }
 
 jreleaser {

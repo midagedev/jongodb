@@ -6,6 +6,7 @@ Top-level documentation:
 
 Runtime and compatibility:
 - `docs/USAGE.md`
+- `docs/SPRING_TESTING.md`
 - `docs/COMPATIBILITY.md`
 - `docs/COMPATIBILITY_SCORECARD.md`
 - `docs/SUPPORT_MATRIX.md`

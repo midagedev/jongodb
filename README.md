@@ -82,6 +82,30 @@ Requirements:
 - It is suitable when your test bootstrap can route command/wire messages in-process.
 - For tests that must connect through standard `mongodb://` endpoint semantics, keep a real/embedded `mongod` backend for that test profile.
 
+### Spring Boot Test Setup (Initializer)
+
+```java
+@SpringBootTest
+@ContextConfiguration(initializers = JongodbMongoInitializer.class)
+class MyIntegrationTest {
+}
+```
+
+### Spring Boot Test Setup (DynamicPropertySource)
+
+```java
+@SpringBootTest
+class MyIntegrationTest {
+  @DynamicPropertySource
+  static void mongoProps(DynamicPropertyRegistry registry) {
+    JongodbMongoDynamicPropertySupport.register(registry);
+  }
+}
+```
+
+See full migration guidance:
+- `docs/SPRING_TESTING.md`
+
 ## Compatibility Snapshot (Current)
 
 This project targets integration-test compatibility for common Spring data paths.
@@ -192,6 +216,7 @@ GitHub Actions workflow:
 ## Documentation
 
 - Usage: `docs/USAGE.md`
+- Spring test integration: `docs/SPRING_TESTING.md`
 - Compatibility matrix: `docs/COMPATIBILITY.md`
 - Compatibility scorecard: `docs/COMPATIBILITY_SCORECARD.md`
 - Support matrix: `docs/SUPPORT_MATRIX.md`
