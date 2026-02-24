@@ -207,9 +207,9 @@ class CommandDispatcherE2ETest {
     void distinctCommandCallsStoreAndReturnsUniqueValues() {
         final RecordingStore store = new RecordingStore();
         store.findResult = List.of(
-                BsonDocument.parse("{\"_id\":1,\"tag\":\"a\",\"tags\":[\"x\",\"y\"]}"),
-                BsonDocument.parse("{\"_id\":2,\"tag\":\"b\",\"tags\":[\"y\",\"z\"]}"),
-                BsonDocument.parse("{\"_id\":3,\"tag\":\"a\",\"tags\":[\"x\"]}"));
+                BsonDocument.parse("{\"_id\":1,\"tag\":\"a\",\"tags\":[\"x\",\"y\"],\"profile\":{\"role\":\"admin\"}}"),
+                BsonDocument.parse("{\"_id\":2,\"tag\":\"b\",\"tags\":[\"y\",\"z\"],\"profile\":{\"role\":\"member\"}}"),
+                BsonDocument.parse("{\"_id\":3,\"tag\":\"a\",\"tags\":[\"x\"],\"profile\":{\"role\":\"admin\"}}"));
         final CommandDispatcher dispatcher = new CommandDispatcher(store);
 
         final BsonDocument scalarResponse = dispatcher.dispatch(BsonDocument.parse(
@@ -226,6 +226,13 @@ class CommandDispatcherE2ETest {
         assertEquals("x", arrayResponse.getArray("values").get(0).asString().getValue());
         assertEquals("y", arrayResponse.getArray("values").get(1).asString().getValue());
         assertEquals("z", arrayResponse.getArray("values").get(2).asString().getValue());
+
+        final BsonDocument nestedResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"profile.role\",\"query\":{}}"));
+        assertEquals(1.0, nestedResponse.get("ok").asNumber().doubleValue());
+        assertEquals(2, nestedResponse.getArray("values").size());
+        assertEquals("admin", nestedResponse.getArray("values").get(0).asString().getValue());
+        assertEquals("member", nestedResponse.getArray("values").get(1).asString().getValue());
     }
 
     @Test
