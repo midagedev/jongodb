@@ -64,6 +64,8 @@ Not implemented or partial:
 - many advanced expression operators are still missing
 - `$group` accumulators other than `$sum` are not available
 - `$unwind.includeArrayIndex` is not available
+- `$out`, `$merge`, `$listLocalSessions` stages are excluded from current differential corpus
+- `bypassDocumentValidation` for aggregate is excluded from current differential corpus
 
 ## Update Semantics
 
