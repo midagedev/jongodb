@@ -201,15 +201,11 @@ Full task list and artifact paths:
 
 This repository is configured for Maven Central publishing through Central Publisher Portal.
 
-Local release command:
-
-```bash
-gradle \
-  -PpublishVersion=0.1.0 \
-  -PpublishGroup=io.github.midagedev \
-  -PpublishArtifactId=jongodb \
-  centralRelease
-```
+Release flow (recommended):
+1. Push a version tag: `vX.Y.Z`
+2. GitHub Actions runs `.github/workflows/maven-central-release.yml`
+3. The workflow publishes to Maven Central if the version is not already published
+4. The workflow creates a GitHub Release with generated notes
 
 Required environment variables for release:
 - `JRELEASER_GITHUB_TOKEN`
@@ -219,8 +215,14 @@ Required environment variables for release:
 - `JRELEASER_GPG_SECRET_KEY`
 - `JRELEASER_GPG_PASSPHRASE`
 
-GitHub Actions workflow:
-- `.github/workflows/maven-central-release.yml` (manual `workflow_dispatch`)
+Manual fallback:
+- Trigger `.github/workflows/maven-central-release.yml` with `workflow_dispatch`
+- This path publishes directly from provided version/group/artifact inputs
+
+First release:
+- version: `0.1.0` (2026-02-24)
+- Maven coordinate: `io.github.midagedev:jongodb:0.1.0`
+- Maven URL: `https://repo1.maven.org/maven2/io/github/midagedev/jongodb/0.1.0/`
 
 ## Documentation
 
@@ -230,6 +232,7 @@ GitHub Actions workflow:
 - Compatibility scorecard: `docs/COMPATIBILITY_SCORECARD.md`
 - Support matrix: `docs/SUPPORT_MATRIX.md`
 - Release checklist: `docs/RELEASE_CHECKLIST.md`
+- Changelog: `CHANGELOG.md`
 - Roadmap: `docs/ROADMAP.md`
 - Contribution guide: `CONTRIBUTING.md`
 - Research notes: `docs/research/README.md`

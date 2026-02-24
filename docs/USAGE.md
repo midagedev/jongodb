@@ -182,15 +182,11 @@ gradle finalReadinessEvidence
 
 This project publishes through Central Publisher Portal via JReleaser.
 
-Release command:
-
-```bash
-gradle \
-  -PpublishVersion=0.1.0 \
-  -PpublishGroup=io.github.midagedev \
-  -PpublishArtifactId=jongodb \
-  centralRelease
-```
+Recommended release path:
+1. Push a tag with semantic version format: `vX.Y.Z`
+2. Workflow `.github/workflows/maven-central-release.yml` resolves version from the tag
+3. If that version is not published yet, it runs `centralRelease`
+4. It then creates a GitHub Release with generated notes
 
 What `centralRelease` does:
 - publish `mavenJava` artifacts to `build/staging-deploy`
@@ -206,6 +202,16 @@ Required environment variables:
 
 GitHub Actions workflow:
 - `.github/workflows/maven-central-release.yml`
+
+Manual fallback command:
+
+```bash
+gradle \
+  -PpublishVersion=0.1.0 \
+  -PpublishGroup=io.github.midagedev \
+  -PpublishArtifactId=jongodb \
+  centralRelease
+```
 
 ## Artifact Paths (Defaults)
 

@@ -17,39 +17,87 @@ on:
         required: false
         default: "jongodb"
         type: string
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publish:
     name: Publish to Maven Central
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      DEFAULT_GROUP: io.github.midagedev
+      DEFAULT_ARTIFACT: jongodb
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate version input
+      - name: Resolve release metadata
+        id: meta
         shell: bash
         run: |
-          if [[ "${{ inputs.version }}" == *"-SNAPSHOT" ]]; then
-            echo "Release version must not be a SNAPSHOT: ${{ inputs.version }}"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            GROUP="${DEFAULT_GROUP}"
+            ARTIFACT="${DEFAULT_ARTIFACT}"
+          else
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+            GROUP="${{ inputs.group }}"
+            ARTIFACT="${{ inputs.artifact }}"
+          fi
+
+          if [[ -z "$VERSION" ]]; then
+            echo "Release version is empty."
             exit 1
           fi
 
+          if [[ "$VERSION" == *"-SNAPSHOT" ]]; then
+            echo "Release version must not be a SNAPSHOT: $VERSION"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "group=$GROUP" >> "$GITHUB_OUTPUT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing Maven Central publication
+        id: published
+        shell: bash
+        run: |
+          GROUP_PATH="${{ steps.meta.outputs.group }}"
+          GROUP_PATH="${GROUP_PATH//./\/}"
+          POM_URL="https://repo1.maven.org/maven2/${GROUP_PATH}/${{ steps.meta.outputs.artifact }}/${{ steps.meta.outputs.version }}/${{ steps.meta.outputs.artifact }}-${{ steps.meta.outputs.version }}.pom"
+
+          if curl --silent --fail --head "$POM_URL" >/dev/null; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "Version already published: $POM_URL"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "Version not published yet: $POM_URL"
+          fi
+
       - name: Set up Temurin 17
+        if: steps.published.outputs.published != 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle
+        if: steps.published.outputs.published != 'true'
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
 
       - name: Import GPG keys
+        if: steps.published.outputs.published != 'true'
         env:
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
           JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
@@ -67,6 +115,7 @@ jobs:
           echo "JRELEASER_GPG_HOMEDIR=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Stage and deploy
+        if: steps.published.outputs.published != 'true'
         env:
           JRELEASER_GITHUB_TOKEN: ${{ github.token }}
           JRELEASER_MAVENCENTRAL_APP_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
@@ -76,16 +125,59 @@ jobs:
           JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           gradle --no-daemon --stacktrace \
-            -PpublishVersion="${{ inputs.version }}" \
-            -PpublishGroup="${{ inputs.group }}" \
-            -PpublishArtifactId="${{ inputs.artifact }}" \
+            -PpublishVersion="${{ steps.meta.outputs.version }}" \
+            -PpublishGroup="${{ steps.meta.outputs.group }}" \
+            -PpublishArtifactId="${{ steps.meta.outputs.artifact }}" \
             centralRelease
 
       - name: Upload staged artifacts
-        if: always()
+        if: always() && steps.published.outputs.published != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: maven-staging
           path: build/staging-deploy/**
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          GROUP: ${{ steps.meta.outputs.group }}
+          ARTIFACT: ${{ steps.meta.outputs.artifact }}
+          PUBLISHED: ${{ steps.published.outputs.published }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub release already exists for $TAG. Skipping creation."
+            exit 0
+          fi
+
+          EXTRA_NOTES=$(cat <<EOF
+          ## Maven Central
+          - Coordinate: \`$GROUP:$ARTIFACT:$VERSION\`
+          - Artifact URL: https://repo1.maven.org/maven2/${GROUP//./\/}/$ARTIFACT/$VERSION/
+          EOF
+          )
+
+          if [[ "$VERSION" == "0.1.0" ]]; then
+            EXTRA_NOTES="${EXTRA_NOTES}
+
+          ## Release Type
+          - Initial public release."
+          fi
+
+          if [[ "$PUBLISHED" == "true" ]]; then
+            EXTRA_NOTES="${EXTRA_NOTES}
+
+          ## Publish Step
+          - Maven Central publish step was skipped because this version already exists."
+          fi
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes \
+            --notes "$EXTRA_NOTES"
