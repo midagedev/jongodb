@@ -33,6 +33,46 @@ dependencies {
 
 If you need command-level integration without sockets, instantiate `WireCommandIngress` in your test bootstrap and route BSON commands through `OpMsgCodec`.
 
+## Spring Boot Test Integration
+
+### Option A: `ApplicationContextInitializer`
+
+Use `JongodbMongoInitializer` when your tests already use `@ContextConfiguration` initializers:
+
+```java
+import org.jongodb.spring.test.JongodbMongoInitializer;
+import org.springframework.test.context.ContextConfiguration;
+
+@SpringBootTest
+@ContextConfiguration(initializers = JongodbMongoInitializer.class)
+class AccountIntegrationTest {
+}
+```
+
+Optional database override:
+- set `jongodb.test.database=<dbName>` as a test property.
+
+### Option B: `@DynamicPropertySource`
+
+Use `JongodbMongoDynamicPropertySupport` as a drop-in replacement pattern for many Testcontainers setups:
+
+```java
+import org.jongodb.spring.test.JongodbMongoDynamicPropertySupport;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+@SpringBootTest
+class AccountIntegrationTest {
+  @DynamicPropertySource
+  static void mongoProps(DynamicPropertyRegistry registry) {
+    JongodbMongoDynamicPropertySupport.register(registry);
+  }
+}
+```
+
+See migration details:
+- `docs/SPRING_TESTING.md`
+
 ## In-Process Runtime Usage
 
 ### 1) Command Dispatcher API
