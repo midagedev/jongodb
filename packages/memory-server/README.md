@@ -123,6 +123,55 @@ Behavior:
 - `setup()` starts launcher and writes `process.env.MONGODB_URI` (default)
 - `teardown()` stops launcher and restores previous env value
 
+## Migration from `mongodb-memory-server`
+
+Basic migration for Jest:
+
+Before:
+
+```ts
+import { MongoMemoryServer } from "mongodb-memory-server";
+
+let mongod: MongoMemoryServer;
+
+beforeAll(async () => {
+  mongod = await MongoMemoryServer.create();
+  process.env.MONGODB_URI = mongod.getUri();
+});
+
+afterAll(async () => {
+  await mongod.stop();
+});
+```
+
+After:
+
+```ts
+import { beforeAll, afterAll } from "@jest/globals";
+import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
+
+const runtime = createJongodbEnvRuntime({ databaseName: "test" });
+
+beforeAll(async () => {
+  await runtime.setup();
+});
+
+afterAll(async () => {
+  await runtime.teardown();
+});
+```
+
+Option mapping:
+
+- `MongoMemoryServer.create({ instance: { port } })` -> `createJongodbEnvRuntime({ port })`
+- `MongoMemoryServer.create({ instance: { dbName } })` -> `createJongodbEnvRuntime({ databaseName })`
+- `mongod.getUri()` -> `runtime.uri` (after `setup`) or `process.env.MONGODB_URI`
+- `mongod.stop()` -> `runtime.teardown()`
+
+Parallel migration tip:
+
+- if your test runner uses multiple workers, set `databaseNameStrategy: "worker"` to isolate worker data by database name.
+
 ## Launcher Modes
 
 `launchMode` values:
