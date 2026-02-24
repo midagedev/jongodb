@@ -1,0 +1,190 @@
+name: Official Suite Sharded
+
+on:
+  workflow_dispatch:
+    inputs:
+      official_specs_ref:
+        description: "Commit/tag/branch in mongodb/specifications"
+        required: false
+        default: "99704fa8860777da1d919ef765af1e41e75f5859"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/main/**"
+      - "src/test/**"
+      - "testkit/**"
+      - "scripts/ci/**"
+      - ".github/workflows/official-suite-sharded.yml"
+      - "build.gradle.kts"
+  schedule:
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-suite-sharded-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  utf-shards:
+    name: UTF shard ${{ matrix.shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2]
+    env:
+      OFFICIAL_SPECS_REPO: https://github.com/mongodb/specifications.git
+      OFFICIAL_SPECS_REF: ${{ github.event.inputs.official_specs_ref || '99704fa8860777da1d919ef765af1e41e75f5859' }}
+      SHARD_COUNT: "3"
+      UTF_SEED: "r3-official-suite-v1"
+      UTF_REPLAY_LIMIT: "30"
+      MONGO_CONTAINER_NAME: jongodb-replset
+      MONGO_REPLSET_NAME: rs0
+      MONGO_PORT: "27017"
+      REPLSET_WAIT_TIMEOUT_SECONDS: "120"
+      REPLSET_WAIT_INTERVAL_SECONDS: "2"
+      REPLSET_DIAGNOSTICS_DIR: build/reports/replset-diagnostics/shard-${{ matrix.shard_index }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Make scripts executable
+        run: chmod +x scripts/ci/*.sh
+
+      - name: Bootstrap replica set fixture
+        run: ./scripts/ci/bootstrap-replset.sh
+
+      - name: Prepare official spec checkout
+        id: spec_checkout
+        run: |
+          ./scripts/ci/prepare-official-specs.sh \
+            --repo "${OFFICIAL_SPECS_REPO}" \
+            --ref "${OFFICIAL_SPECS_REF}" \
+            --dest "${RUNNER_TEMP}/mongodb-specifications"
+
+      - name: Run baseline shard
+        run: |
+          ./scripts/ci/run-utf-shard.sh \
+            --spec-repo-root "${RUNNER_TEMP}/mongodb-specifications" \
+            --shard-index "${{ matrix.shard_index }}" \
+            --shard-count "${SHARD_COUNT}" \
+            --output-dir "build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/baseline" \
+            --seed "${UTF_SEED}" \
+            --replay-limit "${UTF_REPLAY_LIMIT}" \
+            --mongo-uri "${JONGODB_REAL_MONGOD_URI}" \
+            --gradle-cmd gradle
+
+      - name: Run rerun shard (flake gate input)
+        run: |
+          ./scripts/ci/run-utf-shard.sh \
+            --spec-repo-root "${RUNNER_TEMP}/mongodb-specifications" \
+            --shard-index "${{ matrix.shard_index }}" \
+            --shard-count "${SHARD_COUNT}" \
+            --output-dir "build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/rerun" \
+            --seed "${UTF_SEED}" \
+            --replay-limit "${UTF_REPLAY_LIMIT}" \
+            --mongo-uri "${JONGODB_REAL_MONGOD_URI}" \
+            --gradle-cmd gradle
+
+      - name: Enforce flake gate (baseline vs rerun consistency)
+        run: |
+          ./scripts/ci/assert-utf-shard-consistency.sh \
+            --baseline-json "build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/baseline/utf-differential-report.json" \
+            --rerun-json "build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/rerun/utf-differential-report.json"
+
+      - name: Collect replica set diagnostics
+        if: always()
+        run: ./scripts/ci/collect-replset-diagnostics.sh "${REPLSET_DIAGNOSTICS_DIR}"
+
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: utf-shard-${{ matrix.shard_index }}
+          path: |
+            build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/**/*.json
+            build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/**/*.md
+            build/reports/unified-spec-shards/shard-${{ matrix.shard_index }}/**/*.txt
+            build/reports/replset-diagnostics/shard-${{ matrix.shard_index }}/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Teardown replica set fixture
+        if: always()
+        run: ./scripts/ci/teardown-replset.sh
+
+  shard-summary:
+    name: Shard summary
+    runs-on: ubuntu-latest
+    needs: [utf-shards]
+    if: always()
+    steps:
+      - name: Download shard 0 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: utf-shard-0
+          path: artifacts/utf-shard-0
+
+      - name: Download shard 1 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: utf-shard-1
+          path: artifacts/utf-shard-1
+
+      - name: Download shard 2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: utf-shard-2
+          path: artifacts/utf-shard-2
+
+      - name: Build shard summary markdown
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          shard_roots = [Path("artifacts/utf-shard-0"), Path("artifacts/utf-shard-1"), Path("artifacts/utf-shard-2")]
+          out = Path("artifacts/utf-shard-summary.md")
+
+          lines = ["# UTF shard summary", ""]
+          for shard_index, root in enumerate(shard_roots):
+            baseline_json = next(root.glob("**/baseline/utf-differential-report.json"), None)
+            rerun_json = next(root.glob("**/rerun/utf-differential-report.json"), None)
+            if baseline_json is None or rerun_json is None:
+              raise SystemExit(f"missing baseline/rerun report for shard {shard_index}")
+
+            baseline = json.loads(baseline_json.read_text(encoding="utf-8"))
+            rerun = json.loads(rerun_json.read_text(encoding="utf-8"))
+            b = baseline["differentialSummary"]
+            r = rerun["differentialSummary"]
+            lines.append(f"## shard-{shard_index}")
+            lines.append(f"- baseline: total={b['total']} match={b['match']} mismatch={b['mismatch']} error={b['error']}")
+            lines.append(f"- rerun: total={r['total']} match={r['match']} mismatch={r['mismatch']} error={r['error']}")
+            lines.append("")
+
+          out.write_text("\n".join(lines), encoding="utf-8")
+          print(out.read_text(encoding="utf-8"))
+          PY
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: utf-shard-summary
+          path: artifacts/utf-shard-summary.md
+          if-no-files-found: error
+          retention-days: 14
