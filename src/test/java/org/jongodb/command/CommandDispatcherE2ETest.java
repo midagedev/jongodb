@@ -726,6 +726,52 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void commitTransactionDoesNotDropOutOfTransactionWritesFromDifferentCollection() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"txn-user\"}],\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outOfTransactionInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"tenantMappings\",\"$db\":\"app\",\"documents\":[{\"_id\":101,\"tenantId\":\"t-1\"}]}"));
+        assertEquals(1.0, outOfTransactionInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument usersFind =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(1, usersFind.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument mappingFind = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"tenantMappings\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(1, mappingFind.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
+    void commitTransactionDoesNotDropOutOfTransactionWritesInSameCollection() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"txn-user\"}],\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outOfTransactionInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2,\"name\":\"outside-user\"}]}"));
+        assertEquals(1.0, outOfTransactionInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-2\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument usersFind =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(2, usersFind.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
     void transactionStateTransitionsRequireValidLifecycle() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
