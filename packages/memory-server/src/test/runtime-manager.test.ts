@@ -118,6 +118,8 @@ test(
       envVarName: envKey,
       startupTimeoutMs: 20_000,
     });
+    assert.equal(first.useGlobalEnvBindings, true);
+    assert.equal(second.useGlobalEnvBindings, true);
 
     try {
       const firstUri = await first.setup();
@@ -160,6 +162,8 @@ test(
       envTarget: scopedEnv,
       startupTimeoutMs: 20_000,
     });
+    assert.equal(runtime.useGlobalEnvBindings, false);
+    assert.equal(runtime.envTarget, scopedEnv);
 
     try {
       const uri = await runtime.setup();
