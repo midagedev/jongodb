@@ -65,6 +65,13 @@ class FindAndModifyCommandE2ETest {
 
         dispatcher.dispatch(BsonDocument.parse(
                 "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2,\"name\":\"beta\",\"tier\":3}]}"));
+        final BsonDocument fieldsAliasResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{\"_id\":2},\"remove\":true,\"fields\":{\"tier\":1,\"_id\":0}}"));
+        assertEquals(1.0, fieldsAliasResponse.get("ok").asNumber().doubleValue());
+        assertEquals(3, fieldsAliasResponse.get("value").asDocument().getInt32("tier").getValue());
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2,\"name\":\"beta\",\"tier\":3}]}"));
         final BsonDocument conflictingProjection = dispatcher.dispatch(BsonDocument.parse(
                 "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{\"_id\":2},\"remove\":true,\"fields\":{\"name\":1},\"projection\":{\"tier\":1}}"));
         assertCommandError(conflictingProjection, "BadValue");
