@@ -450,6 +450,57 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsFindOneAndDeleteAndExecutesThroughWireBackend() throws IOException {
+        Files.writeString(
+                tempDir.resolve("find-one-and-delete-integration.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "findOneAndDelete importer and execution",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [
+                          {"_id": 1, "name": "alpha"},
+                          {"_id": 2, "name": "beta"}
+                        ]}},
+                        {"name": "findOneAndDelete", "arguments": {"filter": {"_id": 1}, "projection": {"name": 1, "_id": 0}}},
+                        {"name": "countDocuments", "arguments": {"filter": {}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        final ScenarioCommand findOneAndDelete = scenario.commands().get(1);
+        assertEquals("findAndModify", findOneAndDelete.commandName());
+        assertEquals(true, findOneAndDelete.payload().get("remove"));
+        assertTrue(findOneAndDelete.payload().containsKey("fields"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> findAndModifyResult = outcome.commandResults().get(1);
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> value = (Map<String, Object>) findAndModifyResult.get("value");
+        assertEquals("alpha", value.get("name"));
+        assertTrue(!value.containsKey("_id"));
+
+        final Map<String, Object> countResult = outcome.commandResults().get(2);
+        assertEquals(1L, ((Number) countResult.get("n")).longValue());
+        assertEquals(1L, ((Number) countResult.get("count")).longValue());
+    }
+
+    @Test
     void appliesTransactionEnvelopeWithCreateEntitiesSessions() throws IOException {
         Files.writeString(
                 tempDir.resolve("transactions.yml"),
