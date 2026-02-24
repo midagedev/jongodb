@@ -282,6 +282,31 @@ class CommandDispatcherE2ETest {
         assertEquals(
                 "UnsupportedFeature",
                 collationUnsupported.getArray("errorLabels").get(0).asString().getValue());
+
+        final BsonDocument hintBadValue = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"hint\":{}}"));
+        assertCommandError(hintBadValue, "BadValue");
+    }
+
+    @Test
+    void distinctCommandAcceptsHintStringAndDocumentSubsets() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(
+                BsonDocument.parse("{\"_id\":1,\"name\":\"alpha\"}"),
+                BsonDocument.parse("{\"_id\":2,\"name\":\"beta\"}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument stringHint = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"name\",\"query\":{},\"hint\":\"name_1\"}"));
+        assertEquals(1.0, stringHint.get("ok").asNumber().doubleValue());
+        assertEquals(2, stringHint.getArray("values").size());
+        assertEquals(0, store.lastFindFilter.size());
+
+        final BsonDocument documentHint = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"name\",\"query\":{},\"hint\":{\"name\":1}}"));
+        assertEquals(1.0, documentHint.get("ok").asNumber().doubleValue());
+        assertEquals(2, documentHint.getArray("values").size());
+        assertEquals(0, store.lastFindFilter.size());
     }
 
     @Test
