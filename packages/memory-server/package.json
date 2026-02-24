@@ -2,6 +2,14 @@
   "name": "@jongodb/memory-server",
   "version": "0.0.0-development",
   "description": "Node.js launcher for jongodb in-memory server",
+  "keywords": [
+    "mongodb",
+    "mongodb-memory-server",
+    "jongodb",
+    "integration-test",
+    "jest",
+    "vitest"
+  ],
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

@@ -105,6 +105,15 @@ Requirements:
 - Java 17+
 - Gradle 8+
 
+## Node Adapter Status
+
+Node.js adapter work is tracked in issue `#106` and lives under `packages/memory-server`.
+
+Current state:
+- package scaffold exists (`@jongodb/memory-server`)
+- runtime process manager is in progress (`#108`)
+- Jest/Vitest helpers and compatibility smoke suites are planned (`#109`, `#110`)
+
 ## Transaction Contract (Current)
 
 Supported in current scope:
