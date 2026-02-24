@@ -1,6 +1,7 @@
 package org.jongodb.testkit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -47,6 +48,7 @@ class R3FailureLedgerRunnerTest {
                 "seed-r3",
                 "mongodb://example",
                 10,
+                false,
                 List.of(
                         new R3FailureLedgerRunner.SuiteConfig("crud-unified", "source/crud/tests/unified"),
                         new R3FailureLedgerRunner.SuiteConfig("transactions-unified", "source/transactions/tests/unified")));
@@ -68,6 +70,60 @@ class R3FailureLedgerRunnerTest {
         assertEquals(3, json.getInteger("failureCount"));
         assertEquals(3, json.getList("entries", Document.class).size());
         assertEquals(1, json.get("byTrack", Document.class).getInteger("txn"));
+        assertTrue(R3FailureLedgerRunner.hasGateFailure(first));
+    }
+
+    @Test
+    void gatePassesWhenNoFailuresAndNoMissingSuites() throws Exception {
+        final Path specRepoRoot = tempDir.resolve("specifications");
+        writeFixtureSpecTree(specRepoRoot);
+
+        final Clock fixedClock = Clock.fixed(Instant.parse("2026-02-24T01:45:00Z"), ZoneOffset.UTC);
+        final R3FailureLedgerRunner runner = new R3FailureLedgerRunner(
+                fixedClock,
+                new UnifiedSpecImporter(),
+                () -> new StubBackend("left-backend", scenario -> successResult(scenario.id())),
+                mongoUri -> new StubBackend("right-backend", scenario -> successResult(scenario.id())));
+
+        final R3FailureLedgerRunner.RunConfig config = new R3FailureLedgerRunner.RunConfig(
+                specRepoRoot,
+                tempDir.resolve("out-pass"),
+                "seed-r3-pass",
+                "mongodb://example",
+                10,
+                true,
+                List.of(
+                        new R3FailureLedgerRunner.SuiteConfig("crud-unified", "source/crud/tests/unified"),
+                        new R3FailureLedgerRunner.SuiteConfig("transactions-unified", "source/transactions/tests/unified")));
+
+        final R3FailureLedgerRunner.RunResult result = runner.run(config);
+        assertEquals(0, result.entries().size());
+        assertTrue(result.suiteSummaries().stream().allMatch(summary -> "OK".equals(summary.status())));
+        assertFalse(R3FailureLedgerRunner.hasGateFailure(result));
+    }
+
+    @Test
+    void gateFailsWhenSuiteRootIsMissing() throws Exception {
+        final Clock fixedClock = Clock.fixed(Instant.parse("2026-02-24T01:50:00Z"), ZoneOffset.UTC);
+        final R3FailureLedgerRunner runner = new R3FailureLedgerRunner(
+                fixedClock,
+                new UnifiedSpecImporter(),
+                () -> new StubBackend("left-backend", scenario -> successResult(scenario.id())),
+                mongoUri -> new StubBackend("right-backend", scenario -> successResult(scenario.id())));
+
+        final R3FailureLedgerRunner.RunConfig config = new R3FailureLedgerRunner.RunConfig(
+                tempDir.resolve("missing-spec-root"),
+                tempDir.resolve("out-missing"),
+                "seed-r3-missing",
+                "mongodb://example",
+                10,
+                true,
+                List.of(new R3FailureLedgerRunner.SuiteConfig("crud-unified", "source/crud/tests/unified")));
+
+        final R3FailureLedgerRunner.RunResult result = runner.run(config);
+        assertEquals(0, result.entries().size());
+        assertTrue(result.suiteSummaries().stream().allMatch(summary -> "MISSING".equals(summary.status())));
+        assertTrue(R3FailureLedgerRunner.hasGateFailure(result));
     }
 
     private static List<String> extractFailureIds(final R3FailureLedgerRunner.RunResult result) {

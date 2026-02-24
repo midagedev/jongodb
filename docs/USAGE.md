@@ -93,7 +93,8 @@ Generate R3 failure ledger artifacts:
 ```bash
 gradle r3FailureLedger \
   -Pr3SpecRepoRoot="third_party/mongodb-specs/.checkout/specifications" \
-  -Pr3FailureLedgerMongoUri="mongodb://localhost:27017"
+  -Pr3FailureLedgerMongoUri="mongodb://localhost:27017" \
+  -Pr3FailureLedgerFailOnFailures=true
 ```
 
 Run Spring compatibility matrix:
@@ -159,6 +160,7 @@ GitHub Actions workflow:
 - R3 failure ledger:
   - `build/reports/r3-failure-ledger/r3-failure-ledger.json`
   - `build/reports/r3-failure-ledger/r3-failure-ledger.md`
+  - `build/reports/r3-failure-ledger/r3-failure-ledger-trend.md`
 - Spring matrix:
   - `build/reports/spring-matrix/spring-compatibility-matrix.json`
   - `build/reports/spring-matrix/spring-compatibility-matrix.md`

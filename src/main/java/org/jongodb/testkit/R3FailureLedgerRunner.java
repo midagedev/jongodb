@@ -89,6 +89,11 @@ public final class R3FailureLedgerRunner {
         System.out.println("- failures: " + result.entries().size());
         System.out.println("- jsonArtifact: " + paths.jsonArtifact());
         System.out.println("- markdownArtifact: " + paths.markdownArtifact());
+
+        if (config.failOnFailures() && hasGateFailure(result)) {
+            System.err.println("R3 failure ledger gate failed: failures or missing suites detected.");
+            System.exit(2);
+        }
     }
 
     public RunResult runAndWrite(final RunConfig config) throws IOException {
@@ -142,6 +147,19 @@ public final class R3FailureLedgerRunner {
                 List.copyOf(suiteSummaries),
                 Map.copyOf(byTrack),
                 Map.copyOf(byStatus));
+    }
+
+    static boolean hasGateFailure(final RunResult result) {
+        Objects.requireNonNull(result, "result");
+        if (!result.entries().isEmpty()) {
+            return true;
+        }
+        for (final SuiteRunSummary suiteSummary : result.suiteSummaries()) {
+            if (!"OK".equals(suiteSummary.status())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static ArtifactPaths artifactPaths(final Path outputDir) {
@@ -396,6 +414,8 @@ public final class R3FailureLedgerRunner {
         System.out.println("  --mongo-uri=<uri>          Real mongod URI (or env JONGODB_REAL_MONGOD_URI)");
         System.out.println("  --replay-limit=<n>         Failure replay capture limit per suite");
         System.out.println("  --suite=<id>:<root>        Additional suite mapping (repeatable)");
+        System.out.println("  --fail-on-failures         Exit non-zero when failures or missing suites exist");
+        System.out.println("  --no-fail-on-failures      Do not fail the process on ledger gate failure");
         System.out.println("  --help, -h                 Show help");
     }
 
@@ -499,6 +519,7 @@ public final class R3FailureLedgerRunner {
             String seed,
             String mongoUri,
             int replayLimit,
+            boolean failOnFailures,
             List<SuiteConfig> suites) {
         public RunConfig {
             specRepoRoot = normalizePath(specRepoRoot, "specRepoRoot");
@@ -520,6 +541,7 @@ public final class R3FailureLedgerRunner {
             String seed = DEFAULT_SEED;
             String mongoUri = trimToNull(System.getenv(DEFAULT_MONGO_URI_ENV));
             int replayLimit = DEFAULT_REPLAY_LIMIT;
+            boolean failOnFailures = false;
             final List<SuiteConfig> suites = new ArrayList<>(DEFAULT_SUITES);
 
             for (final String arg : args) {
@@ -555,13 +577,21 @@ public final class R3FailureLedgerRunner {
                     suites.add(new SuiteConfig(raw.substring(0, separator), raw.substring(separator + 1)));
                     continue;
                 }
+                if ("--fail-on-failures".equals(arg)) {
+                    failOnFailures = true;
+                    continue;
+                }
+                if ("--no-fail-on-failures".equals(arg)) {
+                    failOnFailures = false;
+                    continue;
+                }
                 throw new IllegalArgumentException("unknown argument: " + arg);
             }
 
             if (mongoUri == null || mongoUri.isBlank()) {
                 throw new IllegalArgumentException("mongo-uri must be provided (arg or " + DEFAULT_MONGO_URI_ENV + ")");
             }
-            return new RunConfig(specRepoRoot, outputDir, seed, mongoUri, replayLimit, suites);
+            return new RunConfig(specRepoRoot, outputDir, seed, mongoUri, replayLimit, failOnFailures, suites);
         }
     }
 
