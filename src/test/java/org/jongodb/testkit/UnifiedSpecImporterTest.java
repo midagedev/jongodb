@@ -178,4 +178,60 @@ class UnifiedSpecImporterTest {
         assertTrue(result.skippedCases().stream().allMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
     }
+
+    @Test
+    void marksKnownUnsupportedAggregationFeaturesAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("unsupported-aggregation.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "aggregate with out",
+                      "operations": [
+                        {
+                          "name": "aggregate",
+                          "arguments": {
+                            "pipeline": [{"$out": "archive"}]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "description": "aggregate with merge",
+                      "operations": [
+                        {
+                          "name": "aggregate",
+                          "arguments": {
+                            "pipeline": [{"$merge": {"into": "archive"}}]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "description": "aggregate with bypass validation",
+                      "operations": [
+                        {
+                          "name": "aggregate",
+                          "arguments": {
+                            "pipeline": [{"$match": {"_id": 1}}],
+                            "bypassDocumentValidation": true
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(3, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().allMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
+    }
 }

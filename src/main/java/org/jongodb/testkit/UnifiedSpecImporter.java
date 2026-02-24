@@ -281,7 +281,14 @@ public final class UnifiedSpecImporter {
         final List<Object> pipeline = asList(arguments.getOrDefault("pipeline", List.of()), "aggregate.arguments.pipeline");
         final List<Object> copiedPipeline = new ArrayList<>(pipeline.size());
         for (final Object stage : pipeline) {
-            copiedPipeline.add(deepCopyValue(asStringObjectMap(stage, "aggregate stage")));
+            final Map<String, Object> stageMap = asStringObjectMap(stage, "aggregate stage");
+            if (containsUnsupportedAggregateStage(stageMap)) {
+                throw new UnsupportedOperationException("unsupported UTF aggregate stage in pipeline");
+            }
+            copiedPipeline.add(deepCopyValue(stageMap));
+        }
+        if (arguments.containsKey("bypassDocumentValidation")) {
+            throw new UnsupportedOperationException("unsupported UTF aggregate option: bypassDocumentValidation");
         }
 
         final Map<String, Object> payload = commandEnvelope("aggregate", database, collection);
@@ -295,6 +302,41 @@ public final class UnifiedSpecImporter {
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("aggregate", immutableMap(payload));
+    }
+
+    private static boolean containsUnsupportedAggregateStage(final Map<String, Object> stage) {
+        if (stage.containsKey("$out") || stage.containsKey("$merge") || stage.containsKey("$listLocalSessions")) {
+            return true;
+        }
+        for (final Object value : stage.values()) {
+            if (containsUnsupportedAggregateStageValue(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsUnsupportedAggregateStageValue(final Object value) {
+        if (value instanceof Map<?, ?> mapValue) {
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                final String key = String.valueOf(entry.getKey());
+                if ("$out".equals(key) || "$merge".equals(key) || "$listLocalSessions".equals(key)) {
+                    return true;
+                }
+                if (containsUnsupportedAggregateStageValue(entry.getValue())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (containsUnsupportedAggregateStageValue(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static ScenarioCommand update(
