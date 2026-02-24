@@ -43,6 +43,10 @@ public final class CommandDispatcher {
         configuredHandlers.put("update", new UpdateCommandHandler(routedStore));
         configuredHandlers.put("delete", new DeleteCommandHandler(routedStore));
         configuredHandlers.put("findandmodify", new FindAndModifyCommandHandler(routedStore));
+        configuredHandlers.put("countdocuments", new CountDocumentsCommandHandler(routedStore));
+        configuredHandlers.put("replaceone", new ReplaceOneCommandHandler(routedStore));
+        configuredHandlers.put("findoneandupdate", new FindOneAndUpdateCommandHandler(routedStore));
+        configuredHandlers.put("findoneandreplace", new FindOneAndReplaceCommandHandler(routedStore));
         configuredHandlers.put("committransaction", new CommitTransactionCommandHandler());
         configuredHandlers.put("aborttransaction", new AbortTransactionCommandHandler());
         this.handlers = Map.copyOf(configuredHandlers);

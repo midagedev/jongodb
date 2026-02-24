@@ -134,6 +134,76 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void countDocumentsCommandCallsStoreAndReturnsCountShape() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(
+                BsonDocument.parse("{\"_id\":1}"),
+                BsonDocument.parse("{\"_id\":2}"),
+                BsonDocument.parse("{\"_id\":3}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"$db\":\"app\",\"filter\":{\"role\":\"member\"}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(3L, response.getInt64("n").getValue());
+        assertEquals(3L, response.getInt64("count").getValue());
+        assertEquals("app", store.lastFindDatabase);
+        assertEquals("users", store.lastFindCollection);
+        assertEquals(
+                "member",
+                store.lastFindFilter.getString("role").getValue());
+    }
+
+    @Test
+    void countDocumentsCommandSupportsSkipAndLimit() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(
+                BsonDocument.parse("{\"_id\":1}"),
+                BsonDocument.parse("{\"_id\":2}"),
+                BsonDocument.parse("{\"_id\":3}"),
+                BsonDocument.parse("{\"_id\":4}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"$db\":\"app\",\"filter\":{},\"skip\":1,\"limit\":2}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(2L, response.getInt64("n").getValue());
+    }
+
+    @Test
+    void countDocumentsCommandAcceptsLegacyQueryAlias() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(BsonDocument.parse("{\"_id\":1}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"$db\":\"app\",\"query\":{\"role\":\"member\"}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1L, response.getInt64("n").getValue());
+        assertEquals("member", store.lastFindFilter.getString("role").getValue());
+    }
+
+    @Test
+    void countDocumentsCommandRejectsInvalidPayloadShapes() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument filterTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"filter\":1}"));
+        assertCommandError(filterTypeMismatch, "TypeMismatch");
+
+        final BsonDocument skipTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"filter\":{},\"skip\":1.5}"));
+        assertCommandError(skipTypeMismatch, "TypeMismatch");
+
+        final BsonDocument limitBadValue = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"filter\":{},\"limit\":-1}"));
+        assertCommandError(limitBadValue, "BadValue");
+    }
+
+    @Test
     void unsupportedQueryOperatorsReturnNotImplementedAcrossCrudCommands() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
@@ -155,6 +225,22 @@ class CommandDispatcherE2ETest {
         final BsonDocument deleteResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"delete\":\"users\",\"$db\":\"app\",\"deletes\":[{\"q\":{\"name\":{\"$foo\":1}},\"limit\":0}]}"));
         assertCommandError(deleteResponse, 238, "NotImplemented");
+
+        final BsonDocument countDocumentsResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}}}"));
+        assertCommandError(countDocumentsResponse, 238, "NotImplemented");
+
+        final BsonDocument replaceOneResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"replaceOne\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}},\"replacement\":{\"name\":\"neo\"}}"));
+        assertCommandError(replaceOneResponse, 238, "NotImplemented");
+
+        final BsonDocument findOneAndUpdateResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}},\"update\":{\"$set\":{\"active\":true}}}"));
+        assertCommandError(findOneAndUpdateResponse, 238, "NotImplemented");
+
+        final BsonDocument findOneAndReplaceResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}},\"replacement\":{\"name\":\"neo\"}}"));
+        assertCommandError(findOneAndReplaceResponse, 238, "NotImplemented");
     }
 
     @Test
@@ -560,6 +646,145 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void replaceOneCommandCallsStoreAndReturnsWriteShape() {
+        final RecordingStore store = new RecordingStore();
+        store.updateResult = new CommandStore.UpdateResult(1, 1);
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"replaceOne\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"replacement\":{\"name\":\"after\"},\"upsert\":true,\"hint\":{\"_id\":1},\"collation\":{\"locale\":\"en\"}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, response.getInt32("n").getValue());
+        assertEquals(1, response.getInt32("nModified").getValue());
+        assertEquals("app", store.lastUpdateDatabase);
+        assertEquals("users", store.lastUpdateCollection);
+        assertEquals(1, store.lastUpdateRequests.size());
+        assertEquals(1, store.lastUpdateRequests.get(0).query().getInt32("_id").getValue());
+        assertEquals("after", store.lastUpdateRequests.get(0).update().getString("name").getValue());
+        assertTrue(!store.lastUpdateRequests.get(0).multi());
+        assertEquals(true, store.lastUpdateRequests.get(0).upsert());
+    }
+
+    @Test
+    void replaceOneCommandRejectsInvalidPayloadShapes() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument filterTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"replaceOne\":\"users\",\"filter\":1,\"replacement\":{\"name\":\"a\"}}"));
+        assertCommandError(filterTypeMismatch, "TypeMismatch");
+
+        final BsonDocument replacementTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"replaceOne\":\"users\",\"filter\":{},\"replacement\":1}"));
+        assertCommandError(replacementTypeMismatch, "TypeMismatch");
+
+        final BsonDocument replacementBadValue = dispatcher.dispatch(BsonDocument.parse(
+                "{\"replaceOne\":\"users\",\"filter\":{},\"replacement\":{\"$set\":{\"name\":\"a\"}}}"));
+        assertCommandError(replacementBadValue, "BadValue");
+    }
+
+    @Test
+    void findOneAndUpdateCommandSupportsBeforeAndAfterSemantics() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"tier\":1}]}"));
+
+        final BsonDocument beforeResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"update\":{\"$set\":{\"name\":\"after\"}}}"));
+        assertEquals(1.0, beforeResponse.get("ok").asNumber().doubleValue());
+        assertEquals(
+                "before",
+                beforeResponse.getDocument("value").getString("name").getValue());
+
+        final BsonDocument afterResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"update\":{\"$set\":{\"name\":\"after-2\"}},\"returnDocument\":\"after\"}"));
+        assertEquals(1.0, afterResponse.get("ok").asNumber().doubleValue());
+        assertEquals(
+                "after-2",
+                afterResponse.getDocument("value").getString("name").getValue());
+    }
+
+    @Test
+    void findOneAndUpdateCommandRejectsInvalidPayloadShapes() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument filterTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"filter\":1,\"update\":{\"$set\":{\"name\":\"a\"}}}"));
+        assertCommandError(filterTypeMismatch, "TypeMismatch");
+
+        final BsonDocument replacementNotAllowed = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"filter\":{},\"update\":{\"name\":\"a\"}}"));
+        assertCommandError(replacementNotAllowed, "BadValue");
+
+        final BsonDocument invalidReturnDocument = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"filter\":{},\"update\":{\"$set\":{\"name\":\"a\"}},\"returnDocument\":\"later\"}"));
+        assertCommandError(invalidReturnDocument, "BadValue");
+
+        final BsonDocument unsupportedArrayFilters = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"filter\":{},\"update\":{\"$set\":{\"name\":\"a\"}},\"arrayFilters\":[]}"));
+        assertCommandError(unsupportedArrayFilters, "BadValue");
+    }
+
+    @Test
+    void findOneAndReplaceCommandSupportsBeforeAndAfterSemantics() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"extra\":true}]}"));
+
+        final BsonDocument beforeResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"replacement\":{\"name\":\"after\"}}"));
+        assertEquals(1.0, beforeResponse.get("ok").asNumber().doubleValue());
+        assertEquals(
+                "before",
+                beforeResponse.getDocument("value").getString("name").getValue());
+
+        final BsonDocument afterResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"replacement\":{\"name\":\"after-2\"},\"returnDocument\":\"after\"}"));
+        assertEquals(1.0, afterResponse.get("ok").asNumber().doubleValue());
+        assertEquals(
+                "after-2",
+                afterResponse.getDocument("value").getString("name").getValue());
+
+        final BsonDocument findResponse =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument stored =
+                findResponse.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals(1, stored.getInt32("_id").getValue());
+        assertTrue(!stored.containsKey("extra"));
+    }
+
+    @Test
+    void findOneAndReplaceCommandRejectsInvalidPayloadShapes() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument replacementTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"filter\":{},\"replacement\":1}"));
+        assertCommandError(replacementTypeMismatch, "TypeMismatch");
+
+        final BsonDocument operatorReplacement = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"filter\":{},\"replacement\":{\"$set\":{\"name\":\"a\"}}}"));
+        assertCommandError(operatorReplacement, "BadValue");
+
+        final BsonDocument invalidReturnDocument = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"filter\":{},\"replacement\":{\"name\":\"a\"},\"returnDocument\":1}"));
+        assertCommandError(invalidReturnDocument, "TypeMismatch");
+    }
+
+    @Test
+    void findOneAndReplaceCommandSupportsUpsertWithReturnAfter() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":91},\"replacement\":{\"name\":\"created\"},\"upsert\":true,\"returnDocument\":\"after\"}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(91, response.getDocument("value").getInt32("_id").getValue());
+        assertEquals(
+                "created",
+                response.getDocument("value").getString("name").getValue());
+    }
+
+    @Test
     void updateCommandRejectsInvalidPayloadShapes() {
         final RecordingStore store = new RecordingStore();
         final CommandDispatcher dispatcher = new CommandDispatcher(store);
@@ -706,6 +931,64 @@ class CommandDispatcherE2ETest {
         final BsonDocument outsideFind =
                 dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
         assertEquals(1, outsideFind.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
+    void replaceOneCommandHonorsTransactionVisibilityAndCommit() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument seedInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\"}]}"));
+        assertEquals(1.0, seedInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument replaceInTxn = dispatcher.dispatch(BsonDocument.parse(
+                "{\"replaceOne\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"replacement\":{\"name\":\"after\"},\"lsid\":{\"id\":\"session-r1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, replaceInTxn.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideBeforeCommit = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        assertEquals(
+                "before",
+                outsideBeforeCommit
+                        .getDocument("cursor")
+                        .getArray("firstBatch")
+                        .get(0)
+                        .asDocument()
+                        .getString("name")
+                        .getValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-r1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideAfterCommit = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        assertEquals(
+                "after",
+                outsideAfterCommit
+                        .getDocument("cursor")
+                        .getArray("firstBatch")
+                        .get(0)
+                        .asDocument()
+                        .getString("name")
+                        .getValue());
+    }
+
+    @Test
+    void countDocumentsCommandUsesTransactionalSnapshot() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":10,\"name\":\"txn-doc\"}],\"lsid\":{\"id\":\"session-c1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideCount = dispatcher.dispatch(
+                BsonDocument.parse("{\"countDocuments\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
+        assertEquals(0L, outsideCount.getInt64("n").getValue());
+
+        final BsonDocument transactionalCount = dispatcher.dispatch(BsonDocument.parse(
+                "{\"countDocuments\":\"users\",\"$db\":\"app\",\"filter\":{},\"lsid\":{\"id\":\"session-c1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1L, transactionalCount.getInt64("n").getValue());
     }
 
     @Test

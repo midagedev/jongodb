@@ -19,7 +19,18 @@ public final class TransactionCommandValidator {
     private static final String LABEL_TRANSIENT_TRANSACTION_ERROR = "TransientTransactionError";
     private static final String LABEL_UNKNOWN_TRANSACTION_COMMIT_RESULT = "UnknownTransactionCommitResult";
     private static final Set<String> TRANSACTIONAL_COMMANDS =
-            Set.of("insert", "update", "delete", "find", "committransaction", "aborttransaction");
+            Set.of(
+                    "insert",
+                    "update",
+                    "delete",
+                    "find",
+                    "findandmodify",
+                    "countdocuments",
+                    "replaceone",
+                    "findoneandupdate",
+                    "findoneandreplace",
+                    "committransaction",
+                    "aborttransaction");
 
     private final SessionTransactionPool sessionPool;
 
