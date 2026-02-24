@@ -20,6 +20,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: node-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     name: Verify Node package
@@ -72,17 +76,25 @@ jobs:
         id: meta
         shell: bash
         run: |
+          PUBLISH_INPUT="${{ inputs.publish }}"
+
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             VERSION="${GITHUB_REF_NAME#node-v}"
           else
             VERSION="${{ inputs.version }}"
           fi
 
-          if [[ -z "$VERSION" ]]; then
-            echo "No version input provided. Publish job will run in dry-run mode."
-          elif [[ "$VERSION" == *"-SNAPSHOT" ]]; then
+          if [[ "$VERSION" == *"-SNAPSHOT" ]]; then
             echo "Version must not end with -SNAPSHOT: $VERSION"
             exit 1
+          fi
+
+          if [[ -z "$VERSION" ]]; then
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "$PUBLISH_INPUT" == "true" ]]; then
+              echo "Manual publish requires an explicit version input."
+              exit 1
+            fi
+            echo "No version input provided. Publish job will run in dry-run mode."
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

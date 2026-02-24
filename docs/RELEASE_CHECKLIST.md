@@ -37,9 +37,10 @@ Use this when publishing `@jongodb/memory-server`:
 
 1. Confirm `Node Adapter Release` workflow verify job is green.
 2. Confirm package version is set explicitly (tag `node-vX.Y.Z` or manual input).
-3. Run `npm publish --dry-run` and review package contents.
-4. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
-5. Update README usage examples with the released package version.
+3. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
+4. Run `npm publish --dry-run` and review package contents.
+5. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
+6. Update README usage examples with the released package version.
 
 ## Release History
 
