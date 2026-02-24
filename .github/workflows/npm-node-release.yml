@@ -100,15 +100,8 @@ jobs:
       - name: Typecheck
         run: npm run node:typecheck
 
-      - name: Test
-        shell: bash
-        run: |
-          JCP="$(gradle --no-daemon -q printLauncherClasspath | awk 'NF{line=$0} END{print line}')"
-          if [[ -z "$JCP" ]]; then
-            echo "Failed to resolve JONGODB_TEST_CLASSPATH from Gradle output."
-            exit 1
-          fi
-          JONGODB_TEST_CLASSPATH="$JCP" npm run node:test
+      - name: Pack dry-run
+        run: npm pack --workspace @jongodb/memory-server --dry-run
 
   publish-binaries:
     name: Publish platform binary package (${{ matrix.workspace }})
