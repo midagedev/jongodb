@@ -53,16 +53,31 @@ publishing {
             artifactId = providers.gradleProperty("publishArtifactId").orElse("jongodb").get()
 
             pom {
-                name.set(providers.gradleProperty("pomName").orElse("jongodb"))
+                name.set(
+                    providers.gradleProperty("pomName")
+                        .orElse("jongodb: in-memory MongoDB-compatible test backend")
+                )
                 description.set(
                     providers.gradleProperty("pomDescription")
-                        .orElse("In-memory MongoDB-compatible backend for fast Spring integration tests.")
+                        .orElse(
+                            "In-memory MongoDB-compatible backend for Spring Boot and Java integration tests. " +
+                                    "Runs in-process without Docker/Testcontainers and targets deterministic test environments."
+                        )
                 )
                 url.set(providers.gradleProperty("pomUrl").orElse("https://github.com/midagedev/jongodb"))
+                inceptionYear.set(providers.gradleProperty("pomInceptionYear").orElse("2026"))
+
+                organization {
+                    name.set(providers.gradleProperty("pomOrganizationName").orElse("midagedev"))
+                    url.set(providers.gradleProperty("pomOrganizationUrl").orElse("https://github.com/midagedev"))
+                }
 
                 licenses {
                     license {
-                        name.set(providers.gradleProperty("pomLicenseName").orElse("Apache-2.0"))
+                        name.set(
+                            providers.gradleProperty("pomLicenseName")
+                                .orElse("The Apache License, Version 2.0")
+                        )
                         url.set(
                             providers.gradleProperty("pomLicenseUrl")
                                 .orElse("https://www.apache.org/licenses/LICENSE-2.0.txt")
@@ -75,7 +90,24 @@ publishing {
                     developer {
                         id.set(providers.gradleProperty("pomDeveloperId").orElse("hckim"))
                         name.set(providers.gradleProperty("pomDeveloperName").orElse("hckim"))
+                        url.set(providers.gradleProperty("pomDeveloperUrl").orElse("https://github.com/midagedev"))
                     }
+                }
+
+                issueManagement {
+                    system.set(providers.gradleProperty("pomIssueManagementSystem").orElse("GitHub Issues"))
+                    url.set(
+                        providers.gradleProperty("pomIssueManagementUrl")
+                            .orElse("https://github.com/midagedev/jongodb/issues")
+                    )
+                }
+
+                ciManagement {
+                    system.set(providers.gradleProperty("pomCiManagementSystem").orElse("GitHub Actions"))
+                    url.set(
+                        providers.gradleProperty("pomCiManagementUrl")
+                            .orElse("https://github.com/midagedev/jongodb/actions")
+                    )
                 }
 
                 scm {
@@ -88,6 +120,7 @@ publishing {
                             .orElse("scm:git:ssh://git@github.com/midagedev/jongodb.git")
                     )
                     url.set(providers.gradleProperty("pomScmUrl").orElse("https://github.com/midagedev/jongodb"))
+                    tag.set(providers.gradleProperty("pomScmTag").orElse("HEAD"))
                 }
             }
         }

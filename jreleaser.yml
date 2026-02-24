@@ -1,6 +1,6 @@
 project:
   name: jongodb
-  description: In-memory MongoDB-compatible backend for fast Spring integration tests.
+  description: In-memory MongoDB-compatible backend for Spring Boot and Java integration tests.
   links:
     homepage: https://github.com/midagedev/jongodb
   authors:

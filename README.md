@@ -5,10 +5,8 @@ In-memory MongoDB-compatible backend for fast Spring integration tests.
 `jongodb` targets fast, deterministic Spring Boot test execution without starting a MongoDB container or external process.
 It is not a production MongoDB replacement.
 
-Latest release: `0.1.1`  
-Maven coordinate: `io.github.midagedev:jongodb:0.1.1`
-
-`main` currently includes post-`0.1.1` command and Spring-test usability improvements that are not yet released.
+Latest release: `0.1.2`  
+Maven coordinate: `io.github.midagedev:jongodb:0.1.2`
 
 ## Why This Project Exists
 
@@ -61,7 +59,7 @@ Recommended strategy:
 
 ```kotlin
 dependencies {
-    testImplementation("io.github.midagedev:jongodb:0.1.1")
+    testImplementation("io.github.midagedev:jongodb:0.1.2")
 }
 ```
 

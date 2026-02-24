@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-24
+
 ### Added
 - Added single-hook Spring test bootstrap annotation: `@JongodbMongoTest`.
 - Added command handlers for `countDocuments`, `replaceOne`, `findOneAndUpdate`, `findOneAndReplace`.
