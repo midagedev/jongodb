@@ -301,3 +301,29 @@ tasks.register<JavaExec>("r2CanaryCertificationEvidence") {
         if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
     )
 }
+
+tasks.register<JavaExec>("r3FailureLedger") {
+    group = "verification"
+    description = "Generates deterministic R3 failure-ledger artifacts from official suite runs."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.R3FailureLedgerRunner")
+
+    val specRepoRoot = (findProperty("r3SpecRepoRoot") as String?)
+        ?: "third_party/mongodb-specs/.checkout/specifications"
+    val outputDir = (findProperty("r3FailureLedgerOutputDir") as String?)
+        ?: "build/reports/r3-failure-ledger"
+    val seed = (findProperty("r3FailureLedgerSeed") as String?) ?: "r3-failure-ledger-v1"
+    val replayLimit = (findProperty("r3FailureLedgerReplayLimit") as String?) ?: "20"
+    val mongoUri = (findProperty("r3FailureLedgerMongoUri") as String?)
+        ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
+
+    args(
+        "--spec-repo-root=$specRepoRoot",
+        "--output-dir=$outputDir",
+        "--seed=$seed",
+        "--replay-limit=$replayLimit"
+    )
+    if (mongoUri.isNotBlank()) {
+        args("--mongo-uri=$mongoUri")
+    }
+}
