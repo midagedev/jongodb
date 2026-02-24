@@ -277,6 +277,9 @@ class CommandDispatcherE2ETest {
                 "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"collation\":{\"locale\":\"en\"}}"));
         assertCommandError(collationUnsupported, 238, "NotImplemented");
         assertEquals(
+                true,
+                collationUnsupported.getString("errmsg").getValue().contains("collation"));
+        assertEquals(
                 "UnsupportedFeature",
                 collationUnsupported.getArray("errorLabels").get(0).asString().getValue());
     }
