@@ -1,0 +1,93 @@
+name: R3 Failure Ledger
+
+on:
+  workflow_dispatch:
+    inputs:
+      official_specs_ref:
+        description: "Commit/tag/branch in mongodb/specifications"
+        required: false
+        default: "99704fa8860777da1d919ef765af1e41e75f5859"
+  schedule:
+    - cron: "30 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  generate-ledger:
+    name: Generate failure ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OFFICIAL_SPECS_REPO: https://github.com/mongodb/specifications.git
+      OFFICIAL_SPECS_REF: ${{ github.event.inputs.official_specs_ref || '99704fa8860777da1d919ef765af1e41e75f5859' }}
+      MONGO_CONTAINER_NAME: jongodb-replset
+      MONGO_REPLSET_NAME: rs0
+      MONGO_PORT: "27017"
+      REPLSET_WAIT_TIMEOUT_SECONDS: "120"
+      REPLSET_WAIT_INTERVAL_SECONDS: "2"
+      REPLSET_DIAGNOSTICS_DIR: build/reports/replset-diagnostics/r3-failure-ledger
+      R3_LEDGER_OUTPUT_DIR: build/reports/r3-failure-ledger
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Make scripts executable
+        run: chmod +x scripts/ci/*.sh
+
+      - name: Bootstrap replica set fixture
+        run: ./scripts/ci/bootstrap-replset.sh
+
+      - name: Prepare official specs checkout
+        run: |
+          ./scripts/ci/prepare-official-specs.sh \
+            --repo "${OFFICIAL_SPECS_REPO}" \
+            --ref "${OFFICIAL_SPECS_REF}" \
+            --dest "${RUNNER_TEMP}/mongodb-specifications"
+
+      - name: Run failure ledger generation
+        run: |
+          gradle --no-daemon --stacktrace \
+            -Pr3SpecRepoRoot="${RUNNER_TEMP}/mongodb-specifications" \
+            -Pr3FailureLedgerOutputDir="${R3_LEDGER_OUTPUT_DIR}" \
+            -Pr3FailureLedgerMongoUri="${JONGODB_REAL_MONGOD_URI}" \
+            r3FailureLedger
+
+      - name: Collect replica set diagnostics
+        if: always()
+        run: ./scripts/ci/collect-replset-diagnostics.sh "${REPLSET_DIAGNOSTICS_DIR}"
+
+      - name: Upload failure ledger artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r3-failure-ledger
+          path: |
+            build/reports/r3-failure-ledger/**/*.json
+            build/reports/r3-failure-ledger/**/*.md
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload replica set diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r3-failure-ledger-diagnostics
+          path: build/reports/replset-diagnostics/r3-failure-ledger/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Teardown replica set fixture
+        if: always()
+        run: ./scripts/ci/teardown-replset.sh

@@ -88,6 +88,14 @@ gradle replayFailureBundle \
   -PreplayFailureId="utf::some-case-id"
 ```
 
+Generate R3 failure ledger artifacts:
+
+```bash
+gradle r3FailureLedger \
+  -Pr3SpecRepoRoot="third_party/mongodb-specs/.checkout/specifications" \
+  -Pr3FailureLedgerMongoUri="mongodb://localhost:27017"
+```
+
 Run Spring compatibility matrix:
 
 ```bash
@@ -148,6 +156,9 @@ GitHub Actions workflow:
   - `build/reports/unified-spec/utf-differential-report.json`
   - `build/reports/unified-spec/utf-differential-report.md`
   - `build/reports/unified-spec/failure-replay-bundles/manifest.json`
+- R3 failure ledger:
+  - `build/reports/r3-failure-ledger/r3-failure-ledger.json`
+  - `build/reports/r3-failure-ledger/r3-failure-ledger.md`
 - Spring matrix:
   - `build/reports/spring-matrix/spring-compatibility-matrix.json`
   - `build/reports/spring-matrix/spring-compatibility-matrix.md`
