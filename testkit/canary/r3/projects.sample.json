@@ -1,0 +1,40 @@
+{
+  "projects": [
+    {
+      "projectId": "platform-server",
+      "repository": "internal://apps/platform-server",
+      "revision": "canary-2026-02-24-a",
+      "canaryPassed": true,
+      "rollback": {
+        "attempted": true,
+        "success": true,
+        "recoverySeconds": 38
+      },
+      "notes": "MongoTemplate + transaction integration suite"
+    },
+    {
+      "projectId": "spring-suite-boot-2.7-template",
+      "repository": "internal://testkit/spring-suite",
+      "revision": "canary-2026-02-24-b",
+      "canaryPassed": true,
+      "rollback": {
+        "attempted": true,
+        "success": true,
+        "recoverySeconds": 29
+      },
+      "notes": "Template-centric compatibility profile"
+    },
+    {
+      "projectId": "spring-suite-boot-3.2-repository",
+      "repository": "internal://testkit/spring-suite",
+      "revision": "canary-2026-02-24-c",
+      "canaryPassed": true,
+      "rollback": {
+        "attempted": true,
+        "success": true,
+        "recoverySeconds": 34
+      },
+      "notes": "Repository-centric compatibility profile"
+    }
+  ]
+}

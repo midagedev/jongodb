@@ -19,6 +19,7 @@
 - [`13-r2-canary-certification.md`](./13-r2-canary-certification.md): R2 외부 canary 인증 산출 규격
 - [`14-r3-issue-50-protocol-parity-baseline.md`](./14-r3-issue-50-protocol-parity-baseline.md): R3 failure ledger 기준 protocol parity baseline
 - [`15-r3-issue-53-transaction-baseline.md`](./15-r3-issue-53-transaction-baseline.md): R3 transaction/session baseline과 unsupported surface
+- [`16-r3-issue-58-external-canary-certification.md`](./16-r3-issue-58-external-canary-certification.md): R3 external canary certification flow
 
 ## 권장 읽기 순서
 
@@ -37,6 +38,7 @@
 13. `13-r2-canary-certification.md`로 외부 canary 인증 기준 고정
 14. `14-r3-issue-50-protocol-parity-baseline.md`로 R3 protocol baseline 확인
 15. `15-r3-issue-53-transaction-baseline.md`로 R3 transaction/session baseline 확인
+16. `16-r3-issue-58-external-canary-certification.md`로 R3 external canary 인증 절차 확인
 
 ## 리서치 스냅샷
 

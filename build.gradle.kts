@@ -302,6 +302,24 @@ tasks.register<JavaExec>("r2CanaryCertificationEvidence") {
     )
 }
 
+tasks.register<JavaExec>("r3CanaryCertificationEvidence") {
+    group = "verification"
+    description = "Generates R3 external canary certification artifacts from canary result JSON."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.R2CanaryCertification")
+
+    val inputJson = (findProperty("r3CanaryInputJson") as String?)
+        ?: "build/reports/spring-canary/r3-projects.json"
+    val outputDir = (findProperty("r3CanaryOutputDir") as String?) ?: "build/reports/r3-canary"
+    val failOnGate = (findProperty("r3CanaryFailOnGate") as String?)?.toBoolean() ?: true
+
+    args(
+        "--input-json=$inputJson",
+        "--output-dir=$outputDir",
+        if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
+    )
+}
+
 tasks.register<JavaExec>("r3FailureLedger") {
     group = "verification"
     description = "Generates deterministic R3 failure-ledger artifacts from official suite runs."
