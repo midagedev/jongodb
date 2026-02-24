@@ -57,6 +57,9 @@ class R2CompatibilityScorecardTest {
         final Document manifestJson = Document.parse(Files.readString(paths.supportManifestJson()));
         assertTrue(manifestJson.get("summary", Document.class).getInteger("supported") > 0);
         assertTrue(manifestJson.getList("features", Document.class).size() >= 10);
+        assertTrue(hasFeature(manifestJson, "crud.count-alias"));
+        assertTrue(hasFeature(manifestJson, "crud.distinct-core"));
+        assertTrue(hasFeature(manifestJson, "crud.findoneanddelete"));
     }
 
     @Test
@@ -84,5 +87,14 @@ class R2CompatibilityScorecardTest {
     private static void writeJson(final Path path, final String content) throws IOException {
         Files.createDirectories(path.getParent());
         Files.writeString(path, content, StandardCharsets.UTF_8);
+    }
+
+    private static boolean hasFeature(final Document manifestJson, final String featureId) {
+        for (final Document feature : manifestJson.getList("features", Document.class)) {
+            if (featureId.equals(feature.getString("featureId"))) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -249,6 +249,7 @@ public final class R3FailureLedgerRunner {
 
         boolean hasTxn = false;
         boolean hasAggregation = false;
+        boolean hasDistinct = false;
         boolean hasQueryUpdate = false;
         for (final ScenarioCommand command : commands) {
             final String name = command.commandName().toLowerCase(Locale.ROOT);
@@ -257,6 +258,9 @@ public final class R3FailureLedgerRunner {
             }
             if ("aggregate".equals(name)) {
                 hasAggregation = true;
+            }
+            if ("distinct".equals(name)) {
+                hasDistinct = true;
             }
             if ("find".equals(name)
                     || name.startsWith("update")
@@ -277,6 +281,9 @@ public final class R3FailureLedgerRunner {
         }
         if (hasTxn) {
             return "txn";
+        }
+        if (hasDistinct) {
+            return "distinct";
         }
         if (hasAggregation) {
             return "aggregation";
