@@ -1,0 +1,50 @@
+name: R3 External Canary Certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      canary_input_json:
+        description: "Path to canary project result JSON"
+        required: false
+        default: "testkit/canary/r3/projects.sample.json"
+
+permissions:
+  contents: read
+
+jobs:
+  certify-r3-canary:
+    name: Generate R3 canary certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Run R3 canary certification
+        run: |
+          gradle --no-daemon --stacktrace \
+            -Pr3CanaryInputJson="${{ github.event.inputs.canary_input_json || 'testkit/canary/r3/projects.sample.json' }}" \
+            -Pr3CanaryOutputDir="build/reports/r3-canary" \
+            -Pr3CanaryFailOnGate=true \
+            r3CanaryCertificationEvidence
+
+      - name: Upload R3 canary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: r3-canary-certification
+          path: |
+            build/reports/r3-canary/**/*.json
+            build/reports/r3-canary/**/*.md
+          if-no-files-found: error
+          retention-days: 14

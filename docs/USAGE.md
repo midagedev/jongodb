@@ -116,6 +116,13 @@ gradle r2CanaryCertificationEvidence \
   -Pr2CanaryInputJson="/path/to/projects.json"
 ```
 
+Run R3 external canary certification from canary result JSON:
+
+```bash
+gradle r3CanaryCertificationEvidence \
+  -Pr3CanaryInputJson="testkit/canary/r3/projects.sample.json"
+```
+
 Run final readiness aggregation:
 
 ```bash
@@ -171,6 +178,9 @@ GitHub Actions workflow:
 - R2 canary:
   - `build/reports/r2-canary/r2-canary-certification.json`
   - `build/reports/r2-canary/r2-canary-certification.md`
+- R3 canary:
+  - `build/reports/r3-canary/r2-canary-certification.json`
+  - `build/reports/r3-canary/r2-canary-certification.md`
 - Final readiness:
   - `build/reports/release-readiness/r1-final-readiness-report.json`
   - `build/reports/release-readiness/r1-final-readiness-report.md`
