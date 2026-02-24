@@ -209,6 +209,41 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void countCommandAliasSupportsLongSkipAndLimitValues() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(
+                BsonDocument.parse("{\"_id\":1}"),
+                BsonDocument.parse("{\"_id\":2}"),
+                BsonDocument.parse("{\"_id\":3}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument hugeSkipResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"count\":\"users\",\"$db\":\"app\",\"query\":{},\"skip\":{\"$numberLong\":\"2147483648\"}}"));
+        assertEquals(1.0, hugeSkipResponse.get("ok").asNumber().doubleValue());
+        assertEquals(0L, hugeSkipResponse.getInt64("n").getValue());
+        assertEquals(0L, hugeSkipResponse.getInt64("count").getValue());
+
+        final BsonDocument hugeLimitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"count\":\"users\",\"$db\":\"app\",\"query\":{},\"skip\":1,\"limit\":{\"$numberLong\":\"9223372036854775807\"}}"));
+        assertEquals(1.0, hugeLimitResponse.get("ok").asNumber().doubleValue());
+        assertEquals(2L, hugeLimitResponse.getInt64("n").getValue());
+        assertEquals(2L, hugeLimitResponse.getInt64("count").getValue());
+    }
+
+    @Test
+    void countCommandAliasRejectsInvalidSkipAndLimitLikeCountDocuments() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument countSkipTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"count\":\"users\",\"query\":{},\"skip\":1.5}"));
+        assertCommandError(countSkipTypeMismatch, "TypeMismatch");
+
+        final BsonDocument countLimitBadValue = dispatcher.dispatch(BsonDocument.parse(
+                "{\"count\":\"users\",\"query\":{},\"limit\":-1}"));
+        assertCommandError(countLimitBadValue, "BadValue");
+    }
+
+    @Test
     void countDocumentsCommandRejectsInvalidPayloadShapes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
 

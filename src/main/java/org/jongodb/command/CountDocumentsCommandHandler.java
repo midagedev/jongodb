@@ -44,7 +44,7 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
             filter = filterValue.asDocument();
         }
 
-        final int skip;
+        final long skip;
         final BsonValue skipValue = command.get("skip");
         if (skipValue == null) {
             skip = 0;
@@ -53,13 +53,13 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
             if (parsedSkip == null) {
                 return CommandErrors.typeMismatch("skip must be an integer");
             }
-            if (parsedSkip < 0 || parsedSkip > Integer.MAX_VALUE) {
+            if (parsedSkip < 0) {
                 return CommandErrors.badValue("skip must be a non-negative integer");
             }
-            skip = parsedSkip.intValue();
+            skip = parsedSkip;
         }
 
-        final int limit;
+        final long limit;
         final BsonValue limitValue = command.get("limit");
         if (limitValue == null) {
             limit = 0;
@@ -68,10 +68,10 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
             if (parsedLimit == null) {
                 return CommandErrors.typeMismatch("limit must be an integer");
             }
-            if (parsedLimit < 0 || parsedLimit > Integer.MAX_VALUE) {
+            if (parsedLimit < 0) {
                 return CommandErrors.badValue("limit must be a non-negative integer");
             }
-            limit = parsedLimit.intValue();
+            limit = parsedLimit;
         }
 
         final List<BsonDocument> matches;
@@ -81,12 +81,9 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }
 
-        final int fromIndex = Math.min(skip, matches.size());
-        int toIndex = matches.size();
-        if (limit > 0) {
-            toIndex = Math.min(fromIndex + limit, matches.size());
-        }
-        final long count = toIndex - fromIndex;
+        final long fromIndex = Math.min(skip, matches.size());
+        final long available = matches.size() - fromIndex;
+        final long count = limit > 0 ? Math.min(limit, available) : available;
 
         return new BsonDocument()
                 .append("n", new BsonInt64(count))
