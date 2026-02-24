@@ -1,0 +1,73 @@
+name: Node Compatibility Smoke
+
+on:
+  pull_request:
+    paths:
+      - "packages/memory-server/**"
+      - "src/main/java/org/jongodb/server/**"
+      - "testkit/node-compat/**"
+      - ".github/workflows/node-compat-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: mongodb + mongoose smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install root workspace dependencies
+        run: npm ci
+
+      - name: Build memory-server package
+        run: npm run node:build
+
+      - name: Resolve launcher classpath
+        id: classpath
+        shell: bash
+        run: |
+          CLASSPATH=$(./.tooling/gradle-8.10.2/bin/gradle --no-daemon -q printLauncherClasspath | tail -n 1)
+          if [[ -z "$CLASSPATH" ]]; then
+            echo "Failed to resolve launcher classpath."
+            exit 1
+          fi
+          echo "value=$CLASSPATH" >> "$GITHUB_OUTPUT"
+
+      - name: Install node compatibility smoke dependencies
+        run: npm --prefix testkit/node-compat ci
+
+      - name: Run node compatibility smoke suite
+        env:
+          JONGODB_CLASSPATH: ${{ steps.classpath.outputs.value }}
+        run: npm --prefix testkit/node-compat test
+
+      - name: Upload node compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-compat-smoke-report
+          path: testkit/node-compat/reports/node-compat-smoke.json
+          if-no-files-found: warn
+          retention-days: 14

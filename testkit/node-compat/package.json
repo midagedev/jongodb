@@ -1,0 +1,12 @@
+{
+  "name": "jongodb-node-compat-smoke",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node ./src/smoke-runner.mjs --report ./reports/node-compat-smoke.json"
+  },
+  "dependencies": {
+    "mongodb": "^6.21.0",
+    "mongoose": "^8.19.1"
+  }
+}
