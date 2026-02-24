@@ -626,6 +626,37 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void marksClientBulkWriteVerboseResultsAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-verbose-results.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite verboseResults true",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"verboseResults": true, "models": [
+                          {"insertOne": {"namespace": "app.users", "document": {"_id": 1}}}
+                        ]}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF clientBulkWrite option: verboseResults=true")));
+    }
+
+    @Test
     void importsCountAliasWithQueryAndExecutesThroughWireBackend() throws IOException {
         Files.writeString(
                 tempDir.resolve("count-alias-integration.json"),
