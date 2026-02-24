@@ -12,3 +12,8 @@ out/
 
 # Local tool distributions
 .tooling/
+
+# Node workspace artifacts
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
