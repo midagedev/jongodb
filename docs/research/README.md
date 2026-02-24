@@ -15,6 +15,9 @@
 - [`09-r1-replacement-reference-baseline.md`](./09-r1-replacement-reference-baseline.md): R1 대체 목표의 공식 레퍼런스 기준선
 - [`10-r1-issue-reference-test-matrix.md`](./10-r1-issue-reference-test-matrix.md): R1 이슈별 레퍼런스/테스트/게이트 매핑
 - [`11-r1-issue-37-canary-cutover-rollback-playbook.md`](./11-r1-issue-37-canary-cutover-rollback-playbook.md): Issue #37 canary 전환/롤백 실행 플레이북
+- [`12-r2-scorecard-manifest.md`](./12-r2-scorecard-manifest.md): R2 scorecard/support manifest 산출 규격
+- [`13-r2-canary-certification.md`](./13-r2-canary-certification.md): R2 외부 canary 인증 산출 규격
+- [`14-r3-issue-50-protocol-parity-baseline.md`](./14-r3-issue-50-protocol-parity-baseline.md): R3 failure ledger 기준 protocol parity baseline
 
 ## 권장 읽기 순서
 
@@ -29,6 +32,9 @@
 9. `09-r1-replacement-reference-baseline.md`로 R1 판정 기준 고정
 10. `10-r1-issue-reference-test-matrix.md`로 이슈 실행/검증 매핑 적용
 11. `11-r1-issue-37-canary-cutover-rollback-playbook.md`로 canary cutover/rollback 증빙 운영
+12. `12-r2-scorecard-manifest.md`로 R2 산출물 포맷 고정
+13. `13-r2-canary-certification.md`로 외부 canary 인증 기준 고정
+14. `14-r3-issue-50-protocol-parity-baseline.md`로 R3 protocol baseline 확인
 
 ## 리서치 스냅샷
 
