@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
-import { delimiter } from "node:path";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { delimiter, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
+
+const require = createRequire(import.meta.url);
 
 const READY_PREFIX = "JONGODB_URI=";
 const FAILURE_PREFIX = "JONGODB_START_FAILURE=";
@@ -11,7 +15,10 @@ const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 const DEFAULT_LAUNCHER_CLASS = "org.jongodb.server.TcpMongoServerLauncher";
 const MAX_LOG_LINES = 50;
 
+const BUNDLED_BINARY_PACKAGE_PREFIX = "@jongodb/memory-server-bin";
+
 type LogLevel = "silent" | "info" | "debug";
+type LaunchMode = "auto" | "binary" | "java";
 
 export interface JongodbMemoryServerOptions {
   host?: string;
@@ -22,6 +29,8 @@ export interface JongodbMemoryServerOptions {
   javaPath?: string;
   launcherClass?: string;
   classpath?: string | string[];
+  binaryPath?: string;
+  launchMode?: LaunchMode;
   env?: Record<string, string>;
   logLevel?: LogLevel;
 }
@@ -36,6 +45,13 @@ export interface JongodbMemoryServer {
 interface ExitResult {
   code: number | null;
   signal: NodeJS.Signals | null;
+}
+
+interface SpawnLaunchConfig {
+  mode: "binary" | "java";
+  command: string;
+  args: string[];
+  source: string;
 }
 
 export async function startJongodbMemoryServer(
@@ -54,27 +70,54 @@ export async function startJongodbMemoryServer(
   const host = normalizeHost(options.host);
   const port = normalizePort(options.port);
   const databaseName = normalizeDatabaseName(options.databaseName);
-  const launcherClass = options.launcherClass?.trim() || DEFAULT_LAUNCHER_CLASS;
-  const javaPath =
-    options.javaPath?.trim() || process.env.JONGODB_JAVA_PATH || "java";
-  const classpath = resolveClasspath(options.classpath);
   const logLevel = options.logLevel ?? "silent";
+  const launchConfigs = resolveLaunchConfigs(options, {
+    host,
+    port,
+    databaseName,
+  });
+  const launchErrors: string[] = [];
 
-  const args = [
-    "-cp",
-    classpath,
-    launcherClass,
-    `--host=${host}`,
-    `--port=${port}`,
-    `--database=${databaseName}`,
-  ];
+  for (let index = 0; index < launchConfigs.length; index += 1) {
+    const launchConfig = launchConfigs[index];
+    try {
+      return await startWithLaunchConfig(launchConfig, {
+        startupTimeoutMs,
+        stopTimeoutMs,
+        logLevel,
+        env: options.env,
+      });
+    } catch (error: unknown) {
+      const normalized = wrapError(error);
+      launchErrors.push(
+        `[${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
+      );
+    }
+  }
 
-  const child = spawn(javaPath, args, {
+  throw new Error(
+    [
+      "Failed to start jongodb with available launch configurations.",
+      ...launchErrors,
+    ].join(" ")
+  );
+}
+
+async function startWithLaunchConfig(
+  launchConfig: SpawnLaunchConfig,
+  context: {
+    startupTimeoutMs: number;
+    stopTimeoutMs: number;
+    logLevel: LogLevel;
+    env?: Record<string, string>;
+  }
+): Promise<JongodbMemoryServer> {
+  const child = spawn(launchConfig.command, launchConfig.args, {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     env: {
       ...process.env,
-      ...options.env,
+      ...context.env,
     },
   });
 
@@ -96,10 +139,11 @@ export async function startJongodbMemoryServer(
     stderrReader,
     stdoutLines,
     stderrLines,
-    startupTimeoutMs,
-    logLevel,
+    startupTimeoutMs: context.startupTimeoutMs,
+    logLevel: context.logLevel,
+    launchDescription: `${launchConfig.mode}:${launchConfig.source}`,
   }).catch(async (error: unknown) => {
-    await forceStopIfAlive(child, stopTimeoutMs);
+    await forceStopIfAlive(child, context.stopTimeoutMs);
     throw wrapError(error);
   });
 
@@ -126,7 +170,7 @@ export async function startJongodbMemoryServer(
       );
     }
 
-    const gracefulExit = await waitForExit(child, stopTimeoutMs);
+    const gracefulExit = await waitForExit(child, context.stopTimeoutMs);
     if (gracefulExit !== null) {
       return;
     }
@@ -138,7 +182,7 @@ export async function startJongodbMemoryServer(
       );
     }
 
-    const forcedExit = await waitForExit(child, stopTimeoutMs);
+    const forcedExit = await waitForExit(child, context.stopTimeoutMs);
     if (forcedExit === null) {
       throw new Error(
         "Failed to stop jongodb server process: process did not exit after SIGKILL."
@@ -163,6 +207,265 @@ export async function startJongodbMemoryServer(
     pid: child.pid,
     detach,
     stop,
+  };
+}
+
+function resolveLaunchConfigs(
+  options: JongodbMemoryServerOptions,
+  context: { host: string; port: number; databaseName: string }
+): SpawnLaunchConfig[] {
+  const mode = options.launchMode ?? "auto";
+  if (mode !== "auto" && mode !== "binary" && mode !== "java") {
+    throw new Error(`launchMode must be one of: auto, binary, java (got: ${mode}).`);
+  }
+
+  const binary = resolveBinaryCandidate(options.binaryPath);
+  const java = resolveJavaCandidate(options);
+
+  if (mode === "binary") {
+    if (binary === null) {
+      throw new Error(
+        [
+          "Binary launch mode requested but no binary was found.",
+          "Provide options.binaryPath or JONGODB_BINARY_PATH.",
+          bundledBinaryHint(),
+        ].join(" ")
+      );
+    }
+    return [toBinaryLaunchConfig(binary.path, binary.source, context)];
+  }
+
+  if (mode === "java") {
+    if (java === null) {
+      throw new Error(
+        [
+          "Java launch mode requested but Java classpath is not configured.",
+          "Pass options.classpath or set JONGODB_CLASSPATH.",
+          "Example (repo-local): ./.tooling/gradle-8.10.2/bin/gradle -q printLauncherClasspath",
+        ].join(" ")
+      );
+    }
+    return [toJavaLaunchConfig(java, context)];
+  }
+
+  if (binary !== null && java !== null) {
+    return [
+      toBinaryLaunchConfig(binary.path, binary.source, context),
+      toJavaLaunchConfig(java, context),
+    ];
+  }
+  if (binary !== null) {
+    return [toBinaryLaunchConfig(binary.path, binary.source, context)];
+  }
+  if (java !== null) {
+    return [toJavaLaunchConfig(java, context)];
+  }
+
+  throw new Error(
+    [
+      "No launcher runtime configured.",
+      "Provide one of:",
+      "1) options.binaryPath or JONGODB_BINARY_PATH",
+      "2) options.classpath or JONGODB_CLASSPATH",
+      bundledBinaryHint(),
+    ].join(" ")
+  );
+}
+
+function toBinaryLaunchConfig(
+  binaryPath: string,
+  source: string,
+  context: { host: string; port: number; databaseName: string }
+): SpawnLaunchConfig {
+  return {
+    mode: "binary",
+    command: binaryPath,
+    args: [
+      `--host=${context.host}`,
+      `--port=${context.port}`,
+      `--database=${context.databaseName}`,
+    ],
+    source,
+  };
+}
+
+function toJavaLaunchConfig(
+  java: { javaPath: string; classpath: string; launcherClass: string; source: string },
+  context: { host: string; port: number; databaseName: string }
+): SpawnLaunchConfig {
+  return {
+    mode: "java",
+    command: java.javaPath,
+    args: [
+      "-cp",
+      java.classpath,
+      java.launcherClass,
+      `--host=${context.host}`,
+      `--port=${context.port}`,
+      `--database=${context.databaseName}`,
+    ],
+    source: java.source,
+  };
+}
+
+function resolveBinaryCandidate(
+  explicitBinaryPath: string | undefined
+): { path: string; source: string } | null {
+  const fromOption = normalizeBinaryPath(explicitBinaryPath, "options.binaryPath");
+  if (fromOption !== null) {
+    return { path: fromOption, source: "options.binaryPath" };
+  }
+
+  const fromEnv = normalizeBinaryPath(process.env.JONGODB_BINARY_PATH, "JONGODB_BINARY_PATH");
+  if (fromEnv !== null) {
+    return { path: fromEnv, source: "JONGODB_BINARY_PATH" };
+  }
+
+  const fromBundled = resolveBundledBinaryPath();
+  if (fromBundled !== null) {
+    return fromBundled;
+  }
+
+  return null;
+}
+
+function normalizeBinaryPath(value: string | undefined, fieldName: string): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new Error(`${fieldName} must not be empty when provided.`);
+  }
+  return normalized;
+}
+
+function resolveBundledBinaryPath(): { path: string; source: string } | null {
+  const candidates = bundledBinaryPackageCandidates();
+  for (const packageName of candidates) {
+    const pathFromPackage = resolveBinaryPathFromPackage(packageName);
+    if (pathFromPackage !== null) {
+      return {
+        path: pathFromPackage,
+        source: `bundled-package:${packageName}`,
+      };
+    }
+  }
+  return null;
+}
+
+function bundledBinaryPackageCandidates(): string[] {
+  const platform = process.platform;
+  const arch = process.arch;
+
+  if (platform === "darwin") {
+    return [`${BUNDLED_BINARY_PACKAGE_PREFIX}-darwin-${arch}`];
+  }
+
+  if (platform === "win32") {
+    return [`${BUNDLED_BINARY_PACKAGE_PREFIX}-win32-${arch}`];
+  }
+
+  if (platform === "linux") {
+    const libcVariant = detectLinuxLibcVariant();
+    return [
+      `${BUNDLED_BINARY_PACKAGE_PREFIX}-linux-${arch}-${libcVariant}`,
+      `${BUNDLED_BINARY_PACKAGE_PREFIX}-linux-${arch}`,
+    ];
+  }
+
+  return [];
+}
+
+function detectLinuxLibcVariant(): "gnu" | "musl" {
+  const report = process.report?.getReport?.() as
+    | { header?: { glibcVersionRuntime?: string } }
+    | undefined;
+  const glibcVersionRuntime = report?.header?.glibcVersionRuntime;
+  if (typeof glibcVersionRuntime === "string" && glibcVersionRuntime.length > 0) {
+    return "gnu";
+  }
+  return "musl";
+}
+
+function resolveBinaryPathFromPackage(packageName: string): string | null {
+  try {
+    const packageJsonPath = require.resolve(`${packageName}/package.json`);
+    const packageDir = dirname(packageJsonPath);
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      bin?: string | Record<string, string>;
+      jongodb?: { binary?: string };
+    };
+
+    const binaryRelativePath =
+      readJongodbBinaryPath(packageJson) ??
+      readBinEntryPath(packageJson.bin);
+
+    if (binaryRelativePath === null) {
+      return null;
+    }
+
+    return resolve(packageDir, binaryRelativePath);
+  } catch {
+    return null;
+  }
+}
+
+function readJongodbBinaryPath(packageJson: {
+  jongodb?: { binary?: string };
+}): string | null {
+  const binary = packageJson.jongodb?.binary;
+  if (typeof binary !== "string") {
+    return null;
+  }
+  const normalized = binary.trim();
+  return normalized.length === 0 ? null : normalized;
+}
+
+function readBinEntryPath(
+  value: string | Record<string, string> | undefined
+): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length === 0 ? null : normalized;
+  }
+
+  if (value !== undefined && typeof value === "object") {
+    const preferred = value["jongodb-memory-server"];
+    if (typeof preferred === "string" && preferred.trim().length > 0) {
+      return preferred.trim();
+    }
+
+    for (const candidate of Object.values(value)) {
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+function bundledBinaryHint(): string {
+  const candidates = bundledBinaryPackageCandidates();
+  if (candidates.length === 0) {
+    return "Bundled platform binary package is not defined for this OS/architecture.";
+  }
+  return `Bundled platform binary package candidates: ${candidates.join(", ")}.`;
+}
+
+function resolveJavaCandidate(
+  options: JongodbMemoryServerOptions
+): { javaPath: string; classpath: string; launcherClass: string; source: string } | null {
+  const classpath = resolveClasspathOrNull(options.classpath);
+  if (classpath === null) {
+    return null;
+  }
+  return {
+    javaPath: options.javaPath?.trim() || process.env.JONGODB_JAVA_PATH || "java",
+    classpath,
+    launcherClass: options.launcherClass?.trim() || DEFAULT_LAUNCHER_CLASS,
+    source: options.classpath !== undefined ? "options.classpath" : "JONGODB_CLASSPATH",
   };
 }
 
@@ -202,9 +505,7 @@ function normalizeDatabaseName(databaseName: string | undefined): string {
   return normalized;
 }
 
-function resolveClasspath(
-  classpath: string | string[] | undefined
-): string {
+function resolveClasspathOrNull(classpath: string | string[] | undefined): string | null {
   const explicit = resolveExplicitClasspath(classpath);
   if (explicit !== null) {
     return explicit;
@@ -214,14 +515,7 @@ function resolveClasspath(
   if (fromEnv !== undefined && fromEnv.length > 0) {
     return fromEnv;
   }
-
-  throw new Error(
-    [
-      "Jongodb Java classpath is not configured.",
-      "Pass options.classpath or set JONGODB_CLASSPATH.",
-      "Example (repo-local): ./.tooling/gradle-8.10.2/bin/gradle -q printLauncherClasspath",
-    ].join(" ")
-  );
+  return null;
 }
 
 function resolveExplicitClasspath(
@@ -262,6 +556,7 @@ async function waitForStartup(params: {
   stderrLines: string[];
   startupTimeoutMs: number;
   logLevel: LogLevel;
+  launchDescription: string;
 }): Promise<{ uri: string }> {
   const {
     child,
@@ -271,6 +566,7 @@ async function waitForStartup(params: {
     stderrLines,
     startupTimeoutMs,
     logLevel,
+    launchDescription,
   } = params;
 
   return new Promise((resolve, reject) => {
@@ -285,7 +581,7 @@ async function waitForStartup(params: {
       reject(
         new Error(
           [
-            `Timed out waiting for jongodb startup after ${startupTimeoutMs}ms.`,
+            `Timed out waiting for jongodb startup after ${startupTimeoutMs}ms (${launchDescription}).`,
             formatLogTail("stdout", stdoutLines),
             formatLogTail("stderr", stderrLines),
           ].join(" ")
@@ -336,8 +632,9 @@ async function waitForStartup(params: {
         reject(
           new Error(
             [
-              `Failed to spawn Java process '${child.spawnfile}': ${error.message}`,
-              "Check javaPath and classpath configuration.",
+              `Failed to spawn launcher '${child.spawnfile}': ${error.message}`,
+              `Launch source: ${launchDescription}.`,
+              "Check binary/classpath configuration.",
             ].join(" ")
           )
         );
@@ -353,6 +650,7 @@ async function waitForStartup(params: {
           new Error(
             [
               `Jongodb process exited before readiness (code=${code}, signal=${signal}).`,
+              `Launch source: ${launchDescription}.`,
               formatFailureLine(stderrLines),
               formatLogTail("stdout", stdoutLines),
               formatLogTail("stderr", stderrLines),

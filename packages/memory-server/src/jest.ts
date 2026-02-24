@@ -5,6 +5,7 @@ import {
   type JongodbMemoryServerOptions,
   startJongodbMemoryServer,
 } from "./index.js";
+import { createJongodbEnvRuntime } from "./runtime.js";
 
 const DEFAULT_ENV_VAR_NAME = "MONGODB_URI";
 const DEFAULT_STATE_FILE = path.join(
@@ -43,33 +44,19 @@ export function registerJongodbForJest(
   hooks: JestHookRegistrar,
   options: JestHookOptions = {}
 ): RegisteredJongodbTestServer {
-  const envVarName = normalizeEnvVarName(options.envVarName);
-  let runtimeServer:
-    | Awaited<ReturnType<typeof startJongodbMemoryServer>>
-    | null = null;
-  let uri: string | null = null;
+  const runtime = createJongodbEnvRuntime(options);
 
   hooks.beforeAll(async () => {
-    runtimeServer = await startJongodbMemoryServer(options);
-    uri = runtimeServer.uri;
-    process.env[envVarName] = uri;
+    await runtime.setup();
   });
 
   hooks.afterAll(async () => {
-    if (runtimeServer !== null) {
-      await runtimeServer.stop();
-      runtimeServer = null;
-    }
+    await runtime.teardown();
   });
 
   return {
     get uri(): string {
-      if (uri === null) {
-        throw new Error(
-          "Jongodb URI is not available before beforeAll completes."
-        );
-      }
-      return uri;
+      return runtime.uri;
     },
   };
 }

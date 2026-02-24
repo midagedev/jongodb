@@ -1,9 +1,5 @@
-import {
-  type JongodbMemoryServerOptions,
-  startJongodbMemoryServer,
-} from "./index.js";
-
-const DEFAULT_ENV_VAR_NAME = "MONGODB_URI";
+import { type JongodbMemoryServerOptions } from "./index.js";
+import { createJongodbEnvRuntime } from "./runtime.js";
 
 export interface VitestHookRegistrar {
   beforeAll(callback: () => unknown | Promise<unknown>): void;
@@ -22,41 +18,19 @@ export function registerJongodbForVitest(
   hooks: VitestHookRegistrar,
   options: VitestHookOptions = {}
 ): RegisteredVitestJongodbServer {
-  const envVarName = normalizeEnvVarName(options.envVarName);
-  let runtimeServer:
-    | Awaited<ReturnType<typeof startJongodbMemoryServer>>
-    | null = null;
-  let uri: string | null = null;
+  const runtime = createJongodbEnvRuntime(options);
 
   hooks.beforeAll(async () => {
-    runtimeServer = await startJongodbMemoryServer(options);
-    uri = runtimeServer.uri;
-    process.env[envVarName] = uri;
+    await runtime.setup();
   });
 
   hooks.afterAll(async () => {
-    if (runtimeServer !== null) {
-      await runtimeServer.stop();
-      runtimeServer = null;
-    }
+    await runtime.teardown();
   });
 
   return {
     get uri(): string {
-      if (uri === null) {
-        throw new Error(
-          "Jongodb URI is not available before beforeAll completes."
-        );
-      }
-      return uri;
+      return runtime.uri;
     },
   };
-}
-
-function normalizeEnvVarName(name: string | undefined): string {
-  const normalized = name?.trim() || DEFAULT_ENV_VAR_NAME;
-  if (normalized.length === 0) {
-    throw new Error("envVarName must not be empty.");
-  }
-  return normalized;
 }

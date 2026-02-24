@@ -3,11 +3,13 @@
   "private": true,
   "description": "Workspace scripts for jongodb Node adapter packages.",
   "workspaces": [
-    "packages/*"
+    "packages/memory-server"
   ],
   "scripts": {
     "node:build": "npm run --workspace @jongodb/memory-server build",
     "node:test": "npm run --workspace @jongodb/memory-server test",
-    "node:typecheck": "npm run --workspace @jongodb/memory-server typecheck"
+    "node:typecheck": "npm run --workspace @jongodb/memory-server typecheck",
+    "node:release:check": "npm run --workspace @jongodb/memory-server release:check",
+    "node:sync-bin-optional-deps": "node ./scripts/node/sync-memory-server-optional-bins.mjs"
   }
 }

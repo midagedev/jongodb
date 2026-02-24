@@ -110,10 +110,14 @@ Requirements:
 Node.js adapter work is tracked in issue `#106` and lives under `packages/memory-server`.
 
 Current state:
-- package scaffold exists (`@jongodb/memory-server`)
+- package exists (`@jongodb/memory-server`)
+- framework-agnostic runtime helper is implemented (`./runtime`)
+- launcher mode supports `auto` / `binary` / `java`
+- platform binary package scaffolds exist (`@jongodb/memory-server-bin-*`)
 - runtime process manager is implemented (`#108`)
 - Jest/Vitest helpers are implemented (`#109`)
-- compatibility smoke suites are planned (`#110`)
+- compatibility smoke suite is implemented (`#110`)
+- release workflow exists (`.github/workflows/npm-node-release.yml`)
 
 Node runtime note:
 - provide Java classpath via `classpath` option or `JONGODB_CLASSPATH`

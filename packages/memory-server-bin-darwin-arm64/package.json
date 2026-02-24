@@ -1,0 +1,35 @@
+{
+  "name": "@jongodb/memory-server-bin-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Native launcher binary for @jongodb/memory-server (darwin-arm64).",
+  "license": "Apache-2.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/midagedev/jongodb.git",
+    "directory": "packages/memory-server-bin-darwin-arm64"
+  },
+  "bugs": {
+    "url": "https://github.com/midagedev/jongodb/issues"
+  },
+  "homepage": "https://github.com/midagedev/jongodb/tree/main/packages/memory-server-bin-darwin-arm64#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {},
+  "jongodb": {
+    "binary": "bin/jongodb",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
+}

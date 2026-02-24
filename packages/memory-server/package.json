@@ -1,46 +1,102 @@
 {
   "name": "@jongodb/memory-server",
-  "version": "0.0.0-development",
-  "description": "Node.js launcher for jongodb in-memory server",
+  "version": "0.1.0",
+  "description": "Node.js memory server launcher for jongodb (MongoDB-compatible integration tests).",
   "keywords": [
     "mongodb",
     "mongodb-memory-server",
     "jongodb",
     "integration-test",
+    "nestjs",
+    "express",
+    "fastify",
+    "mongoose",
+    "prisma",
+    "typeorm",
+    "mocha",
+    "e2e",
     "jest",
     "vitest"
   ],
   "license": "Apache-2.0",
+  "author": "jongodb contributors",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./jest": "./dist/jest.js",
-    "./vitest": "./dist/vitest.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./jest": {
+      "types": "./dist/jest.d.ts",
+      "default": "./dist/jest.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./nestjs": {
+      "types": "./dist/nestjs.d.ts",
+      "default": "./dist/nestjs.js"
+    },
+    "./vitest": {
+      "types": "./dist/vitest.d.ts",
+      "default": "./dist/vitest.js"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "jest": [
         "./dist/jest.d.ts"
       ],
+      "runtime": [
+        "./dist/runtime.d.ts"
+      ],
+      "nestjs": [
+        "./dist/nestjs.d.ts"
+      ],
       "vitest": [
         "./dist/vitest.d.ts"
       ]
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/midagedev/jongodb.git",
+    "directory": "packages/memory-server"
+  },
+  "bugs": {
+    "url": "https://github.com/midagedev/jongodb/issues"
+  },
+  "homepage": "https://github.com/midagedev/jongodb/tree/main/packages/memory-server#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@jongodb/memory-server-bin-darwin-arm64": "0.1.0",
+    "@jongodb/memory-server-bin-linux-x64-gnu": "0.1.0",
+    "@jongodb/memory-server-bin-win32-x64": "0.1.0"
+  },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE",
+    "!dist/test",
+    "!dist/test/**"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "npm run build",
-    "test": "node --test dist/test/*.test.js"
+    "test": "node --test dist/test/*.test.js",
+    "prepack": "npm run clean && npm run build",
+    "release:check": "npm run build && npm run typecheck && npm run test && npm pack --dry-run"
   },
   "devDependencies": {
     "@types/node": "^20.17.57",

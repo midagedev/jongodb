@@ -1,0 +1,35 @@
+{
+  "name": "@jongodb/memory-server-bin-win32-x64",
+  "version": "0.1.0",
+  "description": "Native launcher binary for @jongodb/memory-server (win32-x64).",
+  "license": "Apache-2.0",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/midagedev/jongodb.git",
+    "directory": "packages/memory-server-bin-win32-x64"
+  },
+  "bugs": {
+    "url": "https://github.com/midagedev/jongodb/issues"
+  },
+  "homepage": "https://github.com/midagedev/jongodb/tree/main/packages/memory-server-bin-win32-x64#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {},
+  "jongodb": {
+    "binary": "bin/jongodb.cmd",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
+}

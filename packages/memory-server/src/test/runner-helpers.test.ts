@@ -9,6 +9,7 @@ import {
   readJestGlobalState,
   registerJongodbForJest,
 } from "../jest.js";
+import { registerJongodbForNestJest } from "../nestjs.js";
 import { registerJongodbForVitest } from "../vitest.js";
 import { resolveTestClasspath } from "./support/classpath.js";
 
@@ -25,7 +26,7 @@ test(
       startupTimeoutMs: 20_000,
     });
 
-    assert.throws(() => registration.uri, /beforeAll/i);
+    assert.throws(() => registration.uri, /before (setup|all)/i);
 
     await hooks.runBeforeAll();
     assert.match(registration.uri, /^mongodb:\/\//u);
@@ -46,13 +47,43 @@ test(
       startupTimeoutMs: 20_000,
     });
 
-    assert.throws(() => registration.uri, /beforeAll/i);
+    assert.throws(() => registration.uri, /before (setup|all)/i);
 
     await hooks.runBeforeAll();
     assert.match(registration.uri, /^mongodb:\/\//u);
     assert.equal(process.env.JONGODB_VITEST_URI, registration.uri);
 
     await hooks.runAfterAll();
+  }
+);
+
+test(
+  "registerJongodbForNestJest wires lifecycle hooks and restores previous env value",
+  { concurrency: false },
+  async () => {
+    const previous = process.env.MONGODB_URI;
+    process.env.MONGODB_URI = "mongodb://previous-host:27017/previous";
+
+    try {
+      const hooks = new HookHarness();
+      const registration = registerJongodbForNestJest(hooks, {
+        classpath: classpathForRuntime,
+        startupTimeoutMs: 20_000,
+      });
+
+      await hooks.runBeforeAll();
+      assert.match(registration.uri, /^mongodb:\/\//u);
+      assert.equal(process.env.MONGODB_URI, registration.uri);
+
+      await hooks.runAfterAll();
+      assert.equal(process.env.MONGODB_URI, "mongodb://previous-host:27017/previous");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MONGODB_URI;
+      } else {
+        process.env.MONGODB_URI = previous;
+      }
+    }
   }
 );
 

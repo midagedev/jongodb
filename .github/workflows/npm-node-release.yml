@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Node package version (required for manual publish)"
+        description: "Node package version (required for publish)"
         required: false
         type: string
       publish:
@@ -25,8 +25,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  meta:
+    name: Resolve Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+    steps:
+      - name: Resolve version and publish mode
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            VERSION="${GITHUB_REF_NAME#node-v}"
+            SHOULD_PUBLISH=true
+          else
+            VERSION="${{ inputs.version }}"
+            if [[ "${{ inputs.publish }}" == "true" ]]; then
+              SHOULD_PUBLISH=true
+            else
+              SHOULD_PUBLISH=false
+            fi
+          fi
+
+          if [[ -n "$VERSION" && "$VERSION" == *"-SNAPSHOT" ]]; then
+            echo "Version must not end with -SNAPSHOT: $VERSION"
+            exit 1
+          fi
+
+          if [[ "$SHOULD_PUBLISH" == "true" && -z "$VERSION" ]]; then
+            echo "Publish mode requires an explicit version."
+            exit 1
+          fi
+
+          if [[ -z "$VERSION" ]]; then
+            echo "No version provided. Dry-run will use current workspace versions."
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$SHOULD_PUBLISH" >> "$GITHUB_OUTPUT"
+
   verify:
     name: Verify Node package
+    needs: meta
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -51,11 +92,99 @@ jobs:
       - name: Test
         run: npm run node:test
 
-  publish:
-    name: Publish Node package
-    needs: verify
+  publish-binaries:
+    name: Publish platform binary package (${{ matrix.workspace }})
+    needs: [meta, verify]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            workspace: "@jongodb/memory-server-bin-linux-x64-gnu"
+            workspace_dir: "packages/memory-server-bin-linux-x64-gnu"
+            output_name: "jongodb"
+          - runner: macos-14
+            workspace: "@jongodb/memory-server-bin-darwin-arm64"
+            workspace_dir: "packages/memory-server-bin-darwin-arm64"
+            output_name: "jongodb"
+          - runner: windows-latest
+            workspace: "@jongodb/memory-server-bin-win32-x64"
+            workspace_dir: "packages/memory-server-bin-win32-x64"
+            output_name: "jongodb.exe"
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Setup GraalVM native-image
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: "17"
+          distribution: "graalvm-community"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: "true"
+          cache: "gradle"
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Set package version
+        if: needs.meta.outputs.version != ''
+        shell: bash
+        run: node ./scripts/node/set-package-version.mjs --packageJson "${{ matrix.workspace_dir }}/package.json" --version "${{ needs.meta.outputs.version }}"
+
+      - name: Build native launcher binary
+        shell: bash
+        run: node ./scripts/node/build-native-launcher.mjs --gradle gradle --output "${RUNNER_TEMP}/${{ matrix.output_name }}"
+
+      - name: Stage binary into npm package workspace
+        shell: bash
+        run: node ./scripts/node/stage-bin-package.mjs --workspace "${{ matrix.workspace_dir }}" --binary "${RUNNER_TEMP}/${{ matrix.output_name }}"
+
+      - name: Validate npm credentials for publish
+        if: needs.meta.outputs.should_publish == 'true'
+        shell: bash
+        run: |
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "NPM_TOKEN secret is required for publish runs."
+            exit 1
+          fi
+
+      - name: npm publish dry-run
+        run: npm publish "${{ matrix.workspace_dir }}" --access public --provenance --dry-run
+
+      - name: npm publish
+        if: needs.meta.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "${{ matrix.workspace_dir }}" --access public --provenance
+
+  publish-core:
+    name: Publish @jongodb/memory-server
+    needs: [meta, verify, publish-binaries]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
@@ -72,42 +201,27 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
-      - name: Resolve release version
-        id: meta
+      - name: Set package version and sync optional binary dependencies
+        if: needs.meta.outputs.version != ''
         shell: bash
         run: |
-          PUBLISH_INPUT="${{ inputs.publish }}"
+          npm version "${{ needs.meta.outputs.version }}" --workspace @jongodb/memory-server --no-git-tag-version
+          node ./scripts/node/sync-memory-server-optional-bins.mjs --version "${{ needs.meta.outputs.version }}"
 
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            VERSION="${GITHUB_REF_NAME#node-v}"
-          else
-            VERSION="${{ inputs.version }}"
-          fi
-
-          if [[ "$VERSION" == *"-SNAPSHOT" ]]; then
-            echo "Version must not end with -SNAPSHOT: $VERSION"
+      - name: Validate npm credentials for publish
+        if: needs.meta.outputs.should_publish == 'true'
+        shell: bash
+        run: |
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "NPM_TOKEN secret is required for publish runs."
             exit 1
           fi
-
-          if [[ -z "$VERSION" ]]; then
-            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "$PUBLISH_INPUT" == "true" ]]; then
-              echo "Manual publish requires an explicit version input."
-              exit 1
-            fi
-            echo "No version input provided. Publish job will run in dry-run mode."
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Set package version for release job
-        if: steps.meta.outputs.version != ''
-        run: npm version "${{ steps.meta.outputs.version }}" --workspace @jongodb/memory-server --no-git-tag-version
 
       - name: npm publish dry-run
         run: npm publish --workspace @jongodb/memory-server --access public --provenance --dry-run
 
       - name: npm publish
-        if: env.NPM_TOKEN != '' && (github.event_name == 'push' || inputs.publish)
+        if: needs.meta.outputs.should_publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --workspace @jongodb/memory-server --access public --provenance

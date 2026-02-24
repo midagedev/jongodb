@@ -37,10 +37,17 @@ Use this when publishing `@jongodb/memory-server`:
 
 1. Confirm `Node Adapter Release` workflow verify job is green.
 2. Confirm package version is set explicitly (tag `node-vX.Y.Z` or manual input).
-3. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
-4. Run `npm publish --dry-run` and review package contents.
-5. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
-6. Update README usage examples with the released package version.
+3. Confirm npm scope ownership for `@jongodb` and valid `NPM_TOKEN` in GitHub repository secrets.
+4. Confirm GraalVM native-image is available in workflow runners (linux, macOS, windows) for binary jobs.
+5. Confirm platform binary packages publish first:
+   - `@jongodb/memory-server-bin-linux-x64-gnu`
+   - `@jongodb/memory-server-bin-darwin-arm64`
+   - `@jongodb/memory-server-bin-win32-x64`
+6. Confirm core package publishes after binaries with synced optional dependency versions.
+7. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
+8. Run `npm publish --dry-run` and review package contents.
+9. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
+10. Update README usage examples with the released package version.
 
 ## Release History
 
