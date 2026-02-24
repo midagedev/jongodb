@@ -1,0 +1,16 @@
+# Issue #123: [scorecard][r4][slice-03] Design clientBulkWrite delete model parity subset
+
+Status: in progress
+
+## Metadata
+- Issue: https://github.com/midagedev/jongodb/issues/123
+- Slice key: `slice-03`
+- Track: `track:engine`
+
+## Objective
+Define an isolated execution slice that contributes to reducing unsupported surface in the compatibility scorecard.
+
+## Planned Validation
+```bash
+./.tooling/gradle-8.10.2/bin/gradle --no-daemon r3FailureLedger
+```
