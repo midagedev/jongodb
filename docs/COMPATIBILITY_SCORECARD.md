@@ -58,7 +58,7 @@ Current ledger gate status:
 - `byTrack={}`
 - `byStatus={}`
 
-## Top Unsupported Reasons (Current)
+## Top Unsupported Reasons (Current, strict profile)
 
 | Reason | Count |
 | --- | --- |
@@ -77,11 +77,13 @@ Notes:
 
 - UTF importer now supports subset adapters for `runCommand` and `clientBulkWrite` (`#229`, `#231`).
 - The counts above are from the latest frozen snapshot; rerunning the ledger will shift those categories toward narrower unsupported reasons (for example unsupported command names/options).
+- Profile context matters: this snapshot is strict-profile (`failPoint` policy exclusion enabled). Compat-profile runs track failpoint categories separately.
 
 ## Policy Exclusions
 
-- `failPoint` remains a policy exclusion for deterministic in-process execution.
-- Scorecard accounting distinguishes this as `unsupported-by-policy UTF operation: failPoint`.
+- `failPoint` is a policy exclusion in strict profile for deterministic in-process execution.
+- Compat profile allows only failpoint-disable subset and keeps other modes explicit unsupported.
+- Scorecard accounting distinguishes strict-profile policy exclusions as `unsupported-by-policy UTF operation: failPoint`.
 
 ## Gap-to-Issue Mapping
 
@@ -89,6 +91,8 @@ Notes:
 - `#101`: unified CRUD adapter coverage (`bulkWrite`, `findOneAndUpdate`, `findOneAndReplace`, `countDocuments`, `replaceOne`) - completed.
 - `#229`: UTF `runCommand` subset adapter (`ping`, `buildInfo`, `listIndexes`, `count`) - completed.
 - `#231`: UTF `clientBulkWrite` subset adapter (ordered single-namespace rewrite to `bulkWrite`) - completed.
+- `#233`: update pipeline subset adapter (`$set`/`$unset` with literal values) - completed.
+- `#234`: profile-based failpoint handling (`strict` vs `compat`) - completed.
 - `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction

@@ -55,6 +55,38 @@ class BulkWriteCommandE2ETest {
     }
 
     @Test
+    void bulkWriteCommandSupportsUpdatePipelineSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "bulkWrite": "users",
+                  "$db": "app",
+                  "ordered": true,
+                  "operations": [
+                    {"insertOne": {"document": {"_id": 1, "name": "before", "legacy": true}}},
+                    {"updateOne": {"filter": {"_id": 1}, "update": [{"$set": {"name": "after"}}, {"$unset": "legacy"}]}}
+                  ]
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, response.getInt32("nInserted").getValue());
+        assertEquals(1, response.getInt32("nMatched").getValue());
+        assertEquals(1, response.getInt32("nModified").getValue());
+        assertEquals(0, response.getInt32("nDeleted").getValue());
+        assertEquals(0, response.getInt32("nUpserted").getValue());
+
+        final BsonDocument finalState =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument document =
+                finalState.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals("after", document.getString("name").getValue());
+        assertTrue(!document.containsKey("legacy"));
+    }
+
+    @Test
     void bulkWriteCommandStopsAtFirstWriteErrorWhenOrdered() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 

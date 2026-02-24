@@ -142,15 +142,12 @@ public final class BulkWriteCommandHandler implements CommandHandler {
 
         final BsonValue updateValue = operation.get("update");
         if (updateValue == null) {
-            return CommandErrors.typeMismatch("update must be a document");
+            return CommandErrors.typeMismatch("update must be a document or array");
         }
-        if (updateValue.isArray()) {
-            return CommandErrors.badValue("update pipeline is not supported yet");
+        if (!updateValue.isDocument() && !updateValue.isArray()) {
+            return CommandErrors.typeMismatch("update must be a document or array");
         }
-        if (!updateValue.isDocument()) {
-            return CommandErrors.typeMismatch("update must be a document");
-        }
-        if (!isOperatorUpdate(updateValue.asDocument())) {
+        if (updateValue.isDocument() && !isOperatorUpdate(updateValue.asDocument())) {
             return CommandErrors.badValue("bulkWrite update operation requires atomic modifiers");
         }
 
@@ -166,7 +163,7 @@ public final class BulkWriteCommandHandler implements CommandHandler {
 
         final BsonDocument updateSpec = new BsonDocument()
                 .append("q", filter)
-                .append("u", updateValue.asDocument())
+                .append("u", updateValue)
                 .append("multi", BsonBoolean.valueOf(multi))
                 .append("upsert", BsonBoolean.valueOf(upsert));
         appendIfPresent(operation, updateSpec, "hint");

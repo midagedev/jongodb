@@ -45,9 +45,20 @@ public final class FindOneAndUpdateCommandHandler implements CommandHandler {
             return CommandErrors.typeMismatch("filter must be a document");
         }
 
-        final BsonDocument update = readRequiredDocument(command, "update");
-        if (update == null) {
-            return CommandErrors.typeMismatch("update must be a document");
+        final BsonValue updateValue = command.get("update");
+        final BsonDocument update;
+        if (updateValue == null) {
+            return CommandErrors.typeMismatch("update must be a document or array");
+        } else if (updateValue.isDocument()) {
+            update = updateValue.asDocument();
+        } else if (updateValue.isArray()) {
+            final UpdatePipelineSubset.ParseResult parsedPipeline = UpdatePipelineSubset.parse(updateValue.asArray());
+            if (parsedPipeline.error() != null) {
+                return parsedPipeline.error();
+            }
+            update = parsedPipeline.updateDocument();
+        } else {
+            return CommandErrors.typeMismatch("update must be a document or array");
         }
 
         optionError = validateOperatorUpdateDocument(update);
