@@ -8,6 +8,7 @@ export interface VitestHookRegistrar {
 
 export interface VitestHookOptions extends JongodbMemoryServerOptions {
   envVarName?: string;
+  envVarNames?: string[];
 }
 
 export interface RegisteredVitestJongodbServer {

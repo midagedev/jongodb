@@ -22,6 +22,7 @@ export interface JestHookRegistrar {
 
 export interface JestHookOptions extends JongodbMemoryServerOptions {
   envVarName?: string;
+  envVarNames?: string[];
 }
 
 export interface RegisteredJongodbTestServer {

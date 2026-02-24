@@ -60,3 +60,42 @@ test(
     }
   }
 );
+
+test(
+  "createJongodbEnvRuntime writes and restores multiple env keys",
+  { concurrency: false },
+  async () => {
+    const previousPrimary = process.env.TEST_MULTI_PRIMARY;
+    const previousSecondary = process.env.TEST_MULTI_SECONDARY;
+    process.env.TEST_MULTI_PRIMARY = "mongodb://previous-host:27017/previous";
+    delete process.env.TEST_MULTI_SECONDARY;
+
+    const runtime = createJongodbEnvRuntime({
+      classpath: classpathForRuntime,
+      envVarNames: ["TEST_MULTI_PRIMARY", "TEST_MULTI_SECONDARY"],
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      const uri = await runtime.setup();
+      assert.equal(process.env.TEST_MULTI_PRIMARY, uri);
+      assert.equal(process.env.TEST_MULTI_SECONDARY, uri);
+
+      await runtime.teardown();
+      assert.equal(process.env.TEST_MULTI_PRIMARY, "mongodb://previous-host:27017/previous");
+      assert.equal(process.env.TEST_MULTI_SECONDARY, undefined);
+    } finally {
+      if (previousPrimary === undefined) {
+        delete process.env.TEST_MULTI_PRIMARY;
+      } else {
+        process.env.TEST_MULTI_PRIMARY = previousPrimary;
+      }
+
+      if (previousSecondary === undefined) {
+        delete process.env.TEST_MULTI_SECONDARY;
+      } else {
+        process.env.TEST_MULTI_SECONDARY = previousSecondary;
+      }
+    }
+  }
+);
