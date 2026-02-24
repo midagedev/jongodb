@@ -15,18 +15,25 @@ Status date: 2026-02-24
   - `docs/COMPATIBILITY_SCORECARD.md`
 - [x] README certification snapshot is updated and links current evidence docs.
 
+## Current Release-Line Notes
+
+- `main` is ahead of `v0.1.1` with unreleased PRs: `#86`, `#87`, `#88`, `#89`, `#91`.
+- Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse `v0.1.1` evidence.
+
 ## Tagging Gate
 
 Before creating a release tag:
 
-1. Re-run the three CI workflows above on the release candidate commit.
-2. Confirm that `docs/COMPATIBILITY_SCORECARD.md` metrics still match artifacts.
-3. Confirm no open P1/P2 compatibility regressions remain.
-4. Push the release tag (`git tag -a vX.Y.Z <commit> -m "jongodb X.Y.Z"` then `git push origin vX.Y.Z`).
-5. Confirm `.github/workflows/maven-central-release.yml` completed and a GitHub Release exists for the tag.
+1. Confirm `CI Test Suite` is green on the release candidate commit.
+2. Re-run the three certification workflows above on the release candidate commit.
+3. Confirm that `docs/COMPATIBILITY_SCORECARD.md` metrics still match artifacts.
+4. Confirm no open P1/P2 compatibility regressions remain.
+5. Push the release tag (`git tag -a vX.Y.Z <commit> -m "jongodb X.Y.Z"` then `git push origin vX.Y.Z`).
+6. Confirm `.github/workflows/maven-central-release.yml` completed and a GitHub Release exists for the tag.
 
 ## Release History
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |
 | --- | --- | --- | --- | --- |
+| `0.1.1` | `2026-02-24` | `f4a8bbb` | `io.github.midagedev:jongodb:0.1.1` | run `22335420545` |
 | `0.1.0` | `2026-02-24` | `df774da` | `io.github.midagedev:jongodb:0.1.0` | run `22334177236` |

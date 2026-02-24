@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added single-hook Spring test bootstrap annotation: `@JongodbMongoTest`.
+- Added command handlers for `countDocuments`, `replaceOne`, `findOneAndUpdate`, `findOneAndReplace`.
+- Added ordered `bulkWrite` core subset support.
+- Expanded `findOneAndUpdate` / `findOneAndReplace` projection subset behavior.
+- Added PR CI workflow `.github/workflows/ci-test-suite.yml` to enforce `clean test` on PRs and `main`.
+
+### Fixed
+- Included `aggregate` in transactional command routing so transaction-scoped aggregate operations use the transaction snapshot.
+- Added regression coverage for transactional aggregate visibility and post-commit publish behavior.
+
+### Changed
+- Maven release workflow now runs `clean test` before staging/deploy.
+- Default local project version moved to `0.1.2-SNAPSHOT`.
+- Updated README and release docs to distinguish `v0.1.1` certification baseline from current `main`.
+
 ## [0.1.1] - 2026-02-24
 
 ### Fixed

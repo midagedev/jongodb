@@ -4,6 +4,7 @@ Status date: 2026-02-24
 
 This document is the final R3 certification snapshot used for release decisions.
 It is an integration-test compatibility report, not a production MongoDB parity claim.
+Scope: release baseline for `v0.1.1` (`f4a8bbb`), not the latest `main` head.
 
 ## Evidence Sources
 
@@ -26,6 +27,15 @@ It is an integration-test compatibility report, not a production MongoDB parity 
 | External canary certification | PASS | projectCount=3, canaryPass=3, rollbackSuccess=3, maxRecoverySeconds=38 |
 | Spring compatibility matrix | PASS | totalCells=20, pass=20, fail=0, passRate=1.0 |
 | Compatibility scorecard gates | PASS | pass=2, fail=0, missing=0 |
+
+## Post-0.1.1 Main Deltas (Not Included in This Snapshot)
+
+The following `main` changes landed after `v0.1.1` and require the next release-cycle certification snapshot:
+
+- `#86`: single-hook Spring test annotation (`@JongodbMongoTest`)
+- `#87`: `countDocuments`, `replaceOne`, `findOneAndUpdate`, `findOneAndReplace` command support
+- `#88`: ordered `bulkWrite` core subset
+- `#91`: projection subset expansion for `findOneAndUpdate` / `findOneAndReplace`
 
 ## Official UTF Coverage Snapshot
 
@@ -89,4 +99,3 @@ Run the same gates locally:
   -Pr3CanaryInputJson=testkit/canary/r3/projects.sample.json \
   -Pr3CanaryFailOnGate=true
 ```
-

@@ -1037,6 +1037,31 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void aggregateCommandUsesTransactionalSnapshot() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":20,\"name\":\"txn-agg\"}],\"lsid\":{\"id\":\"session-a1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideAggregate = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"users\",\"$db\":\"app\",\"pipeline\":[{\"$match\":{}}],\"cursor\":{}}"));
+        assertEquals(0, outsideAggregate.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument transactionalAggregate = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"users\",\"$db\":\"app\",\"pipeline\":[{\"$match\":{}}],\"cursor\":{},\"lsid\":{\"id\":\"session-a1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1, transactionalAggregate.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-a1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideAfterCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"users\",\"$db\":\"app\",\"pipeline\":[{\"$match\":{}}],\"cursor\":{}}"));
+        assertEquals(1, outsideAfterCommit.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
     void abortTransactionDiscardsTransactionWrites() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 

@@ -8,6 +8,8 @@ It is not a production MongoDB replacement.
 Latest release: `0.1.1`  
 Maven coordinate: `io.github.midagedev:jongodb:0.1.1`
 
+`main` currently includes post-`0.1.1` command and Spring-test usability improvements that are not yet released.
+
 ## Why This Project Exists
 
 Container-based integration tests are useful for production fidelity, but they are often slower and more environment-sensitive during day-to-day development.
@@ -127,7 +129,7 @@ This project targets integration-test compatibility for common Spring data paths
 
 | Area | Current level | Notes |
 | --- | --- | --- |
-| Command surface | 17 handlers | Mix of `Supported` and `Partial` |
+| Command surface | 22 handlers | Mix of `Supported` and `Partial` |
 | Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced parity incomplete |
 | Aggregation | Core stages + selected Tier-2 stages | Full operator coverage not implemented |
 | Transactions | Single-process session/transaction flow | Namespace-aware commit merge |
@@ -178,7 +180,8 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 
 - `hello`, `isMaster`, `ping`, `buildInfo`, `getParameter`
 - `insert`, `find`, `aggregate`, `getMore`, `killCursors`
-- `createIndexes`, `listIndexes`, `update`, `delete`, `findAndModify`
+- `createIndexes`, `listIndexes`, `update`, `delete`, `bulkWrite`
+- `findAndModify`, `countDocuments`, `replaceOne`, `findOneAndUpdate`, `findOneAndReplace`
 - `commitTransaction`, `abortTransaction`
 
 ## Known Limitations
@@ -208,8 +211,9 @@ Unsupported branches are standardized progressively as:
 ## Release Process (Maintainers)
 
 1. Push tag `vX.Y.Z`.
-2. GitHub Actions workflow `.github/workflows/maven-central-release.yml` publishes to Maven Central.
-3. Workflow creates GitHub Release notes.
+2. Ensure CI test gates are green (`CI Test Suite` and compatibility workflows as needed).
+3. GitHub Actions workflow `.github/workflows/maven-central-release.yml` publishes to Maven Central.
+4. Workflow creates GitHub Release notes.
 
 Required secrets:
 - `MAVEN_CENTRAL_USERNAME`

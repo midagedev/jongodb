@@ -25,6 +25,7 @@ public final class TransactionCommandValidator {
                     "delete",
                     "bulkwrite",
                     "find",
+                    "aggregate",
                     "findandmodify",
                     "countdocuments",
                     "replaceone",

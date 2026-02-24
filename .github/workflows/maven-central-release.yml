@@ -96,6 +96,10 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      - name: Run release gate tests
+        if: steps.published.outputs.published != 'true'
+        run: gradle --no-daemon --stacktrace clean test
+
       - name: Import GPG keys
         if: steps.published.outputs.published != 'true'
         env:
