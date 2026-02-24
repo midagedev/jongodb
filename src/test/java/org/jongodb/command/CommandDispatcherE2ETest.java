@@ -272,6 +272,16 @@ class CommandDispatcherE2ETest {
         final BsonDocument queryTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
                 "{\"distinct\":\"users\",\"key\":\"name\",\"query\":1}"));
         assertCommandError(queryTypeMismatch, "TypeMismatch");
+
+        final BsonDocument collationUnsupported = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"collation\":{\"locale\":\"en\"}}"));
+        assertCommandError(collationUnsupported, 238, "NotImplemented");
+        assertEquals(
+                true,
+                collationUnsupported.getString("errmsg").getValue().contains("collation"));
+        assertEquals(
+                "UnsupportedFeature",
+                collationUnsupported.getArray("errorLabels").get(0).asString().getValue());
     }
 
     @Test

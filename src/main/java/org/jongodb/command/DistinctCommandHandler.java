@@ -36,6 +36,9 @@ public final class DistinctCommandHandler implements CommandHandler {
         if (optionError != null) {
             return optionError;
         }
+        if (command.containsKey("collation")) {
+            return CommandErrors.notImplemented("collation is not supported for distinct yet");
+        }
 
         final BsonValue keyValue = command.get("key");
         if (keyValue == null || !keyValue.isString()) {
