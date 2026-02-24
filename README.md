@@ -168,13 +168,6 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 }
 ```
 
-### From mongo-java-server and similar backends
-
-1. Replace test dependency with `io.github.midagedev:jongodb:<version>`.
-2. Switch bootstrap to `JongodbMongoTest`, `JongodbMongoInitializer`, or `JongodbMongoDynamicPropertySupport`.
-3. Run integration tests and classify failures.
-4. Keep a fallback profile for unsupported feature paths.
-
 ## Implemented Command Handlers
 
 - `hello`, `isMaster`, `ping`, `buildInfo`, `getParameter`
