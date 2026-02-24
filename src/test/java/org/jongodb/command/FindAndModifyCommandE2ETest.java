@@ -15,6 +15,14 @@ class FindAndModifyCommandE2ETest {
                 "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{},\"remove\":true,\"update\":{\"$set\":{\"name\":\"neo\"}}}"));
         assertCommandError(updateWithRemove, "BadValue");
 
+        final BsonDocument updateArrayWithRemove = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{},\"remove\":true,\"update\":[{\"$set\":{\"name\":\"neo\"}}]}"));
+        assertCommandError(updateArrayWithRemove, "BadValue");
+
+        final BsonDocument updateScalarWithRemove = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{},\"remove\":true,\"update\":1}"));
+        assertCommandError(updateScalarWithRemove, "BadValue");
+
         final BsonDocument newWithRemove = dispatcher.dispatch(BsonDocument.parse(
                 "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{},\"remove\":true,\"new\":true}"));
         assertCommandError(newWithRemove, "BadValue");
