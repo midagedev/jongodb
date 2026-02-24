@@ -111,8 +111,16 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
             return null;
         }
 
+        final BsonValue countAlias = command.get("count");
+        if (countAlias != null) {
+            if (countAlias.isString()) {
+                return countAlias.asString().getValue();
+            }
+            return null;
+        }
+
         for (final String key : command.keySet()) {
-            if (!"countdocuments".equalsIgnoreCase(key)) {
+            if (!"countdocuments".equalsIgnoreCase(key) && !"count".equalsIgnoreCase(key)) {
                 continue;
             }
             final BsonValue value = command.get(key);

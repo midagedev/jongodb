@@ -47,6 +47,7 @@ public final class CommandDispatcher {
         configuredHandlers.put("delete", new DeleteCommandHandler(routedStore));
         configuredHandlers.put("bulkwrite", new BulkWriteCommandHandler(routedStore));
         configuredHandlers.put("findandmodify", new FindAndModifyCommandHandler(routedStore));
+        configuredHandlers.put("count", new CountDocumentsCommandHandler(routedStore));
         configuredHandlers.put("countdocuments", new CountDocumentsCommandHandler(routedStore));
         configuredHandlers.put("replaceone", new ReplaceOneCommandHandler(routedStore));
         configuredHandlers.put("findoneandupdate", new FindOneAndUpdateCommandHandler(routedStore));
