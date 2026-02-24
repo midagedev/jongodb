@@ -204,6 +204,48 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void distinctCommandCallsStoreAndReturnsUniqueValues() {
+        final RecordingStore store = new RecordingStore();
+        store.findResult = List.of(
+                BsonDocument.parse("{\"_id\":1,\"tag\":\"a\",\"tags\":[\"x\",\"y\"]}"),
+                BsonDocument.parse("{\"_id\":2,\"tag\":\"b\",\"tags\":[\"y\",\"z\"]}"),
+                BsonDocument.parse("{\"_id\":3,\"tag\":\"a\",\"tags\":[\"x\"]}"));
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument scalarResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"tag\",\"query\":{}}"));
+        assertEquals(1.0, scalarResponse.get("ok").asNumber().doubleValue());
+        assertEquals(2, scalarResponse.getArray("values").size());
+        assertEquals("a", scalarResponse.getArray("values").get(0).asString().getValue());
+        assertEquals("b", scalarResponse.getArray("values").get(1).asString().getValue());
+
+        final BsonDocument arrayResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"tags\",\"query\":{}}"));
+        assertEquals(1.0, arrayResponse.get("ok").asNumber().doubleValue());
+        assertEquals(3, arrayResponse.getArray("values").size());
+        assertEquals("x", arrayResponse.getArray("values").get(0).asString().getValue());
+        assertEquals("y", arrayResponse.getArray("values").get(1).asString().getValue());
+        assertEquals("z", arrayResponse.getArray("values").get(2).asString().getValue());
+    }
+
+    @Test
+    void distinctCommandRejectsInvalidPayloadShapes() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument keyTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":1}"));
+        assertCommandError(keyTypeMismatch, "TypeMismatch");
+
+        final BsonDocument keyBadValue = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":\"a..b\"}"));
+        assertCommandError(keyBadValue, "BadValue");
+
+        final BsonDocument queryTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":\"name\",\"query\":1}"));
+        assertCommandError(queryTypeMismatch, "TypeMismatch");
+    }
+
+    @Test
     void unsupportedQueryOperatorsReturnNotImplementedAcrossCrudCommands() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
@@ -229,6 +271,10 @@ class CommandDispatcherE2ETest {
         final BsonDocument countDocumentsResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"countDocuments\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}}}"));
         assertCommandError(countDocumentsResponse, 238, "NotImplemented");
+
+        final BsonDocument distinctResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"name\",\"query\":{\"name\":{\"$foo\":1}}}"));
+        assertCommandError(distinctResponse, 238, "NotImplemented");
 
         final BsonDocument replaceOneResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"replaceOne\":\"users\",\"$db\":\"app\",\"filter\":{\"name\":{\"$foo\":1}},\"replacement\":{\"name\":\"neo\"}}"));

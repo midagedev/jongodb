@@ -37,6 +37,7 @@ public final class CommandDispatcher {
         configuredHandlers.put("getparameter", new GetParameterCommandHandler());
         configuredHandlers.put("insert", new InsertCommandHandler(routedStore));
         configuredHandlers.put("find", new FindCommandHandler(routedStore, cursorRegistry));
+        configuredHandlers.put("distinct", new DistinctCommandHandler(routedStore));
         configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry));
         configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry));
