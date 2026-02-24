@@ -99,3 +99,83 @@ test(
     }
   }
 );
+
+test(
+  "createJongodbEnvRuntime avoids env clobbering across overlapping runtimes",
+  { concurrency: false, timeout: 120_000 },
+  async () => {
+    const envKey = "TEST_MONGODB_URI_OVERLAP";
+    const previous = process.env[envKey];
+    delete process.env[envKey];
+
+    const first = createJongodbEnvRuntime({
+      classpath: classpathForRuntime,
+      envVarName: envKey,
+      startupTimeoutMs: 20_000,
+    });
+    const second = createJongodbEnvRuntime({
+      classpath: classpathForRuntime,
+      envVarName: envKey,
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      const firstUri = await first.setup();
+      assert.equal(process.env[envKey], firstUri);
+
+      const secondUri = await second.setup();
+      assert.equal(process.env[envKey], secondUri);
+
+      await first.teardown();
+      assert.equal(process.env[envKey], secondUri);
+
+      await second.teardown();
+      assert.equal(process.env[envKey], undefined);
+    } finally {
+      await first.teardown();
+      await second.teardown();
+      if (previous === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = previous;
+      }
+    }
+  }
+);
+
+test(
+  "createJongodbEnvRuntime supports scoped env targets without mutating process env",
+  { concurrency: false, timeout: 120_000 },
+  async () => {
+    const envKey = "TEST_MONGODB_URI_SCOPED";
+    const previousProcess = process.env[envKey];
+    process.env[envKey] = "mongodb://process-only:27017/original";
+
+    const scopedEnv: Record<string, string | undefined> = {
+      [envKey]: "mongodb://scoped-only:27017/original",
+    };
+    const runtime = createJongodbEnvRuntime({
+      classpath: classpathForRuntime,
+      envVarName: envKey,
+      envTarget: scopedEnv,
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      const uri = await runtime.setup();
+      assert.equal(scopedEnv[envKey], uri);
+      assert.equal(process.env[envKey], "mongodb://process-only:27017/original");
+
+      await runtime.teardown();
+      assert.equal(scopedEnv[envKey], "mongodb://scoped-only:27017/original");
+      assert.equal(process.env[envKey], "mongodb://process-only:27017/original");
+    } finally {
+      await runtime.teardown();
+      if (previousProcess === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = previousProcess;
+      }
+    }
+  }
+);

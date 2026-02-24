@@ -5,15 +5,34 @@ import {
 } from "./index.js";
 
 const DEFAULT_ENV_VAR_NAME = "MONGODB_URI";
+const processEnv = process.env;
+
+type EnvTarget = Record<string, string | undefined>;
+
+interface GlobalEnvBinding {
+  readonly token: symbol;
+  readonly value: string;
+}
+
+interface GlobalEnvBindingState {
+  readonly hadPrevious: boolean;
+  readonly previousValue: string | undefined;
+  readonly stack: GlobalEnvBinding[];
+}
+
+const globalEnvBindings = new Map<string, GlobalEnvBindingState>();
 
 export interface JongodbEnvRuntimeOptions extends JongodbMemoryServerOptions {
   envVarName?: string;
   envVarNames?: string[];
+  envTarget?: EnvTarget;
 }
 
 export interface JongodbEnvRuntime {
   readonly envVarName: string;
   readonly envVarNames: readonly string[];
+  readonly envTarget: EnvTarget;
+  readonly useGlobalEnvBindings: boolean;
   readonly running: boolean;
   readonly uri: string;
   setup(): Promise<string>;
@@ -28,16 +47,22 @@ export function createJongodbEnvRuntime(
   const {
     envVarName: _envVarName,
     envVarNames: _envVarNames,
+    envTarget: _envTarget,
     ...serverOptions
   } = options;
+  const envTarget = options.envTarget ?? processEnv;
+  const useGlobalEnvBindings = envTarget === processEnv;
 
   let runtimeServer: JongodbMemoryServer | null = null;
   let uri: string | null = null;
-  let previousEnvState = captureEnvState(envVarNames);
+  let previousEnvState = captureEnvState(envTarget, envVarNames);
+  let bindingToken: symbol | null = null;
 
   return {
     envVarName,
     envVarNames,
+    envTarget,
+    useGlobalEnvBindings,
     get running(): boolean {
       return runtimeServer !== null;
     },
@@ -52,12 +77,18 @@ export function createJongodbEnvRuntime(
         return uri;
       }
 
-      previousEnvState = captureEnvState(envVarNames);
+      if (!useGlobalEnvBindings) {
+        previousEnvState = captureEnvState(envTarget, envVarNames);
+      }
 
       runtimeServer = await startJongodbMemoryServer(serverOptions);
       uri = runtimeServer.uri;
-      for (const candidate of envVarNames) {
-        process.env[candidate] = uri;
+      if (useGlobalEnvBindings) {
+        bindingToken = claimGlobalEnvBinding(envVarNames, uri);
+      } else {
+        for (const candidate of envVarNames) {
+          envTarget[candidate] = uri;
+        }
       }
       return uri;
     },
@@ -67,10 +98,19 @@ export function createJongodbEnvRuntime(
         runtimeServer = null;
       }
 
-      restoreEnvState(previousEnvState);
+      if (uri !== null) {
+        if (useGlobalEnvBindings && bindingToken !== null) {
+          releaseGlobalEnvBinding(bindingToken, envVarNames);
+          bindingToken = null;
+        } else if (!useGlobalEnvBindings) {
+          restoreEnvState(envTarget, previousEnvState);
+        }
+      }
 
       uri = null;
-      previousEnvState = captureEnvState(envVarNames);
+      if (!useGlobalEnvBindings) {
+        previousEnvState = captureEnvState(envTarget, envVarNames);
+      }
     },
   };
 }
@@ -115,26 +155,79 @@ function normalizeEnvVarName(name: string): string {
 }
 
 function captureEnvState(
+  envTarget: EnvTarget,
   envVarNames: readonly string[]
 ): Map<string, { hadPrevious: boolean; previousValue: string | undefined }> {
   const state = new Map<string, { hadPrevious: boolean; previousValue: string | undefined }>();
   for (const envVarName of envVarNames) {
     state.set(envVarName, {
-      hadPrevious: Object.prototype.hasOwnProperty.call(process.env, envVarName),
-      previousValue: process.env[envVarName],
+      hadPrevious: Object.prototype.hasOwnProperty.call(envTarget, envVarName),
+      previousValue: envTarget[envVarName],
     });
   }
   return state;
 }
 
 function restoreEnvState(
+  envTarget: EnvTarget,
   state: Map<string, { hadPrevious: boolean; previousValue: string | undefined }>
 ): void {
   for (const [envVarName, previous] of state.entries()) {
     if (previous.hadPrevious) {
-      process.env[envVarName] = previous.previousValue;
+      envTarget[envVarName] = previous.previousValue;
     } else {
-      delete process.env[envVarName];
+      delete envTarget[envVarName];
     }
+  }
+}
+
+function claimGlobalEnvBinding(envVarNames: readonly string[], value: string): symbol {
+  const token = Symbol("jongodb-env-runtime");
+  for (const envVarName of envVarNames) {
+    let state = globalEnvBindings.get(envVarName);
+    if (state === undefined) {
+      state = {
+        hadPrevious: Object.prototype.hasOwnProperty.call(processEnv, envVarName),
+        previousValue: processEnv[envVarName],
+        stack: [],
+      };
+      globalEnvBindings.set(envVarName, state);
+    }
+
+    state.stack.push({ token, value });
+    processEnv[envVarName] = value;
+  }
+  return token;
+}
+
+function releaseGlobalEnvBinding(token: symbol, envVarNames: readonly string[]): void {
+  for (const envVarName of envVarNames) {
+    const state = globalEnvBindings.get(envVarName);
+    if (state === undefined) {
+      continue;
+    }
+
+    const index = state.stack.findIndex((entry) => entry.token === token);
+    if (index < 0) {
+      continue;
+    }
+
+    const removedTop = index === state.stack.length - 1;
+    state.stack.splice(index, 1);
+
+    if (!removedTop) {
+      continue;
+    }
+    if (state.stack.length > 0) {
+      processEnv[envVarName] = state.stack[state.stack.length - 1].value;
+      continue;
+    }
+
+    if (state.hadPrevious) {
+      processEnv[envVarName] = state.previousValue;
+    } else {
+      delete processEnv[envVarName];
+    }
+    globalEnvBindings.delete(envVarName);
   }
 }

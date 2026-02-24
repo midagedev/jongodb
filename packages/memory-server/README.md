@@ -72,6 +72,7 @@ afterAll(async () => {
 Runtime behavior:
 - `setup()` starts launcher and writes URI to configured env key(s)
 - `teardown()` stops launcher and restores previous env values
+- overlapping runtimes that share env keys now restore without clobbering each other
 
 CommonJS example:
 
@@ -246,6 +247,17 @@ Core:
 Runtime helper options:
 - `envVarName`: single target env key (default: `MONGODB_URI`)
 - `envVarNames`: multiple target env keys (example: `["MONGODB_URI", "DATABASE_URL"]`)
+- `envTarget`: optional scoped env object (default: `process.env`)
+
+Scoped env example:
+
+```ts
+const scopedEnv: Record<string, string | undefined> = {};
+const runtime = createJongodbEnvRuntime({
+  envVarName: "MONGODB_URI",
+  envTarget: scopedEnv,
+});
+```
 
 ## Troubleshooting
 
@@ -257,3 +269,4 @@ Runtime helper options:
 
 Parallel test tip:
 - use `databaseNameStrategy: "worker"` or per-worker suffixes to prevent data collisions
+- if multiple runtimes share a Node process, prefer `envTarget` for per-runtime scoped bindings
