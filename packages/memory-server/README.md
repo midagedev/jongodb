@@ -28,9 +28,9 @@ Rough performance expectation (not a guarantee):
 - cold CI/dev machine: often much faster because there is no `mongod` artifact fetch/unpack
 - warm cache environment: startup-phase wins are usually smaller
 
-Observed benchmark (crown-server integration suite subset, duplicated for load):
+Observed benchmark (NestJS integration suite subset, duplicated for load):
 
-- workload: 9 suites / 102 tests (`--runInBand`), same machine
+- workload: 9 suites / 102 test cases (`--runInBand`), same machine
 - `mongodb-memory-server` real time:
   - run1: `28.17s`
   - run2: `27.19s`
