@@ -316,12 +316,14 @@ tasks.register<JavaExec>("r3FailureLedger") {
     val replayLimit = (findProperty("r3FailureLedgerReplayLimit") as String?) ?: "20"
     val mongoUri = (findProperty("r3FailureLedgerMongoUri") as String?)
         ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
+    val failOnFailures = (findProperty("r3FailureLedgerFailOnFailures") as String?)?.toBoolean() ?: false
 
     args(
         "--spec-repo-root=$specRepoRoot",
         "--output-dir=$outputDir",
         "--seed=$seed",
-        "--replay-limit=$replayLimit"
+        "--replay-limit=$replayLimit",
+        if (failOnFailures) "--fail-on-failures" else "--no-fail-on-failures"
     )
     if (mongoUri.isNotBlank()) {
         args("--mongo-uri=$mongoUri")

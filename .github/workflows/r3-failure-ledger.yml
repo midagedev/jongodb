@@ -62,7 +62,50 @@ jobs:
             -Pr3SpecRepoRoot="${RUNNER_TEMP}/mongodb-specifications" \
             -Pr3FailureLedgerOutputDir="${R3_LEDGER_OUTPUT_DIR}" \
             -Pr3FailureLedgerMongoUri="${JONGODB_REAL_MONGOD_URI}" \
+            -Pr3FailureLedgerFailOnFailures=true \
             r3FailureLedger
+
+      - name: Build trend snapshot
+        run: |
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          report = Path("build/reports/r3-failure-ledger/r3-failure-ledger.json")
+          out = Path("build/reports/r3-failure-ledger/r3-failure-ledger-trend.md")
+          data = json.loads(report.read_text(encoding="utf-8"))
+
+          now = datetime.now(timezone.utc).isoformat()
+          lines = [
+              "# R3 Differential Trend Snapshot",
+              "",
+              f"- generatedAtUtc: {now}",
+              f"- reportGeneratedAt: {data.get('generatedAt')}",
+              f"- failureCount: {data.get('failureCount')}",
+              f"- suiteCount: {data.get('suiteCount')}",
+              "",
+              "## byTrack",
+          ]
+          by_track = data.get("byTrack", {})
+          if by_track:
+              for key in sorted(by_track):
+                  lines.append(f"- {key}: {by_track[key]}")
+          else:
+              lines.append("- none")
+
+          lines.append("")
+          lines.append("## byStatus")
+          by_status = data.get("byStatus", {})
+          if by_status:
+              for key in sorted(by_status):
+                  lines.append(f"- {key}: {by_status[key]}")
+          else:
+              lines.append("- none")
+
+          out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(out.read_text(encoding="utf-8"))
+          PY
 
       - name: Collect replica set diagnostics
         if: always()
