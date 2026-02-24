@@ -612,6 +612,40 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void updateCommandSupportsSetOnInsertOnlyForUpsertInsertions() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"email\":\"ada@example.com\",\"name\":\"Ada\"}]}"));
+
+        final BsonDocument matchedResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"email\":\"ada@example.com\"},\"u\":{\"$set\":{\"name\":\"Ada Lovelace\"},\"$setOnInsert\":{\"createdAt\":\"insert-only\"}},\"upsert\":true}]}"));
+        assertEquals(1.0, matchedResponse.get("ok").asNumber().doubleValue());
+        assertEquals(1, matchedResponse.getInt32("n").getValue());
+        assertEquals(1, matchedResponse.getInt32("nModified").getValue());
+
+        final BsonDocument existingFind = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument existing =
+                existingFind.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals("Ada Lovelace", existing.getString("name").getValue());
+        assertTrue(!existing.containsKey("createdAt"));
+
+        final BsonDocument upsertedResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"$db\":\"app\",\"updates\":[{\"q\":{\"email\":\"grace@example.com\"},\"u\":{\"$set\":{\"name\":\"Grace\"},\"$setOnInsert\":{\"createdAt\":\"inserted\"}},\"upsert\":true}]}"));
+        assertEquals(1.0, upsertedResponse.get("ok").asNumber().doubleValue());
+        assertEquals(1, upsertedResponse.getInt32("n").getValue());
+        assertEquals(0, upsertedResponse.getInt32("nModified").getValue());
+        assertEquals(1, upsertedResponse.getArray("upserted").size());
+
+        final BsonDocument upsertedFind = dispatcher.dispatch(
+                BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"email\":\"grace@example.com\"}}"));
+        final BsonDocument created =
+                upsertedFind.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals("Grace", created.getString("name").getValue());
+        assertEquals("inserted", created.getString("createdAt").getValue());
+    }
+
+    @Test
     void updateCommandCallsStoreAndReturnsWriteShape() {
         final RecordingStore store = new RecordingStore();
         store.updateResult = new CommandStore.UpdateResult(2, 1);
@@ -730,6 +764,17 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void findOneAndUpdateCommandSupportsSetOnInsertOnUpsert() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"$db\":\"app\",\"filter\":{\"email\":\"neo@example.com\"},\"update\":{\"$set\":{\"name\":\"Neo\"},\"$setOnInsert\":{\"createdAt\":\"inserted\"}},\"upsert\":true,\"returnDocument\":\"after\"}"));
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals("Neo", response.getDocument("value").getString("name").getValue());
+        assertEquals("inserted", response.getDocument("value").getString("createdAt").getValue());
+    }
+
+    @Test
     void findOneAndUpdateCommandRejectsMixedProjectionModes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(
@@ -759,6 +804,10 @@ class CommandDispatcherE2ETest {
         final BsonDocument unsupportedArrayFilters = dispatcher.dispatch(BsonDocument.parse(
                 "{\"findOneAndUpdate\":\"users\",\"filter\":{},\"update\":{\"$set\":{\"name\":\"a\"}},\"arrayFilters\":[]}"));
         assertCommandError(unsupportedArrayFilters, "BadValue");
+
+        final BsonDocument setOnInsertTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"filter\":{},\"update\":{\"$setOnInsert\":1}}"));
+        assertCommandError(setOnInsertTypeMismatch, "TypeMismatch");
     }
 
     @Test
@@ -861,6 +910,10 @@ class CommandDispatcherE2ETest {
         final BsonDocument unsupportedPositionalPath = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"items.$.qty\":1}}}]}"));
         assertCommandError(unsupportedPositionalPath, "BadValue");
+
+        final BsonDocument setOnInsertTypeMismatch = dispatcher.dispatch(
+                BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$setOnInsert\":1}}]}"));
+        assertCommandError(setOnInsertTypeMismatch, "TypeMismatch");
 
         final BsonDocument replacementMultiTrue = dispatcher.dispatch(
                 BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"name\":\"a\"},\"multi\":true}]}"));

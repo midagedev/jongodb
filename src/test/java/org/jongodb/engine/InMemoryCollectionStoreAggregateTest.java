@@ -179,6 +179,29 @@ class InMemoryCollectionStoreAggregateTest {
         assertEquals(2L, asLong(byCity.get(1).get("total")));
     }
 
+    @Test
+    void aggregateGroupSupportsAddToSetAccumulator() {
+        final CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(Arrays.asList(
+                new Document("_id", 1).append("category", "a").append("color", "red"),
+                new Document("_id", 2).append("category", "a").append("color", "blue"),
+                new Document("_id", 3).append("category", "a").append("color", "red"),
+                new Document("_id", 4).append("category", "b").append("color", "green")));
+
+        final List<Document> aggregated = store.aggregate(List.of(
+                new Document(
+                        "$group",
+                        new Document("_id", "$category")
+                                .append("colors", new Document("$addToSet", "$color"))),
+                new Document("$sort", new Document("_id", 1))));
+
+        assertEquals(2, aggregated.size());
+        assertEquals("a", aggregated.get(0).getString("_id"));
+        assertEquals(List.of("red", "blue"), aggregated.get(0).getList("colors", Object.class));
+        assertEquals("b", aggregated.get(1).getString("_id"));
+        assertEquals(List.of("green"), aggregated.get(1).getList("colors", Object.class));
+    }
+
     private static long asLong(final Object value) {
         if (!(value instanceof Number number)) {
             throw new AssertionError("expected numeric value but got: " + value);

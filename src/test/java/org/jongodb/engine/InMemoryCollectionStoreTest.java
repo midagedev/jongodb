@@ -325,6 +325,42 @@ class InMemoryCollectionStoreTest {
     }
 
     @Test
+    void setOnInsertIsAppliedOnlyWhenUpsertInserts() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(List.of(new Document("_id", 1).append("email", "ada@example.com").append("name", "Ada")));
+
+        UpdateManyResult matchedUpdate =
+                store.update(
+                        new Document("email", "ada@example.com"),
+                        new Document("$set", new Document("name", "Ada Lovelace"))
+                                .append("$setOnInsert", new Document("createdAt", "insert-only")),
+                        false,
+                        true);
+        assertEquals(1, matchedUpdate.matchedCount());
+        assertEquals(1, matchedUpdate.modifiedCount());
+
+        Document existing = byId(store.findAll(), 1);
+        assertEquals("Ada Lovelace", existing.getString("name"));
+        assertFalse(existing.containsKey("createdAt"));
+
+        UpdateManyResult upsertedUpdate =
+                store.update(
+                        new Document("email", "grace@example.com"),
+                        new Document("$set", new Document("name", "Grace"))
+                                .append("$setOnInsert", new Document("createdAt", "inserted")),
+                        false,
+                        true);
+        assertEquals(0, upsertedUpdate.matchedCount());
+        assertEquals(0, upsertedUpdate.modifiedCount());
+        assertNotNull(upsertedUpdate.upsertedId());
+
+        List<Document> upsertedMatches = store.find(new Document("email", "grace@example.com"));
+        assertEquals(1, upsertedMatches.size());
+        assertEquals("Grace", upsertedMatches.get(0).getString("name"));
+        assertEquals("inserted", upsertedMatches.get(0).getString("createdAt"));
+    }
+
+    @Test
     void replaceOneWithUpsertInsertsReplacementAndUsesFilterIdSeed() {
         CollectionStore store = new InMemoryCollectionStore();
 

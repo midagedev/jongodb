@@ -32,6 +32,7 @@ final class UpdateApplier {
         }
 
         final List<SetOperation> setOperations = new ArrayList<>();
+        final List<SetOnInsertOperation> setOnInsertOperations = new ArrayList<>();
         final List<IncOperation> incrementOperations = new ArrayList<>();
         final List<String> unsetOperations = new ArrayList<>();
         final List<AddToSetOperation> addToSetOperations = new ArrayList<>();
@@ -43,6 +44,12 @@ final class UpdateApplier {
                 case "$set":
                     for (final Map.Entry<String, Object> setEntry : definition.entrySet()) {
                         setOperations.add(new SetOperation(setEntry.getKey(), setEntry.getValue()));
+                    }
+                    break;
+                case "$setOnInsert":
+                    for (final Map.Entry<String, Object> setOnInsertEntry : definition.entrySet()) {
+                        setOnInsertOperations.add(
+                                new SetOnInsertOperation(setOnInsertEntry.getKey(), setOnInsertEntry.getValue()));
                     }
                     break;
                 case "$inc":
@@ -71,10 +78,20 @@ final class UpdateApplier {
             }
         }
 
-        return ParsedUpdate.operator(setOperations, incrementOperations, unsetOperations, addToSetOperations);
+        return ParsedUpdate.operator(
+                setOperations, setOnInsertOperations, incrementOperations, unsetOperations, addToSetOperations);
     }
 
     static void validateApplicable(final Document document, final ParsedUpdate update) {
+        validateApplicable(document, update, false);
+    }
+
+    static void validateApplicableForUpsertInsert(final Document document, final ParsedUpdate update) {
+        validateApplicable(document, update, true);
+    }
+
+    private static void validateApplicable(
+            final Document document, final ParsedUpdate update, final boolean includeSetOnInsert) {
         Objects.requireNonNull(document, "document");
         Objects.requireNonNull(update, "update");
 
@@ -85,6 +102,11 @@ final class UpdateApplier {
 
         for (final SetOperation operation : update.setOperations()) {
             ensureWritablePath(document, operation.path());
+        }
+        if (includeSetOnInsert) {
+            for (final SetOnInsertOperation operation : update.setOnInsertOperations()) {
+                ensureWritablePath(document, operation.path());
+            }
         }
         for (final IncOperation operation : update.incrementOperations()) {
             ensureWritablePath(document, operation.path());
@@ -107,6 +129,15 @@ final class UpdateApplier {
     }
 
     static boolean apply(final Document document, final ParsedUpdate update) {
+        return apply(document, update, false);
+    }
+
+    static boolean applyForUpsertInsert(final Document document, final ParsedUpdate update) {
+        return apply(document, update, true);
+    }
+
+    private static boolean apply(
+            final Document document, final ParsedUpdate update, final boolean includeSetOnInsert) {
         Objects.requireNonNull(document, "document");
         Objects.requireNonNull(update, "update");
 
@@ -118,6 +149,11 @@ final class UpdateApplier {
 
         for (final SetOperation operation : update.setOperations()) {
             modified |= applySet(document, operation.path(), operation.value());
+        }
+        if (includeSetOnInsert) {
+            for (final SetOnInsertOperation operation : update.setOnInsertOperations()) {
+                modified |= applySet(document, operation.path(), operation.value());
+            }
         }
         for (final IncOperation operation : update.incrementOperations()) {
             modified |= applyIncrement(document, operation.path(), operation.delta());
@@ -499,6 +535,7 @@ final class UpdateApplier {
 
     static final class ParsedUpdate {
         private final List<SetOperation> setOperations;
+        private final List<SetOnInsertOperation> setOnInsertOperations;
         private final List<IncOperation> incrementOperations;
         private final List<String> unsetOperations;
         private final List<AddToSetOperation> addToSetOperations;
@@ -506,11 +543,13 @@ final class UpdateApplier {
 
         private ParsedUpdate(
                 final List<SetOperation> setOperations,
+                final List<SetOnInsertOperation> setOnInsertOperations,
                 final List<IncOperation> incrementOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations,
                 final Document replacementDocument) {
             this.setOperations = List.copyOf(setOperations);
+            this.setOnInsertOperations = List.copyOf(setOnInsertOperations);
             this.incrementOperations = List.copyOf(incrementOperations);
             this.unsetOperations = List.copyOf(unsetOperations);
             this.addToSetOperations = List.copyOf(addToSetOperations);
@@ -519,14 +558,21 @@ final class UpdateApplier {
 
         static ParsedUpdate operator(
                 final List<SetOperation> setOperations,
+                final List<SetOnInsertOperation> setOnInsertOperations,
                 final List<IncOperation> incrementOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations) {
-            return new ParsedUpdate(setOperations, incrementOperations, unsetOperations, addToSetOperations, null);
+            return new ParsedUpdate(
+                    setOperations,
+                    setOnInsertOperations,
+                    incrementOperations,
+                    unsetOperations,
+                    addToSetOperations,
+                    null);
         }
 
         static ParsedUpdate replacement(final Document replacementDocument) {
-            return new ParsedUpdate(List.of(), List.of(), List.of(), List.of(), replacementDocument);
+            return new ParsedUpdate(List.of(), List.of(), List.of(), List.of(), List.of(), replacementDocument);
         }
 
         boolean replacementStyle() {
@@ -539,6 +585,10 @@ final class UpdateApplier {
 
         List<SetOperation> setOperations() {
             return Collections.unmodifiableList(setOperations);
+        }
+
+        List<SetOnInsertOperation> setOnInsertOperations() {
+            return Collections.unmodifiableList(setOnInsertOperations);
         }
 
         List<IncOperation> incrementOperations() {
@@ -555,6 +605,8 @@ final class UpdateApplier {
     }
 
     private record SetOperation(String path, Object value) {}
+
+    private record SetOnInsertOperation(String path, Object value) {}
 
     private record IncOperation(String path, Number delta) {}
 

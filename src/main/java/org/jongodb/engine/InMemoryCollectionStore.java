@@ -318,8 +318,8 @@ public final class InMemoryCollectionStore implements CollectionStore {
         final Document seed = upsertSeed(filter);
         final Document upsertedDocument = DocumentCopies.copy(seed);
 
-        UpdateApplier.validateApplicable(upsertedDocument, parsedUpdate);
-        UpdateApplier.apply(upsertedDocument, parsedUpdate);
+        UpdateApplier.validateApplicableForUpsertInsert(upsertedDocument, parsedUpdate);
+        UpdateApplier.applyForUpsertInsert(upsertedDocument, parsedUpdate);
 
         if (!upsertedDocument.containsKey("_id")) {
             upsertedDocument.put("_id", new ObjectId());

@@ -160,6 +160,32 @@ class AggregateCommandE2ETest {
         assertEquals("alice", firstBatch.get(2).asDocument().getString("ref").getValue());
     }
 
+    @Test
+    void aggregateCommandSupportsGroupAddToSetAccumulator() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"items\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"category\":\"a\",\"color\":\"red\"},{\"_id\":2,\"category\":\"a\",\"color\":\"blue\"},{\"_id\":3,\"category\":\"a\",\"color\":\"red\"},{\"_id\":4,\"category\":\"b\",\"color\":\"green\"}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"items\",\"$db\":\"app\",\"pipeline\":[{\"$group\":{\"_id\":\"$category\",\"colors\":{\"$addToSet\":\"$color\"}}},{\"$sort\":{\"_id\":1}}],\"cursor\":{}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray firstBatch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals(2, firstBatch.size());
+
+        final BsonDocument firstGroup = firstBatch.get(0).asDocument();
+        assertEquals("a", firstGroup.getString("_id").getValue());
+        assertEquals(2, firstGroup.getArray("colors").size());
+        assertEquals("red", firstGroup.getArray("colors").get(0).asString().getValue());
+        assertEquals("blue", firstGroup.getArray("colors").get(1).asString().getValue());
+
+        final BsonDocument secondGroup = firstBatch.get(1).asDocument();
+        assertEquals("b", secondGroup.getString("_id").getValue());
+        assertEquals(1, secondGroup.getArray("colors").size());
+        assertEquals("green", secondGroup.getArray("colors").get(0).asString().getValue());
+    }
+
     private static void assertCommandError(final BsonDocument response, final String codeName) {
         assertCommandError(response, 14, codeName);
     }

@@ -12,7 +12,7 @@ import org.bson.BsonValue;
 import org.jongodb.engine.DuplicateKeyException;
 
 public final class UpdateCommandHandler implements CommandHandler {
-    private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$inc", "$unset", "$addToSet");
+    private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$setOnInsert", "$inc", "$unset", "$addToSet");
 
     private final CommandStore store;
 
@@ -170,6 +170,15 @@ public final class UpdateCommandHandler implements CommandHandler {
             return CommandErrors.typeMismatch("$set must be a document");
         }
         BsonDocument pathValidationError = validateUnsupportedPositionalPaths(setValue);
+        if (pathValidationError != null) {
+            return pathValidationError;
+        }
+
+        final BsonValue setOnInsertValue = updateDocument.get("$setOnInsert");
+        if (setOnInsertValue != null && !setOnInsertValue.isDocument()) {
+            return CommandErrors.typeMismatch("$setOnInsert must be a document");
+        }
+        pathValidationError = validateUnsupportedPositionalPaths(setOnInsertValue);
         if (pathValidationError != null) {
             return pathValidationError;
         }

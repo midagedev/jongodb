@@ -121,4 +121,34 @@ class UpdateApplierTest {
                         () -> UpdateApplier.parse(new Document("$set", new Document("items.$.qty", 1))));
         assertTrue(error.getMessage().contains("positional and array filter updates are not supported"));
     }
+
+    @Test
+    void applyIgnoresSetOnInsertForMatchedDocuments() {
+        Document target = new Document("_id", 1).append("name", "before");
+        Document update =
+                new Document("$set", new Document("name", "after"))
+                        .append("$setOnInsert", new Document("createdAt", "insert-only"));
+
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update);
+        UpdateApplier.validateApplicable(target, parsed);
+
+        assertTrue(UpdateApplier.apply(target, parsed));
+        assertEquals("after", target.getString("name"));
+        assertFalse(target.containsKey("createdAt"));
+    }
+
+    @Test
+    void applyForUpsertInsertAppliesSetOnInsert() {
+        Document target = new Document("email", "ada@example.com");
+        Document update =
+                new Document("$set", new Document("name", "Ada"))
+                        .append("$setOnInsert", new Document("createdAt", "inserted"));
+
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update);
+        UpdateApplier.validateApplicableForUpsertInsert(target, parsed);
+
+        assertTrue(UpdateApplier.applyForUpsertInsert(target, parsed));
+        assertEquals("Ada", target.getString("name"));
+        assertEquals("inserted", target.getString("createdAt"));
+    }
 }

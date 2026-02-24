@@ -232,6 +232,10 @@ public final class AggregationPipeline {
                 for (final GroupAccumulator accumulator : accumulators) {
                     if (accumulator.operator() == GroupAccumulatorOperator.SUM) {
                         aggregate.put(accumulator.outputField(), 0L);
+                        continue;
+                    }
+                    if (accumulator.operator() == GroupAccumulatorOperator.ADD_TO_SET) {
+                        aggregate.put(accumulator.outputField(), new ArrayList<>());
                     }
                 }
                 grouped.put(groupKey, aggregate);
@@ -249,6 +253,17 @@ public final class AggregationPipeline {
                 if (accumulator.operator() == GroupAccumulatorOperator.FIRST
                         && !aggregate.containsKey(accumulator.outputField())) {
                     aggregate.put(accumulator.outputField(), accumulator.firstOperand(source));
+                    continue;
+                }
+
+                if (accumulator.operator() == GroupAccumulatorOperator.ADD_TO_SET) {
+                    @SuppressWarnings("unchecked")
+                    final List<Object> values = (List<Object>) aggregate.computeIfAbsent(
+                            accumulator.outputField(), ignored -> new ArrayList<>());
+                    final Object candidate = accumulator.addToSetOperand(source);
+                    if (!containsByMongoEquality(values, candidate)) {
+                        values.add(candidate);
+                    }
                 }
             }
         }
@@ -273,6 +288,7 @@ public final class AggregationPipeline {
             final GroupAccumulatorOperator operator = switch (accumulatorName) {
                 case "$sum" -> GroupAccumulatorOperator.SUM;
                 case "$first" -> GroupAccumulatorOperator.FIRST;
+                case "$addToSet" -> GroupAccumulatorOperator.ADD_TO_SET;
                 default -> throw new UnsupportedFeatureException(
                         "aggregation.group.accumulator." + accumulatorName,
                         "unsupported $group accumulator: " + accumulatorName);
@@ -303,7 +319,8 @@ public final class AggregationPipeline {
 
     private enum GroupAccumulatorOperator {
         SUM,
-        FIRST
+        FIRST,
+        ADD_TO_SET
     }
 
     private record GroupAccumulator(String outputField, GroupAccumulatorOperator operator, Object expression) {
@@ -312,6 +329,10 @@ public final class AggregationPipeline {
         }
 
         private Object firstOperand(final Document source) {
+            return evaluateGroupExpression(source, expression);
+        }
+
+        private Object addToSetOperand(final Document source) {
             return evaluateGroupExpression(source, expression);
         }
     }
@@ -329,6 +350,15 @@ public final class AggregationPipeline {
             return normalizeNumber(increment.doubleValue());
         }
         return normalizeNumber(currentNumber.doubleValue() + increment.doubleValue());
+    }
+
+    private static boolean containsByMongoEquality(final List<Object> values, final Object candidate) {
+        for (final Object value : values) {
+            if (Objects.deepEquals(value, candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Number normalizeNumber(final double value) {

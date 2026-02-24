@@ -7,7 +7,7 @@ import org.bson.BsonString;
 import org.bson.BsonValue;
 
 public final class FindOneAndUpdateCommandHandler implements CommandHandler {
-    private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$inc", "$unset", "$addToSet");
+    private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$setOnInsert", "$inc", "$unset", "$addToSet");
 
     private final FindAndModifyCommandHandler findAndModifyCommandHandler;
 
@@ -144,6 +144,15 @@ public final class FindOneAndUpdateCommandHandler implements CommandHandler {
             return CommandErrors.typeMismatch("$set must be a document");
         }
         BsonDocument pathValidationError = validateUnsupportedPositionalPaths(setValue);
+        if (pathValidationError != null) {
+            return pathValidationError;
+        }
+
+        final BsonValue setOnInsertValue = update.get("$setOnInsert");
+        if (setOnInsertValue != null && !setOnInsertValue.isDocument()) {
+            return CommandErrors.typeMismatch("$setOnInsert must be a document");
+        }
+        pathValidationError = validateUnsupportedPositionalPaths(setOnInsertValue);
         if (pathValidationError != null) {
             return pathValidationError;
         }
