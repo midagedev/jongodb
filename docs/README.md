@@ -9,6 +9,7 @@ Runtime and compatibility:
 - `docs/SPRING_TESTING.md`
 - `docs/COMPATIBILITY.md`
 - `docs/COMPATIBILITY_SCORECARD.md`
+- `docs/NODE_COMPAT_SMOKE.md`
 - `docs/SUPPORT_MATRIX.md`
 - `docs/RELEASE_CHECKLIST.md`
 - `docs/ROADMAP.md`
