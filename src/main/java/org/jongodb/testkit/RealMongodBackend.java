@@ -685,7 +685,7 @@ public final class RealMongodBackend implements DifferentialBackend {
     }
 
     private static int typeRank(final BsonValue value) {
-        if (value == null) {
+        if (value == null || value.isNull()) {
             return 0;
         }
         if (value.isInt32() || value.isInt64() || value.isDouble() || value.isDecimal128()) {
@@ -710,7 +710,7 @@ public final class RealMongodBackend implements DifferentialBackend {
     }
 
     private static void appendDistinctSortValue(final BsonValue value, final StringBuilder builder) {
-        if (value == null) {
+        if (value == null || value.isNull()) {
             builder.append("NULL:null");
             return;
         }

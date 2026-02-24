@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
+import org.bson.BsonNull;
 import org.junit.jupiter.api.Test;
 
 class RealMongodBackendTest {
@@ -186,6 +187,7 @@ class RealMongodBackendTest {
         final ScenarioCommand command = new ScenarioCommand("distinct", Map.of("distinct", "users", "key", "v"));
         final BsonDocument response = new BsonDocument()
                 .append("values", new BsonArray(List.of(
+                        BsonNull.VALUE,
                         new BsonInt32(2),
                         new BsonInt32(1),
                         BsonDocument.parse("{\"a\":1}"),
@@ -194,11 +196,12 @@ class RealMongodBackendTest {
 
         final BsonDocument normalized = (BsonDocument) method.invoke(null, command, response);
         final BsonArray values = normalized.getArray("values");
-        assertEquals(4, values.size());
-        assertEquals(1, values.get(0).asInt32().getValue());
-        assertEquals(2, values.get(1).asInt32().getValue());
-        assertTrue(values.get(2).isDocument());
-        assertTrue(values.get(3).isArray());
+        assertEquals(5, values.size());
+        assertTrue(values.get(0).isNull());
+        assertEquals(1, values.get(1).asInt32().getValue());
+        assertEquals(2, values.get(2).asInt32().getValue());
+        assertTrue(values.get(3).isDocument());
+        assertTrue(values.get(4).isArray());
     }
 
     private static MongoClient mongoClientProxy(MongoDatabase database) {
