@@ -578,6 +578,66 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void appliesTransactionEnvelopeToFindOneAndDelete() throws IOException {
+        Files.writeString(
+                tempDir.resolve("find-one-delete-transaction.yml"),
+                """
+                schemaVersion: "1.3"
+                createEntities:
+                  - client:
+                      id: client0
+                  - database:
+                      id: database0
+                      client: client0
+                      databaseName: tx-db
+                  - collection:
+                      id: collection0
+                      database: database0
+                      collectionName: tx-coll
+                  - session:
+                      id: session0
+                      client: client0
+                tests:
+                  - description: txn findOneAndDelete envelope
+                    operations:
+                      - object: session0
+                        name: startTransaction
+                      - object: collection0
+                        name: findOneAndDelete
+                        arguments:
+                          session: session0
+                          filter:
+                            _id: 1
+                      - object: session0
+                        name: commitTransaction
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+
+        final ScenarioCommand first = scenario.commands().get(0);
+        assertEquals("findAndModify", first.commandName());
+        assertEquals(true, first.payload().get("remove"));
+        assertEquals(true, first.payload().get("startTransaction"));
+        assertEquals(false, first.payload().get("autocommit"));
+        assertEquals(1L, first.payload().get("txnNumber"));
+        final Object lsid = first.payload().get("lsid");
+        assertTrue(lsid instanceof java.util.Map<?, ?>);
+        assertEquals("session0", ((java.util.Map<?, ?>) lsid).get("id"));
+
+        final ScenarioCommand second = scenario.commands().get(1);
+        assertEquals("commitTransaction", second.commandName());
+        assertEquals("admin", second.payload().get("$db"));
+        assertEquals(1L, second.payload().get("txnNumber"));
+    }
+
+    @Test
     void marksFailPointAsUnsupportedByPolicy() throws IOException {
         Files.writeString(
                 tempDir.resolve("failpoint.yml"),
