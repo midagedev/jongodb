@@ -215,6 +215,7 @@ public final class UnifiedSpecImporter {
             case "updateMany" -> update(arguments, database, collection, true);
             case "deleteOne" -> delete(arguments, database, collection, 1);
             case "deleteMany" -> delete(arguments, database, collection, 0);
+            case "bulkWrite" -> bulkWrite(arguments, database, collection);
             case "createIndex" -> createIndex(arguments, database, collection);
             default -> throw new UnsupportedOperationException("unsupported UTF operation: " + operationName);
         };
@@ -423,6 +424,80 @@ public final class UnifiedSpecImporter {
         final Map<String, Object> payload = commandEnvelope("delete", database, collection);
         payload.put("deletes", List.of(immutableMap(deleteEntry)));
         return new ScenarioCommand("delete", immutableMap(payload));
+    }
+
+    private static ScenarioCommand bulkWrite(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Object orderedValue = arguments.get("ordered");
+        if (orderedValue != null && !(orderedValue instanceof Boolean)) {
+            throw new IllegalArgumentException("bulkWrite.arguments.ordered must be a boolean");
+        }
+        if (Boolean.FALSE.equals(orderedValue)) {
+            throw new UnsupportedOperationException("unsupported UTF bulkWrite option: ordered=false");
+        }
+
+        final List<Object> requests = asList(arguments.get("requests"), "bulkWrite.arguments.requests");
+        if (requests.isEmpty()) {
+            throw new IllegalArgumentException("bulkWrite.arguments.requests must not be empty");
+        }
+
+        final List<Object> operations = new ArrayList<>(requests.size());
+        for (final Object request : requests) {
+            final Map<String, Object> requestDocument = asStringObjectMap(request, "bulkWrite request");
+            if (requestDocument.size() != 1) {
+                throw new IllegalArgumentException("bulkWrite request must contain exactly one operation");
+            }
+
+            final String operationName = requestDocument.keySet().iterator().next();
+            final String normalizedOperationName = operationName.toLowerCase(Locale.ROOT);
+            final Map<String, Object> operationArguments = asStringObjectMap(
+                    requestDocument.get(operationName),
+                    "bulkWrite request operation arguments");
+
+            switch (normalizedOperationName) {
+                case "insertone" -> {
+                    final Map<String, Object> document = asStringObjectMap(
+                            operationArguments.get("document"),
+                            "bulkWrite.insertOne.document");
+                    if (containsUnsupportedKeyPath(document)) {
+                        throw new UnsupportedOperationException(
+                                "unsupported UTF bulkWrite insertOne document keys: dot or dollar path");
+                    }
+                }
+                case "updateone" -> validateBulkWriteUpdate(operationArguments, false);
+                case "updatemany" -> validateBulkWriteUpdate(operationArguments, true);
+                case "deleteone", "deletemany", "replaceone" -> {
+                    // Accepted and forwarded as-is for command-layer validation/execution.
+                }
+                default -> throw new UnsupportedOperationException(
+                        "unsupported UTF bulkWrite operation: " + operationName);
+            }
+
+            operations.add(deepCopyValue(requestDocument));
+        }
+
+        final Map<String, Object> payload = commandEnvelope("bulkWrite", database, collection);
+        payload.put("ordered", true);
+        payload.put("operations", List.copyOf(operations));
+        return new ScenarioCommand("bulkWrite", immutableMap(payload));
+    }
+
+    private static void validateBulkWriteUpdate(final Map<String, Object> operationArguments, final boolean multi) {
+        final Object updateValue = operationArguments.get("update");
+        if (updateValue == null) {
+            throw new IllegalArgumentException("bulkWrite update operation requires update argument");
+        }
+        if (updateValue instanceof List<?>) {
+            throw new UnsupportedOperationException("unsupported UTF update pipeline");
+        }
+        if (operationArguments.containsKey("arrayFilters")) {
+            throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
+        }
+        if (multi && isReplacementDocument(updateValue)) {
+            throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
+        }
     }
 
     private static ScenarioCommand createIndex(
