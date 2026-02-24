@@ -722,6 +722,42 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void updateCommandSupportsPipelineSetUnsetSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"legacy\":true,\"profile\":{\"city\":\"old\"}}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "update": "users",
+                  "$db": "app",
+                  "updates": [
+                    {
+                      "q": {"_id": 1},
+                      "u": [
+                        {"$set": {"name": "after", "profile.city": "seoul"}},
+                        {"$unset": ["legacy"]}
+                      ]
+                    }
+                  ]
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, response.getInt32("n").getValue());
+        assertEquals(1, response.getInt32("nModified").getValue());
+
+        final BsonDocument findResponse =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument updated =
+                findResponse.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals("after", updated.getString("name").getValue());
+        assertTrue(!updated.containsKey("legacy"));
+        assertEquals("seoul", updated.getDocument("profile").getString("city").getValue());
+    }
+
+    @Test
     void updateCommandSupportsReplaceOneSemantics() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(
@@ -948,6 +984,32 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void findOneAndUpdateCommandSupportsPipelineSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"legacy\":true}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "findOneAndUpdate": "users",
+                  "$db": "app",
+                  "filter": {"_id": 1},
+                  "update": [
+                    {"$set": {"name": "after"}},
+                    {"$unset": "legacy"}
+                  ],
+                  "returnDocument": "after"
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonDocument value = response.getDocument("value");
+        assertEquals("after", value.getString("name").getValue());
+        assertTrue(!value.containsKey("legacy"));
+    }
+
+    @Test
     void findOneAndUpdateCommandRejectsMixedProjectionModes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(
@@ -1079,6 +1141,14 @@ class CommandDispatcherE2ETest {
         final BsonDocument unsupportedArrayFilters = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"a\":1}},\"arrayFilters\":[]}]}"));
         assertCommandError(unsupportedArrayFilters, "BadValue");
+
+        final BsonDocument unsupportedPipelineStage = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":[{\"$replaceRoot\":{\"newRoot\":{\"x\":1}}}]}]}"));
+        assertCommandError(unsupportedPipelineStage, "BadValue");
+
+        final BsonDocument pipelineExpressionNotSupported = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":[{\"$set\":{\"a\":\"$other\"}}]}]}"));
+        assertCommandError(pipelineExpressionNotSupported, "BadValue");
 
         final BsonDocument unsupportedPositionalPath = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"items.$.qty\":1}}}]}"));

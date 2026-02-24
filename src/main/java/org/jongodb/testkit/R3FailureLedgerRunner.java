@@ -47,7 +47,7 @@ public final class R3FailureLedgerRunner {
     public R3FailureLedgerRunner() {
         this(
                 Clock.systemUTC(),
-                new UnifiedSpecImporter(),
+                new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.STRICT),
                 () -> new WireCommandIngressBackend("wire-backend"),
                 mongoUri -> new RealMongodBackend("real-mongod", mongoUri));
     }
@@ -79,13 +79,18 @@ public final class R3FailureLedgerRunner {
             return;
         }
 
-        final R3FailureLedgerRunner runner = new R3FailureLedgerRunner();
+        final R3FailureLedgerRunner runner = new R3FailureLedgerRunner(
+                Clock.systemUTC(),
+                new UnifiedSpecImporter(config.importProfile()),
+                () -> new WireCommandIngressBackend("wire-backend"),
+                mongoUri -> new RealMongodBackend("real-mongod", mongoUri));
         final RunResult result = runner.runAndWrite(config);
         final ArtifactPaths paths = artifactPaths(config.outputDir());
 
         System.out.println("R3 failure ledger generated.");
         System.out.println("- generatedAt: " + result.generatedAt());
         System.out.println("- specRepoRoot: " + result.config().specRepoRoot());
+        System.out.println("- importProfile: " + result.config().importProfile().cliValue());
         System.out.println("- failures: " + result.entries().size());
         System.out.println("- jsonArtifact: " + paths.jsonArtifact());
         System.out.println("- markdownArtifact: " + paths.markdownArtifact());
@@ -130,7 +135,8 @@ public final class R3FailureLedgerRunner {
                     config.outputDir().resolve("suite-artifacts").resolve(suiteConfig.id()),
                     config.seed() + "-" + suiteConfig.id(),
                     config.mongoUri(),
-                    config.replayLimit());
+                    config.replayLimit(),
+                    config.importProfile());
             final UnifiedSpecCorpusRunner.RunResult suiteResult = unifiedRunner.run(suiteRunConfig);
             suiteSummaries.add(SuiteRunSummary.fromSuite(suiteConfig.id(), suiteConfig.relativeSpecRoot(), suiteResult));
             collectFailures(entries, suiteConfig.id(), suiteConfig.relativeSpecRoot(), suiteResult);
@@ -318,6 +324,7 @@ public final class R3FailureLedgerRunner {
         root.put("generatedAt", result.generatedAt().toString());
         root.put("seed", result.config().seed());
         root.put("specRepoRoot", result.config().specRepoRoot().toString());
+        root.put("importProfile", result.config().importProfile().cliValue());
         root.put("suiteCount", result.config().suites().size());
         root.put("failureCount", result.entries().size());
         root.put("byTrack", new Document(result.byTrack()));
@@ -365,6 +372,7 @@ public final class R3FailureLedgerRunner {
         markdown.append("- generatedAt: ").append(result.generatedAt()).append('\n');
         markdown.append("- specRepoRoot: ").append(result.config().specRepoRoot()).append('\n');
         markdown.append("- seed: ").append(result.config().seed()).append('\n');
+        markdown.append("- importProfile: ").append(result.config().importProfile().cliValue()).append('\n');
         markdown.append("- failureCount: ").append(result.entries().size()).append('\n');
         markdown.append('\n');
 
@@ -420,6 +428,7 @@ public final class R3FailureLedgerRunner {
         System.out.println("  --seed=<value>             Deterministic seed");
         System.out.println("  --mongo-uri=<uri>          Real mongod URI (or env JONGODB_REAL_MONGOD_URI)");
         System.out.println("  --replay-limit=<n>         Failure replay capture limit per suite");
+        System.out.println("  --import-profile=<name>    Import profile: strict | compat (default: strict)");
         System.out.println("  --suite=<id>:<root>        Additional suite mapping (repeatable)");
         System.out.println("  --fail-on-failures         Exit non-zero when failures or missing suites exist");
         System.out.println("  --no-fail-on-failures      Do not fail the process on ledger gate failure");
@@ -526,6 +535,7 @@ public final class R3FailureLedgerRunner {
             String seed,
             String mongoUri,
             int replayLimit,
+            UnifiedSpecImporter.ImportProfile importProfile,
             boolean failOnFailures,
             List<SuiteConfig> suites) {
         public RunConfig {
@@ -536,6 +546,7 @@ public final class R3FailureLedgerRunner {
             if (replayLimit <= 0) {
                 throw new IllegalArgumentException("replayLimit must be > 0");
             }
+            importProfile = Objects.requireNonNull(importProfile, "importProfile");
             suites = List.copyOf(Objects.requireNonNull(suites, "suites"));
             if (suites.isEmpty()) {
                 throw new IllegalArgumentException("at least one suite is required");
@@ -548,6 +559,7 @@ public final class R3FailureLedgerRunner {
             String seed = DEFAULT_SEED;
             String mongoUri = trimToNull(System.getenv(DEFAULT_MONGO_URI_ENV));
             int replayLimit = DEFAULT_REPLAY_LIMIT;
+            UnifiedSpecImporter.ImportProfile importProfile = UnifiedSpecImporter.ImportProfile.STRICT;
             boolean failOnFailures = false;
             final List<SuiteConfig> suites = new ArrayList<>(DEFAULT_SUITES);
 
@@ -575,6 +587,11 @@ public final class R3FailureLedgerRunner {
                     replayLimit = parsePositiveInt(valueAfterPrefix(arg, "--replay-limit="), "replay-limit");
                     continue;
                 }
+                if (arg.startsWith("--import-profile=")) {
+                    importProfile = UnifiedSpecImporter.ImportProfile.parse(
+                            valueAfterPrefix(arg, "--import-profile="));
+                    continue;
+                }
                 if (arg.startsWith("--suite=")) {
                     final String raw = requireText(valueAfterPrefix(arg, "--suite="), "suite");
                     final int separator = raw.indexOf(':');
@@ -598,7 +615,15 @@ public final class R3FailureLedgerRunner {
             if (mongoUri == null || mongoUri.isBlank()) {
                 throw new IllegalArgumentException("mongo-uri must be provided (arg or " + DEFAULT_MONGO_URI_ENV + ")");
             }
-            return new RunConfig(specRepoRoot, outputDir, seed, mongoUri, replayLimit, failOnFailures, suites);
+            return new RunConfig(
+                    specRepoRoot,
+                    outputDir,
+                    seed,
+                    mongoUri,
+                    replayLimit,
+                    importProfile,
+                    failOnFailures,
+                    suites);
         }
     }
 

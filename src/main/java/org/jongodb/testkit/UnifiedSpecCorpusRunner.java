@@ -38,7 +38,7 @@ public final class UnifiedSpecCorpusRunner {
     public UnifiedSpecCorpusRunner() {
         this(
                 Clock.systemUTC(),
-                new UnifiedSpecImporter(),
+                new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.STRICT),
                 () -> new WireCommandIngressBackend("wire-backend"),
                 mongoUri -> new RealMongodBackend("real-mongod", mongoUri));
     }
@@ -70,7 +70,11 @@ public final class UnifiedSpecCorpusRunner {
             return;
         }
 
-        final UnifiedSpecCorpusRunner runner = new UnifiedSpecCorpusRunner();
+        final UnifiedSpecCorpusRunner runner = new UnifiedSpecCorpusRunner(
+                Clock.systemUTC(),
+                new UnifiedSpecImporter(config.importProfile()),
+                () -> new WireCommandIngressBackend("wire-backend"),
+                mongoUri -> new RealMongodBackend("real-mongod", mongoUri));
         final RunResult result = runner.runAndWrite(config);
         final ArtifactPaths paths = artifactPaths(config.outputDir());
 
@@ -78,6 +82,7 @@ public final class UnifiedSpecCorpusRunner {
         System.out.println("UTF differential report generated.");
         System.out.println("- generatedAt: " + result.generatedAt());
         System.out.println("- seed: " + result.seed() + " (numericSeed=" + result.numericSeed() + ")");
+        System.out.println("- importProfile: " + result.config().importProfile().cliValue());
         System.out.println("- imported: " + result.importResult().importedCount());
         System.out.println("- skipped: " + result.importResult().skippedCount());
         System.out.println("- unsupported: " + result.importResult().unsupportedCount());
@@ -219,6 +224,7 @@ public final class UnifiedSpecCorpusRunner {
         root.put("seed", result.seed());
         root.put("numericSeed", result.numericSeed());
         root.put("specRoot", result.config().specRoot().toString());
+        root.put("importProfile", result.config().importProfile().cliValue());
         root.put("backends", new Document()
                 .append("left", result.differentialReport().leftBackend())
                 .append("right", result.differentialReport().rightBackend()));
@@ -276,6 +282,7 @@ public final class UnifiedSpecCorpusRunner {
         markdown.append("- seed: ").append(result.seed())
                 .append(" (numericSeed=").append(result.numericSeed()).append(")\n");
         markdown.append("- specRoot: ").append(result.config().specRoot()).append('\n');
+        markdown.append("- importProfile: ").append(result.config().importProfile().cliValue()).append('\n');
         markdown.append("- backends: ").append(report.leftBackend()).append(" vs ").append(report.rightBackend()).append('\n');
         markdown.append('\n');
 
@@ -374,6 +381,7 @@ public final class UnifiedSpecCorpusRunner {
         System.out.println("  --seed=<value>             Deterministic seed (default: utf-corpus-v1)");
         System.out.println("  --mongo-uri=<uri>          Real mongod URI (or env JONGODB_REAL_MONGOD_URI)");
         System.out.println("  --replay-limit=<n>         Number of failure replays to include (default: 20)");
+        System.out.println("  --import-profile=<name>    Import profile: strict | compat (default: strict)");
         System.out.println("  --help, -h                 Show this help");
     }
 
@@ -408,7 +416,13 @@ public final class UnifiedSpecCorpusRunner {
         }
     }
 
-    public record RunConfig(Path specRoot, Path outputDir, String seed, String mongoUri, int replayLimit) {
+    public record RunConfig(
+            Path specRoot,
+            Path outputDir,
+            String seed,
+            String mongoUri,
+            int replayLimit,
+            UnifiedSpecImporter.ImportProfile importProfile) {
         public RunConfig {
             specRoot = normalizePath(specRoot, "specRoot");
             outputDir = normalizePath(outputDir, "outputDir");
@@ -417,6 +431,7 @@ public final class UnifiedSpecCorpusRunner {
             if (replayLimit <= 0) {
                 throw new IllegalArgumentException("replayLimit must be > 0");
             }
+            importProfile = Objects.requireNonNull(importProfile, "importProfile");
         }
 
         static RunConfig fromArgs(final String[] args) {
@@ -425,6 +440,7 @@ public final class UnifiedSpecCorpusRunner {
             String seed = DEFAULT_SEED;
             String mongoUri = trimToNull(System.getenv(DEFAULT_MONGO_URI_ENV));
             int replayLimit = DEFAULT_REPLAY_LIMIT;
+            UnifiedSpecImporter.ImportProfile importProfile = UnifiedSpecImporter.ImportProfile.STRICT;
 
             for (final String arg : args) {
                 if (arg == null || arg.isBlank()) {
@@ -450,12 +466,17 @@ public final class UnifiedSpecCorpusRunner {
                     replayLimit = parsePositiveInt(valueAfterPrefix(arg, "--replay-limit="), "replay-limit");
                     continue;
                 }
+                if (arg.startsWith("--import-profile=")) {
+                    importProfile = UnifiedSpecImporter.ImportProfile.parse(
+                            valueAfterPrefix(arg, "--import-profile="));
+                    continue;
+                }
                 throw new IllegalArgumentException("unknown argument: " + arg);
             }
             if (mongoUri == null || mongoUri.isBlank()) {
                 throw new IllegalArgumentException("mongo-uri must be provided (arg or " + DEFAULT_MONGO_URI_ENV + ")");
             }
-            return new RunConfig(specRoot, outputDir, seed, mongoUri, replayLimit);
+            return new RunConfig(specRoot, outputDir, seed, mongoUri, replayLimit, importProfile);
         }
     }
 

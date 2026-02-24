@@ -63,9 +63,20 @@ public final class UpdateCommandHandler implements CommandHandler {
                 return CommandErrors.typeMismatch("q must be a document");
             }
 
-            final BsonDocument updateDocument = readRequiredDocument(updateSpec, "u");
-            if (updateDocument == null) {
-                return CommandErrors.typeMismatch("u must be a document");
+            final BsonValue updateValue = updateSpec.get("u");
+            final BsonDocument updateDocument;
+            if (updateValue == null) {
+                return CommandErrors.typeMismatch("u must be a document or array");
+            } else if (updateValue.isDocument()) {
+                updateDocument = updateValue.asDocument();
+            } else if (updateValue.isArray()) {
+                final UpdatePipelineSubset.ParseResult parsedPipeline = UpdatePipelineSubset.parse(updateValue.asArray());
+                if (parsedPipeline.error() != null) {
+                    return parsedPipeline.error();
+                }
+                updateDocument = parsedPipeline.updateDocument();
+            } else {
+                return CommandErrors.typeMismatch("u must be a document or array");
             }
 
             optionError = CrudCommandOptionValidator.validateHint(updateSpec, "hint");

@@ -30,9 +30,19 @@ public final class UnifiedSpecImporter {
             "count", "count");
 
     private final Yaml yaml;
+    private final ImportProfile profile;
 
     public UnifiedSpecImporter() {
+        this(ImportProfile.STRICT);
+    }
+
+    public UnifiedSpecImporter(final ImportProfile profile) {
         this.yaml = new Yaml();
+        this.profile = Objects.requireNonNull(profile, "profile");
+    }
+
+    public ImportProfile profile() {
+        return profile;
     }
 
     public ImportResult importCorpus(final Path specRoot) throws IOException {
@@ -68,7 +78,8 @@ public final class UnifiedSpecImporter {
             final FileConversionContext baseContext = FileConversionContext.fromSpec(
                     defaultDatabase,
                     defaultCollection,
-                    spec);
+                    spec,
+                    profile);
             final Object testsValue = spec.get("tests");
             if (!(testsValue instanceof List<?> testsRaw)) {
                 skipped.add(new SkippedCase(
@@ -415,9 +426,6 @@ public final class UnifiedSpecImporter {
         if (rawUpdate == null) {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
-        if (rawUpdate instanceof List<?>) {
-            throw new UnsupportedOperationException("unsupported UTF update pipeline");
-        }
         if (arguments.containsKey("arrayFilters")) {
             throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
         }
@@ -513,9 +521,6 @@ public final class UnifiedSpecImporter {
         final Object updateValue = arguments.get("update");
         if (updateValue == null) {
             throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
-        }
-        if (updateValue instanceof List<?>) {
-            throw new UnsupportedOperationException("unsupported UTF update pipeline");
         }
         if (arguments.containsKey("arrayFilters")) {
             throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
@@ -630,9 +635,6 @@ public final class UnifiedSpecImporter {
         final Object updateValue = operationArguments.get("update");
         if (updateValue == null) {
             throw new IllegalArgumentException("bulkWrite update operation requires update argument");
-        }
-        if (updateValue instanceof List<?>) {
-            throw new UnsupportedOperationException("unsupported UTF update pipeline");
         }
         if (operationArguments.containsKey("arrayFilters")) {
             throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
@@ -978,9 +980,36 @@ public final class UnifiedSpecImporter {
         return Collections.unmodifiableMap(new LinkedHashMap<>(source));
     }
 
+    public enum ImportProfile {
+        STRICT("strict"),
+        COMPAT("compat");
+
+        private final String cliValue;
+
+        ImportProfile(final String cliValue) {
+            this.cliValue = cliValue;
+        }
+
+        public String cliValue() {
+            return cliValue;
+        }
+
+        public static ImportProfile parse(final String rawValue) {
+            final String normalized = trimToEmpty(rawValue).toLowerCase(Locale.ROOT);
+            if (normalized.isEmpty() || "strict".equals(normalized)) {
+                return STRICT;
+            }
+            if ("compat".equals(normalized) || "compatibility".equals(normalized)) {
+                return COMPAT;
+            }
+            throw new IllegalArgumentException("unsupported import profile: " + rawValue);
+        }
+    }
+
     private static final class FileConversionContext {
         private final String defaultDatabase;
         private final String defaultCollection;
+        private final ImportProfile profile;
         private final Map<String, String> databaseAliases;
         private final Map<String, CollectionTarget> collectionAliases;
         private final Map<String, SessionState> sessions;
@@ -988,11 +1017,13 @@ public final class UnifiedSpecImporter {
         private FileConversionContext(
                 final String defaultDatabase,
                 final String defaultCollection,
+                final ImportProfile profile,
                 final Map<String, String> databaseAliases,
                 final Map<String, CollectionTarget> collectionAliases,
                 final Map<String, SessionState> sessions) {
             this.defaultDatabase = defaultDatabase;
             this.defaultCollection = defaultCollection;
+            this.profile = profile;
             this.databaseAliases = databaseAliases;
             this.collectionAliases = collectionAliases;
             this.sessions = sessions;
@@ -1001,10 +1032,12 @@ public final class UnifiedSpecImporter {
         private static FileConversionContext fromSpec(
                 final String defaultDatabase,
                 final String defaultCollection,
-                final Map<String, Object> spec) {
+                final Map<String, Object> spec,
+                final ImportProfile profile) {
             final FileConversionContext context = new FileConversionContext(
                     defaultDatabase,
                     defaultCollection,
+                    profile,
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>());
@@ -1023,6 +1056,7 @@ public final class UnifiedSpecImporter {
             return new FileConversionContext(
                     defaultDatabase,
                     defaultCollection,
+                    profile,
                     new LinkedHashMap<>(databaseAliases),
                     new LinkedHashMap<>(collectionAliases),
                     copiedSessions);
@@ -1043,7 +1077,8 @@ public final class UnifiedSpecImporter {
                 }
                 case "commitTransaction" -> List.of(completeTransaction("commitTransaction", objectName, arguments));
                 case "abortTransaction" -> List.of(completeTransaction("abortTransaction", objectName, arguments));
-                case "failPoint" -> throw new UnsupportedOperationException("unsupported-by-policy UTF operation: failPoint");
+                case "failPoint" -> handleFailPointOperation("failPoint", arguments);
+                case "targetedFailPoint" -> handleFailPointOperation("targetedFailPoint", arguments);
                 default -> {
                     final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
                     final ScenarioCommand converted = convertCrudOperation(
@@ -1054,6 +1089,56 @@ public final class UnifiedSpecImporter {
                     yield List.of(applySessionEnvelope(converted, arguments));
                 }
             };
+        }
+
+        private List<ScenarioCommand> handleFailPointOperation(
+                final String operationName,
+                final Map<String, Object> arguments) {
+            if (profile == ImportProfile.STRICT) {
+                if ("failPoint".equals(operationName)) {
+                    throw new UnsupportedOperationException("unsupported-by-policy UTF operation: failPoint");
+                }
+                throw new UnsupportedOperationException("unsupported UTF operation: targetedFailPoint");
+            }
+
+            if (!isFailPointDisableMode(arguments)) {
+                throw new UnsupportedOperationException(
+                        "unsupported UTF " + operationName + " mode for compat profile");
+            }
+
+            final Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("ping", 1);
+            payload.put("$db", "admin");
+            return List.of(new ScenarioCommand("ping", immutableMap(payload)));
+        }
+
+        private static boolean isFailPointDisableMode(final Map<String, Object> arguments) {
+            final Object failPointRaw = arguments.get("failPoint");
+            final Map<String, Object> failPoint = failPointRaw instanceof Map<?, ?>
+                    ? asStringObjectMap(failPointRaw, "failPoint.arguments.failPoint")
+                    : arguments;
+            final Object modeRaw = failPoint.get("mode");
+            if (modeRaw == null) {
+                return false;
+            }
+            if (modeRaw instanceof Boolean modeBoolean) {
+                return !modeBoolean;
+            }
+            if (modeRaw instanceof String modeString) {
+                return "off".equalsIgnoreCase(modeString.trim());
+            }
+            if (!(modeRaw instanceof Map<?, ?>)) {
+                return false;
+            }
+            final Map<String, Object> modeDocument = asStringObjectMap(modeRaw, "failPoint.arguments.mode");
+            final Object timesRaw = modeDocument.get("times");
+            if (timesRaw == null) {
+                return false;
+            }
+            if (timesRaw instanceof Number timesNumber) {
+                return timesNumber.intValue() <= 0;
+            }
+            return false;
         }
 
         private List<ScenarioCommand> handleCreateEntities(final Map<String, Object> arguments) {

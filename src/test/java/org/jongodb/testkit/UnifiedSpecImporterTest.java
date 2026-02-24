@@ -242,18 +242,6 @@ class UnifiedSpecImporterTest {
                           }
                         }
                       ]
-                    },
-                    {
-                      "description": "update pipeline",
-                      "operations": [
-                        {
-                          "name": "updateMany",
-                          "arguments": {
-                            "filter": {"_id": 1},
-                            "update": [{"$set": {"a": 1}}]
-                          }
-                        }
-                      ]
                     }
                   ]
                 }
@@ -263,9 +251,51 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
         assertEquals(0, result.importedCount());
-        assertEquals(3, result.unsupportedCount());
+        assertEquals(2, result.unsupportedCount());
         assertTrue(result.skippedCases().stream().allMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
+    }
+
+    @Test
+    void importsUpdatePipelineSubsetAndExecutesThroughWireBackend() throws IOException {
+        Files.writeString(
+                tempDir.resolve("update-pipeline-subset.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "update pipeline subset",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [{"_id": 1, "name": "before", "legacy": true}]}},
+                        {"name": "updateMany", "arguments": {"filter": {"_id": 1}, "update": [{"$set": {"name": "after"}}, {"$unset": "legacy"}]}},
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(result.importedScenarios().get(0).scenario());
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> findResult = outcome.commandResults().get(2);
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> cursor = (Map<String, Object>) findResult.get("cursor");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> firstBatch = (List<Map<String, Object>>) cursor.get("firstBatch");
+        assertEquals(1, firstBatch.size());
+        assertEquals("after", firstBatch.get(0).get("name"));
+        assertTrue(!firstBatch.get(0).containsKey("legacy"));
     }
 
     @Test
@@ -913,5 +943,97 @@ class UnifiedSpecImporterTest {
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
                         && skipped.reason().contains("unsupported-by-policy UTF operation: failPoint")));
+    }
+
+    @Test
+    void strictProfileMarksTargetedFailPointAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("targeted-failpoint-strict.yml"),
+                """
+                tests:
+                  - description: targeted failpoint strict profile
+                    operations:
+                      - object: testRunner
+                        name: targetedFailPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: off
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF operation: targetedFailPoint")));
+    }
+
+    @Test
+    void compatProfileImportsFailPointDisableOperationsAsNoop() throws IOException {
+        Files.writeString(
+                tempDir.resolve("failpoint-compat.yml"),
+                """
+                tests:
+                  - description: failpoint compat mode off
+                    operations:
+                      - object: testRunner
+                        name: failPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: off
+                      - object: testRunner
+                        name: targetedFailPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode:
+                              times: 0
+                      - object: db
+                        name: runCommand
+                        arguments:
+                          command:
+                            ping: 1
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.COMPAT);
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+        assertEquals("ping", scenario.commands().get(1).commandName());
+        assertEquals("ping", scenario.commands().get(2).commandName());
+    }
+
+    @Test
+    void compatProfileRejectsUnsupportedFailPointModes() throws IOException {
+        Files.writeString(
+                tempDir.resolve("failpoint-compat-unsupported.yml"),
+                """
+                tests:
+                  - description: failpoint compat mode unsupported
+                    operations:
+                      - object: testRunner
+                        name: failPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: alwaysOn
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.COMPAT);
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF failPoint mode for compat profile")));
     }
 }

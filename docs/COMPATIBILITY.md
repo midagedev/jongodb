@@ -24,7 +24,7 @@ Certification context:
 | `killCursors` | Supported | Cursor cancellation |
 | `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
 | `listIndexes` | Partial | Metadata round-trip |
-| `update` | Partial | Operator set intentionally limited |
+| `update` | Partial | Operator set intentionally limited; update pipeline subset supports `$set`/`$unset` stages without expression evaluation |
 | `delete` | Supported | `limit` 0/1 behavior |
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
@@ -32,7 +32,7 @@ Certification context:
 | `countDocuments` | Partial | Filter + skip/limit + hint/collation/readConcern shape validation |
 | `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `count`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
-| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; operator updates only; supports projection include/exclude subset (including `_id` override) |
+| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator updates plus update-pipeline subset (`$set`/`$unset`, no expression evaluation); projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
 
@@ -84,6 +84,7 @@ Not implemented or partial:
 
 Supported:
 - operator updates: `$set`, `$inc`, `$unset`
+- update pipeline subset: `$set`/`$unset` stages with literal values
 - replacement updates (with `multi=false`)
 - upsert for operator and replacement forms
 - same update constraints apply to `bulkWrite` update/replace operations
@@ -92,7 +93,8 @@ Not supported:
 - `arrayFilters`
 - positional updates (`$`, `$[]`, `$[<id>]`)
 - update operators outside the supported set
-- pipeline updates (`u` as array)
+- update pipeline stages outside `$set`/`$unset`
+- update pipeline expressions (field references/operator expressions inside stage values)
 - replacement updates with `multi=true`
 
 ## R3 Query/Update Corpus Exclusions
@@ -106,8 +108,18 @@ differential parity counts:
 - documents containing dot or dollar-prefixed field paths in insert payloads
 - `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `count`)
 - update operations using `arrayFilters`
-- update pipeline form (`u` as an array pipeline)
+- update pipeline forms outside the supported subset (`$set`/`$unset` stages with literal values)
 - replacement updates requested with `multi=true`
+
+## UTF Import Profiles
+
+Supported importer profiles:
+- `strict` (default): deterministic mode; `failPoint` remains policy-excluded and `targetedFailPoint` remains unsupported.
+- `compat`: allows safe failpoint-disable subset (`mode: off` or `mode.times <= 0`) and maps those operations to deterministic no-op commands.
+
+In `compat` profile:
+- unsupported failpoint modes remain explicit unsupported cases
+- scorecard/ledger artifacts should be interpreted together with profile metadata
 
 ## Index Semantics
 

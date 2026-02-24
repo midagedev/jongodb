@@ -80,7 +80,8 @@ class UnifiedSpecCorpusRunnerTest {
                 outputDir,
                 "seed-a",
                 "mongodb://example",
-                10);
+                10,
+                UnifiedSpecImporter.ImportProfile.STRICT);
 
         final UnifiedSpecCorpusRunner.RunResult result = runner.runAndWrite(config);
         assertEquals(3, result.importResult().importedCount());
@@ -105,10 +106,12 @@ class UnifiedSpecCorpusRunnerTest {
         assertEquals(1, json.get("differentialSummary", Document.class).getInteger("mismatch"));
         assertEquals(1, json.get("differentialSummary", Document.class).getInteger("error"));
         assertEquals(2, json.get("replayBundles", Document.class).getInteger("count"));
+        assertEquals("strict", json.getString("importProfile"));
 
         final String markdown = Files.readString(artifactPaths.markdownArtifact());
         assertTrue(markdown.contains("pass: 1"));
         assertTrue(markdown.contains("unsupported: 1"));
+        assertTrue(markdown.contains("importProfile: strict"));
         assertTrue(markdown.contains("mismatch-case"));
         assertTrue(markdown.contains("error-case"));
         assertTrue(markdown.contains("## Replay Bundles"));
@@ -153,7 +156,8 @@ class UnifiedSpecCorpusRunnerTest {
                 outputDir,
                 "seed-distinct",
                 "mongodb://example",
-                10));
+                10,
+                UnifiedSpecImporter.ImportProfile.STRICT));
 
         assertEquals(1, result.importResult().importedCount());
         assertEquals(1, result.differentialReport().mismatchCount());

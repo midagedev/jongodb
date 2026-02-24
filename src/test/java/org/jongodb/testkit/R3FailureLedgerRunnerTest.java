@@ -48,6 +48,7 @@ class R3FailureLedgerRunnerTest {
                 "seed-r3",
                 "mongodb://example",
                 10,
+                UnifiedSpecImporter.ImportProfile.STRICT,
                 false,
                 List.of(
                         new R3FailureLedgerRunner.SuiteConfig("crud-unified", "source/crud/tests/unified"),
@@ -72,8 +73,10 @@ class R3FailureLedgerRunnerTest {
         assertEquals(4, json.getList("entries", Document.class).size());
         assertEquals(1, json.get("byTrack", Document.class).getInteger("txn"));
         assertEquals(1, json.get("byTrack", Document.class).getInteger("distinct"));
+        assertEquals("strict", json.getString("importProfile"));
         final String markdown = Files.readString(artifactPaths.markdownArtifact());
         assertTrue(markdown.contains("distinct: 1"));
+        assertTrue(markdown.contains("importProfile: strict"));
         assertTrue(R3FailureLedgerRunner.hasGateFailure(first));
     }
 
@@ -95,6 +98,7 @@ class R3FailureLedgerRunnerTest {
                 "seed-r3-pass",
                 "mongodb://example",
                 10,
+                UnifiedSpecImporter.ImportProfile.STRICT,
                 true,
                 List.of(
                         new R3FailureLedgerRunner.SuiteConfig("crud-unified", "source/crud/tests/unified"),
@@ -121,6 +125,7 @@ class R3FailureLedgerRunnerTest {
                 "seed-r3-missing",
                 "mongodb://example",
                 10,
+                UnifiedSpecImporter.ImportProfile.STRICT,
                 true,
                 List.of(new R3FailureLedgerRunner.SuiteConfig("crud-unified", "source/crud/tests/unified")));
 
