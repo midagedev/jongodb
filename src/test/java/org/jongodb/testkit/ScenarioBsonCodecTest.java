@@ -105,6 +105,24 @@ class ScenarioBsonCodecTest {
     }
 
     @Test
+    void toRealMongodCommandDocumentTranslatesCountDocumentsQueryAliasToMatchStage() {
+        ScenarioCommand command = new ScenarioCommand(
+            "countDocuments",
+            Map.of(
+                "countDocuments",
+                "users",
+                "query",
+                Map.of("active", true)
+            )
+        );
+
+        var commandDocument = ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real");
+
+        BsonDocument firstStage = commandDocument.getArray("pipeline").get(0).asDocument();
+        assertEquals(true, firstStage.getDocument("$match").getBoolean("active").getValue());
+    }
+
+    @Test
     void toRealMongodCommandDocumentTranslatesFindOneAndUpdateToFindAndModify() {
         ScenarioCommand command = new ScenarioCommand(
             "findOneAndUpdate",
