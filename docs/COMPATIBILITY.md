@@ -26,6 +26,7 @@ Certification context:
 | `listIndexes` | Partial | Metadata round-trip |
 | `update` | Partial | Operator set intentionally limited |
 | `delete` | Supported | `limit` 0/1 behavior |
+| `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `countDocuments` | Partial | Filter + skip/limit + hint/collation/readConcern shape validation |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; operator updates only |
@@ -82,6 +83,7 @@ Supported:
 - operator updates: `$set`, `$inc`, `$unset`
 - replacement updates (with `multi=false`)
 - upsert for operator and replacement forms
+- same update constraints apply to `bulkWrite` update/replace operations
 
 Not supported:
 - `arrayFilters`
@@ -96,6 +98,7 @@ The R3 failure-ledger runner currently treats the following UTF cases as unsuppo
 differential parity counts:
 
 - unordered `insertMany` (`ordered=false`)
+- unordered `bulkWrite` (`ordered=false`)
 - documents containing dot or dollar-prefixed field paths in insert payloads
 - update operations using `arrayFilters`
 - update pipeline form (`u` as an array pipeline)

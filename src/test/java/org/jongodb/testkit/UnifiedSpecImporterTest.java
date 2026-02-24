@@ -121,6 +121,94 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsBulkWriteOperationWhenOrderedIsSupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("bulk-write.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "bulk write ordered true",
+                      "operations": [
+                        {
+                          "name": "bulkWrite",
+                          "arguments": {
+                            "ordered": true,
+                            "requests": [
+                              {"insertOne": {"document": {"_id": 1, "name": "alice"}}},
+                              {"updateOne": {"filter": {"_id": 1}, "update": {"$set": {"tier": 1}}}},
+                              {"deleteMany": {"filter": {"tier": 0}}}
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        assertEquals("users", scenario.commands().get(0).payload().get("bulkWrite"));
+        assertEquals("app", scenario.commands().get(0).payload().get("$db"));
+        assertEquals(true, scenario.commands().get(0).payload().get("ordered"));
+        final Object operationsValue = scenario.commands().get(0).payload().get("operations");
+        assertTrue(operationsValue instanceof List<?>);
+        final List<?> operations = (List<?>) operationsValue;
+        assertEquals(3, operations.size());
+        assertTrue(operations.get(0) instanceof java.util.Map<?, ?>);
+        final java.util.Map<?, ?> firstOperation = (java.util.Map<?, ?>) operations.get(0);
+        assertTrue(firstOperation.containsKey("insertOne"));
+    }
+
+    @Test
+    void marksBulkWriteOrderedFalseAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("bulk-write-unsupported.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "bulk write ordered false",
+                      "operations": [
+                        {
+                          "name": "bulkWrite",
+                          "arguments": {
+                            "ordered": false,
+                            "requests": [
+                              {"insertOne": {"document": {"_id": 1, "name": "alice"}}}
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("bulkWrite option: ordered=false")));
+    }
+
+    @Test
     void marksKnownUnsupportedQueryUpdateFeaturesAsUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-query-update.json"),
