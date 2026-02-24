@@ -35,8 +35,7 @@ public final class TransactionCommandValidator {
         final boolean commitOrAbort = isCommitOrAbort(commandName);
         final boolean commitTransaction = "committransaction".equals(commandName);
         final boolean abortTransaction = "aborttransaction".equals(commandName);
-        final boolean hasTransactionFields = hasTransactionFields(command);
-        if (!commitOrAbort && !hasTransactionFields) {
+        if (!hasTransactionEnvelope(command, commitOrAbort)) {
             return ValidationResult.nonTransactional();
         }
 
@@ -263,11 +262,14 @@ public final class TransactionCommandValidator {
         return new ParsedTxnNumber(parsedValue, null);
     }
 
-    private static boolean hasTransactionFields(final BsonDocument command) {
-        return command.containsKey("lsid")
-                || command.containsKey("txnNumber")
-                || command.containsKey("autocommit")
-                || command.containsKey("startTransaction");
+    private static boolean hasTransactionEnvelope(final BsonDocument command, final boolean commitOrAbort) {
+        if (commitOrAbort) {
+            return true;
+        }
+
+        // Retryable writes can include lsid/txnNumber without transaction semantics.
+        // Treat commands as transactional only when transaction envelope fields are present.
+        return command.containsKey("autocommit") || command.containsKey("startTransaction");
     }
 
     private static boolean isCommitOrAbort(final String commandName) {

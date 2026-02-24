@@ -42,6 +42,7 @@ public final class CommandDispatcher {
         configuredHandlers.put("listindexes", new ListIndexesCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("update", new UpdateCommandHandler(routedStore));
         configuredHandlers.put("delete", new DeleteCommandHandler(routedStore));
+        configuredHandlers.put("findandmodify", new FindAndModifyCommandHandler(routedStore));
         configuredHandlers.put("committransaction", new CommitTransactionCommandHandler());
         configuredHandlers.put("aborttransaction", new AbortTransactionCommandHandler());
         this.handlers = Map.copyOf(configuredHandlers);

@@ -34,6 +34,7 @@ final class UpdateApplier {
         final List<SetOperation> setOperations = new ArrayList<>();
         final List<IncOperation> incrementOperations = new ArrayList<>();
         final List<String> unsetOperations = new ArrayList<>();
+        final List<AddToSetOperation> addToSetOperations = new ArrayList<>();
 
         for (final Map.Entry<String, Object> entry : update.entrySet()) {
             final String operator = entry.getKey();
@@ -57,12 +58,20 @@ final class UpdateApplier {
                 case "$unset":
                     unsetOperations.addAll(definition.keySet());
                     break;
+                case "$addToSet":
+                    for (final Map.Entry<String, Object> addToSetEntry : definition.entrySet()) {
+                        addToSetOperations.add(
+                                new AddToSetOperation(
+                                        addToSetEntry.getKey(),
+                                        parseAddToSetValues(addToSetEntry.getKey(), addToSetEntry.getValue())));
+                    }
+                    break;
                 default:
                     throw new IllegalArgumentException("unsupported update operator: " + operator);
             }
         }
 
-        return ParsedUpdate.operator(setOperations, incrementOperations, unsetOperations);
+        return ParsedUpdate.operator(setOperations, incrementOperations, unsetOperations, addToSetOperations);
     }
 
     static void validateApplicable(final Document document, final ParsedUpdate update) {
@@ -86,6 +95,15 @@ final class UpdateApplier {
                         "$inc target for '" + operation.path() + "' must be numeric");
             }
         }
+        for (final AddToSetOperation operation : update.addToSetOperations()) {
+            ensureWritablePath(document, operation.path());
+
+            final PathLookup target = lookupPath(document, operation.path());
+            if (target.exists() && !(target.value() instanceof List<?>)) {
+                throw new IllegalArgumentException(
+                        "$addToSet target for '" + operation.path() + "' must be an array");
+            }
+        }
     }
 
     static boolean apply(final Document document, final ParsedUpdate update) {
@@ -107,8 +125,32 @@ final class UpdateApplier {
         for (final String path : update.unsetOperations()) {
             modified |= applyUnset(document, path);
         }
+        for (final AddToSetOperation operation : update.addToSetOperations()) {
+            modified |= applyAddToSet(document, operation.path(), operation.values());
+        }
 
         return modified;
+    }
+
+    private static List<Object> parseAddToSetValues(final String path, final Object rawValue) {
+        if (!(rawValue instanceof Map<?, ?> mapValue) || !mapValue.containsKey("$each")) {
+            return List.of(DocumentCopies.copyAny(rawValue));
+        }
+
+        if (mapValue.size() != 1) {
+            throw new IllegalArgumentException("$addToSet for '" + path + "' only supports $each");
+        }
+
+        final Object eachValue = mapValue.get("$each");
+        if (!(eachValue instanceof List<?> eachList)) {
+            throw new IllegalArgumentException("$addToSet.$each for '" + path + "' must be an array");
+        }
+
+        final List<Object> values = new ArrayList<>(eachList.size());
+        for (final Object item : eachList) {
+            values.add(DocumentCopies.copyAny(item));
+        }
+        return List.copyOf(values);
     }
 
     private static void validateReplacementApplicable(final Document current, final Document replacement) {
@@ -212,6 +254,47 @@ final class UpdateApplier {
 
         parent.remove(leaf);
         return true;
+    }
+
+    private static boolean applyAddToSet(final Document document, final String path, final List<Object> values) {
+        final Map<String, Object> parent = getOrCreateParent(document, path);
+        final String leaf = leaf(path);
+
+        final List<Object> targetList;
+        if (!parent.containsKey(leaf)) {
+            targetList = new ArrayList<>();
+            parent.put(leaf, targetList);
+        } else {
+            final Object existing = parent.get(leaf);
+            if (!(existing instanceof List<?> existingList)) {
+                throw new IllegalArgumentException("$addToSet target for '" + path + "' must be an array");
+            }
+            targetList = castList(existingList);
+        }
+
+        boolean modified = false;
+        for (final Object rawValue : values) {
+            final Object copiedValue = DocumentCopies.copyAny(rawValue);
+            if (!containsByMongoEquality(targetList, copiedValue)) {
+                targetList.add(copiedValue);
+                modified = true;
+            }
+        }
+        return modified;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> castList(final List<?> source) {
+        return (List<Object>) source;
+    }
+
+    private static boolean containsByMongoEquality(final List<Object> values, final Object candidate) {
+        for (final Object value : values) {
+            if (valueEquals(value, candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void ensureWritablePath(final Document document, final String path) {
@@ -418,28 +501,32 @@ final class UpdateApplier {
         private final List<SetOperation> setOperations;
         private final List<IncOperation> incrementOperations;
         private final List<String> unsetOperations;
+        private final List<AddToSetOperation> addToSetOperations;
         private final Document replacementDocument;
 
         private ParsedUpdate(
                 final List<SetOperation> setOperations,
                 final List<IncOperation> incrementOperations,
                 final List<String> unsetOperations,
+                final List<AddToSetOperation> addToSetOperations,
                 final Document replacementDocument) {
             this.setOperations = List.copyOf(setOperations);
             this.incrementOperations = List.copyOf(incrementOperations);
             this.unsetOperations = List.copyOf(unsetOperations);
+            this.addToSetOperations = List.copyOf(addToSetOperations);
             this.replacementDocument = replacementDocument == null ? null : DocumentCopies.copy(replacementDocument);
         }
 
         static ParsedUpdate operator(
                 final List<SetOperation> setOperations,
                 final List<IncOperation> incrementOperations,
-                final List<String> unsetOperations) {
-            return new ParsedUpdate(setOperations, incrementOperations, unsetOperations, null);
+                final List<String> unsetOperations,
+                final List<AddToSetOperation> addToSetOperations) {
+            return new ParsedUpdate(setOperations, incrementOperations, unsetOperations, addToSetOperations, null);
         }
 
         static ParsedUpdate replacement(final Document replacementDocument) {
-            return new ParsedUpdate(List.of(), List.of(), List.of(), replacementDocument);
+            return new ParsedUpdate(List.of(), List.of(), List.of(), List.of(), replacementDocument);
         }
 
         boolean replacementStyle() {
@@ -461,11 +548,17 @@ final class UpdateApplier {
         List<String> unsetOperations() {
             return Collections.unmodifiableList(unsetOperations);
         }
+
+        List<AddToSetOperation> addToSetOperations() {
+            return Collections.unmodifiableList(addToSetOperations);
+        }
     }
 
     private record SetOperation(String path, Object value) {}
 
     private record IncOperation(String path, Number delta) {}
+
+    private record AddToSetOperation(String path, List<Object> values) {}
 
     private record PathLookup(boolean exists, Object value) {
         static PathLookup missing() {

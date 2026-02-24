@@ -65,6 +65,7 @@ public final class AggregationPipeline {
                 case "$count" -> applyCount(working, stageDefinition);
                 case "$addFields" -> applyAddFields(working, stageDefinition);
                 case "$sortByCount" -> applySortByCount(working, stageDefinition);
+                case "$replaceRoot" -> applyReplaceRoot(working, stageDefinition);
                 case "$facet" -> applyFacet(working, stageDefinition, collectionResolver);
                 case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver);
                 case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver);
@@ -220,7 +221,7 @@ public final class AggregationPipeline {
         }
 
         final Object idExpression = groupDefinition.get("_id");
-        final List<SumAccumulator> accumulators = parseSumAccumulators(groupDefinition);
+        final List<GroupAccumulator> accumulators = parseAccumulators(groupDefinition);
         final Map<GroupKey, Document> grouped = new LinkedHashMap<>();
         for (final Document source : input) {
             final Object id = evaluateGroupId(source, idExpression);
@@ -228,25 +229,35 @@ public final class AggregationPipeline {
             Document aggregate = grouped.get(groupKey);
             if (aggregate == null) {
                 aggregate = new Document("_id", DocumentCopies.copyAny(id));
-                for (final SumAccumulator accumulator : accumulators) {
-                    aggregate.put(accumulator.outputField(), 0L);
+                for (final GroupAccumulator accumulator : accumulators) {
+                    if (accumulator.operator() == GroupAccumulatorOperator.SUM) {
+                        aggregate.put(accumulator.outputField(), 0L);
+                    }
                 }
                 grouped.put(groupKey, aggregate);
             }
 
-            for (final SumAccumulator accumulator : accumulators) {
-                final Number increment = accumulator.sumOperand(source);
-                aggregate.put(
-                        accumulator.outputField(),
-                        addNumbers(aggregate.get(accumulator.outputField()), increment));
+            for (final GroupAccumulator accumulator : accumulators) {
+                if (accumulator.operator() == GroupAccumulatorOperator.SUM) {
+                    final Number increment = accumulator.sumOperand(source);
+                    aggregate.put(
+                            accumulator.outputField(),
+                            addNumbers(aggregate.get(accumulator.outputField()), increment));
+                    continue;
+                }
+
+                if (accumulator.operator() == GroupAccumulatorOperator.FIRST
+                        && !aggregate.containsKey(accumulator.outputField())) {
+                    aggregate.put(accumulator.outputField(), accumulator.firstOperand(source));
+                }
             }
         }
 
         return List.copyOf(grouped.values());
     }
 
-    private static List<SumAccumulator> parseSumAccumulators(final Document groupDefinition) {
-        final List<SumAccumulator> accumulators = new ArrayList<>();
+    private static List<GroupAccumulator> parseAccumulators(final Document groupDefinition) {
+        final List<GroupAccumulator> accumulators = new ArrayList<>();
         for (final Map.Entry<String, Object> entry : groupDefinition.entrySet()) {
             if ("_id".equals(entry.getKey())) {
                 continue;
@@ -259,14 +270,50 @@ public final class AggregationPipeline {
             }
 
             final String accumulatorName = accumulatorDefinition.keySet().iterator().next();
-            if (!"$sum".equals(accumulatorName)) {
-                throw new UnsupportedFeatureException(
+            final GroupAccumulatorOperator operator = switch (accumulatorName) {
+                case "$sum" -> GroupAccumulatorOperator.SUM;
+                case "$first" -> GroupAccumulatorOperator.FIRST;
+                default -> throw new UnsupportedFeatureException(
                         "aggregation.group.accumulator." + accumulatorName,
                         "unsupported $group accumulator: " + accumulatorName);
-            }
-            accumulators.add(new SumAccumulator(entry.getKey(), accumulatorDefinition.get("$sum")));
+            };
+            accumulators.add(new GroupAccumulator(entry.getKey(), operator, accumulatorDefinition.get(accumulatorName)));
         }
         return List.copyOf(accumulators);
+    }
+
+    private static Object evaluateGroupExpression(final Document source, final Object expression) {
+        if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
+            if ("$$ROOT".equals(pathExpression) || "$$CURRENT".equals(pathExpression)) {
+                return DocumentCopies.copy(source);
+            }
+            final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
+            return pathValue.present() ? DocumentCopies.copyAny(pathValue.value()) : null;
+        }
+        return DocumentCopies.copyAny(expression);
+    }
+
+    private static Number evaluateGroupSumOperand(final Document source, final Object expression) {
+        final Object value = evaluateGroupExpression(source, expression);
+        if (value instanceof Number numberValue) {
+            return numberValue;
+        }
+        return 0L;
+    }
+
+    private enum GroupAccumulatorOperator {
+        SUM,
+        FIRST
+    }
+
+    private record GroupAccumulator(String outputField, GroupAccumulatorOperator operator, Object expression) {
+        private Number sumOperand(final Document source) {
+            return evaluateGroupSumOperand(source, expression);
+        }
+
+        private Object firstOperand(final Document source) {
+            return evaluateGroupExpression(source, expression);
+        }
     }
 
     private static Object evaluateGroupId(final Document source, final Object expression) {
@@ -570,6 +617,30 @@ public final class AggregationPipeline {
         return List.copyOf(output);
     }
 
+    private static List<Document> applyReplaceRoot(final List<Document> input, final Object stageDefinition) {
+        final Object expression;
+        if (stageDefinition instanceof String) {
+            expression = stageDefinition;
+        } else {
+            final Document replaceDefinition =
+                    requireDocument(stageDefinition, "$replaceRoot stage requires a document");
+            if (replaceDefinition.size() != 1 || !replaceDefinition.containsKey("newRoot")) {
+                throw new IllegalArgumentException("$replaceRoot stage requires a single newRoot field");
+            }
+            expression = replaceDefinition.get("newRoot");
+        }
+
+        final List<Document> output = new ArrayList<>(input.size());
+        for (final Document source : input) {
+            final Object evaluated = evaluateExpression(source, expression);
+            if (!(evaluated instanceof Map<?, ?> mapValue)) {
+                throw new IllegalArgumentException("$replaceRoot newRoot must evaluate to a document");
+            }
+            output.add(copyMapToDocument(mapValue));
+        }
+        return List.copyOf(output);
+    }
+
     private static List<Document> applyFacet(
             final List<Document> input,
             final Object stageDefinition,
@@ -684,6 +755,9 @@ public final class AggregationPipeline {
 
     private static Object evaluateExpression(final Document source, final Object expression) {
         if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
+            if ("$$ROOT".equals(pathExpression) || "$$CURRENT".equals(pathExpression)) {
+                return DocumentCopies.copy(source);
+            }
             final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
             return pathValue.present() ? DocumentCopies.copyAny(pathValue.value()) : null;
         }
@@ -924,22 +998,6 @@ public final class AggregationPipeline {
 
         private Object valueOrNull() {
             return present ? value : null;
-        }
-    }
-
-    private record SumAccumulator(String outputField, Object expression) {
-        private Number sumOperand(final Document source) {
-            if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
-                final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
-                if (!(pathValue.value() instanceof Number pathNumber)) {
-                    return 0L;
-                }
-                return pathNumber;
-            }
-            if (expression instanceof Number numberExpression) {
-                return numberExpression;
-            }
-            return 0L;
         }
     }
 
