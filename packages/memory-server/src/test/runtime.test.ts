@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
-import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { MongoClient } from "mongodb";
 
 import { startJongodbMemoryServer } from "../index.js";
+import { resolveTestClasspath } from "./support/classpath.js";
 
 const classpathForRuntime = resolveTestClasspath();
 
@@ -113,36 +111,3 @@ test(
     }
   }
 );
-
-function resolveTestClasspath(): string {
-  const fromEnv = process.env.JONGODB_TEST_CLASSPATH?.trim();
-  if (fromEnv !== undefined && fromEnv.length > 0) {
-    return fromEnv;
-  }
-
-  const currentFile = fileURLToPath(import.meta.url);
-  const testDir = path.dirname(currentFile);
-  const packageDir = path.resolve(testDir, "..", "..");
-  const repoRoot = path.resolve(packageDir, "..", "..");
-  const gradle = path.resolve(repoRoot, ".tooling", "gradle-8.10.2", "bin", "gradle");
-
-  const output = execFileSync(
-    gradle,
-    ["--no-daemon", "-q", "printLauncherClasspath"],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }
-  );
-
-  const lines = output
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  const classpath = lines.at(-1);
-  if (classpath === undefined || classpath.length === 0) {
-    throw new Error("Failed to resolve launcher classpath from Gradle output.");
-  }
-  return classpath;
-}

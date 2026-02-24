@@ -14,6 +14,21 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./jest": "./dist/jest.js",
+    "./vitest": "./dist/vitest.js"
+  },
+  "typesVersions": {
+    "*": {
+      "jest": [
+        "./dist/jest.d.ts"
+      ],
+      "vitest": [
+        "./dist/vitest.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist"
   ],

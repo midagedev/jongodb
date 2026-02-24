@@ -28,6 +28,8 @@ export interface JongodbMemoryServerOptions {
 
 export interface JongodbMemoryServer {
   readonly uri: string;
+  readonly pid: number;
+  detach(): void;
   stop(): Promise<void>;
 }
 
@@ -144,8 +146,22 @@ export async function startJongodbMemoryServer(
     }
   };
 
+  if (child.pid === undefined) {
+    throw new Error("Jongodb process started without a PID.");
+  }
+
+  const detach = (): void => {
+    stdoutReader.close();
+    stderrReader.close();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    child.unref();
+  };
+
   return {
     uri: startupResult.uri,
+    pid: child.pid,
+    detach,
     stop,
   };
 }
