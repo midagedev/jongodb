@@ -188,15 +188,17 @@ class RealMongodBackendTest {
                 .append("values", new BsonArray(List.of(
                         new BsonInt32(2),
                         new BsonInt32(1),
-                        BsonDocument.parse("{\"a\":1}"))))
+                        BsonDocument.parse("{\"a\":1}"),
+                        org.bson.BsonArray.parse("[2,1]"))))
                 .append("ok", new BsonInt32(1));
 
         final BsonDocument normalized = (BsonDocument) method.invoke(null, command, response);
         final BsonArray values = normalized.getArray("values");
-        assertEquals(3, values.size());
+        assertEquals(4, values.size());
         assertEquals(1, values.get(0).asInt32().getValue());
         assertEquals(2, values.get(1).asInt32().getValue());
         assertTrue(values.get(2).isDocument());
+        assertTrue(values.get(3).isArray());
     }
 
     private static MongoClient mongoClientProxy(MongoDatabase database) {
