@@ -277,12 +277,20 @@ async function waitForStartup(params: {
       );
     }, startupTimeoutMs);
 
+    const cleanupListeners = () => {
+      stdoutReader.off("line", onStdout);
+      stderrReader.off("line", onStderr);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+
     const finish = (fn: () => void) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timeout);
+      cleanupListeners();
       fn();
     };
 
