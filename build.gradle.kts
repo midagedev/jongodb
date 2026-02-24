@@ -56,7 +56,7 @@ publishing {
                 name.set(providers.gradleProperty("pomName").orElse("jongodb"))
                 description.set(
                     providers.gradleProperty("pomDescription")
-                        .orElse("In-memory MongoDB-compatible command engine for integration testing.")
+                        .orElse("In-memory MongoDB-compatible backend for fast Spring integration tests.")
                 )
                 url.set(providers.gradleProperty("pomUrl").orElse("https://github.com/midagedev/jongodb"))
 
