@@ -168,6 +168,34 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer propagates replica-set profile args in java mode",
+  { concurrency: false },
+  async () => {
+    await withFakeLaunchers(async ({ fakeJavaPath }) => {
+      const server = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpath: "ignored-classpath-for-fake-java",
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_replica",
+        topologyProfile: "singleNodeReplicaSet",
+        replicaSetName: "rs-java",
+      });
+
+      try {
+        assert.match(
+          server.uri,
+          /^mongodb:\/\/127\.0\.0\.1:\d+\/java_replica\?replicaSet=rs-java$/u
+        );
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer reports both launch failures when auto mode cannot start",
   { concurrency: false },
   async () => {
