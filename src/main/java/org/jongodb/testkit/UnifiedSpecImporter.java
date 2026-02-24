@@ -60,6 +60,10 @@ public final class UnifiedSpecImporter {
 
             final String defaultDatabase = readDefaultDatabase(spec);
             final String defaultCollection = readDefaultCollection(spec);
+            final FileConversionContext baseContext = FileConversionContext.fromSpec(
+                    defaultDatabase,
+                    defaultCollection,
+                    spec);
             final Object testsValue = spec.get("tests");
             if (!(testsValue instanceof List<?> testsRaw)) {
                 skipped.add(new SkippedCase(
@@ -125,12 +129,13 @@ public final class UnifiedSpecImporter {
                 }
 
                 final List<ScenarioCommand> commands = new ArrayList<>(operations.size());
+                final FileConversionContext context = baseContext.copy();
                 String unsupportedReason = null;
                 String invalidReason = null;
                 for (final Object rawOperation : operations) {
                     final Map<String, Object> operation = asStringObjectMap(rawOperation, "operation");
                     try {
-                        commands.add(convertOperation(operation, defaultDatabase, defaultCollection));
+                        commands.addAll(context.convertOperation(operation));
                     } catch (final UnsupportedOperationException unsupported) {
                         unsupportedReason = unsupported.getMessage();
                         break;
@@ -154,6 +159,14 @@ public final class UnifiedSpecImporter {
                             sourcePath,
                             SkipKind.INVALID,
                             invalidReason));
+                    continue;
+                }
+                if (commands.isEmpty()) {
+                    skipped.add(new SkippedCase(
+                            caseId,
+                            sourcePath,
+                            SkipKind.SKIPPED,
+                            "no executable operations after setup/policy filtering"));
                     continue;
                 }
 
@@ -194,27 +207,24 @@ public final class UnifiedSpecImporter {
         throw new IllegalArgumentException("unsupported file extension: " + file);
     }
 
-    private static ScenarioCommand convertOperation(
-            final Map<String, Object> operation,
-            final String defaultDatabase,
-            final String defaultCollection) {
-        final String operationName = requireText(operation.get("name"), "operation.name");
-        final String objectName = trimToEmpty(operation.get("object"));
-        final Map<String, Object> arguments = asStringObjectMap(
-                operation.getOrDefault("arguments", Map.of()),
-                "operation.arguments");
-        final String database = fallbackText(arguments.get("database"), defaultDatabase, "database");
-        final String collection = fallbackText(arguments.get("collection"), defaultCollection, "collection");
-
+    private static ScenarioCommand convertCrudOperation(
+            final String operationName,
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
         return switch (operationName) {
             case "insertOne" -> insertOne(arguments, database, collection);
             case "insertMany" -> insertMany(arguments, database, collection);
             case "find" -> find(arguments, database, collection);
             case "aggregate" -> aggregate(arguments, database, collection);
+            case "countDocuments" -> countDocuments(arguments, database, collection);
             case "updateOne" -> update(arguments, database, collection, false);
             case "updateMany" -> update(arguments, database, collection, true);
+            case "replaceOne" -> replaceOne(arguments, database, collection);
             case "deleteOne" -> delete(arguments, database, collection, 1);
             case "deleteMany" -> delete(arguments, database, collection, 0);
+            case "findOneAndUpdate" -> findOneAndUpdate(arguments, database, collection);
+            case "findOneAndReplace" -> findOneAndReplace(arguments, database, collection);
             case "bulkWrite" -> bulkWrite(arguments, database, collection);
             case "createIndex" -> createIndex(arguments, database, collection);
             default -> throw new UnsupportedOperationException("unsupported UTF operation: " + operationName);
@@ -273,6 +283,19 @@ public final class UnifiedSpecImporter {
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("find", immutableMap(payload));
+    }
+
+    private static ScenarioCommand countDocuments(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> payload = commandEnvelope("countDocuments", database, collection);
+        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        copyIfPresent(arguments, payload, "skip");
+        copyIfPresent(arguments, payload, "limit");
+        copyIfPresent(arguments, payload, "hint");
+        copyIfPresent(arguments, payload, "collation");
+        return new ScenarioCommand("countDocuments", immutableMap(payload));
     }
 
     private static ScenarioCommand aggregate(
@@ -375,6 +398,22 @@ public final class UnifiedSpecImporter {
         return new ScenarioCommand("update", immutableMap(payload));
     }
 
+    private static ScenarioCommand replaceOne(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> replacement = asStringObjectMap(
+                arguments.get("replacement"),
+                "replaceOne.arguments.replacement");
+        final Map<String, Object> payload = commandEnvelope("replaceOne", database, collection);
+        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("replacement", deepCopyValue(replacement));
+        copyIfPresent(arguments, payload, "upsert");
+        copyIfPresent(arguments, payload, "hint");
+        copyIfPresent(arguments, payload, "collation");
+        return new ScenarioCommand("replaceOne", immutableMap(payload));
+    }
+
     private static boolean isReplacementDocument(final Object rawUpdate) {
         if (!(rawUpdate instanceof Map<?, ?> mapped) || mapped.isEmpty()) {
             return false;
@@ -424,6 +463,52 @@ public final class UnifiedSpecImporter {
         final Map<String, Object> payload = commandEnvelope("delete", database, collection);
         payload.put("deletes", List.of(immutableMap(deleteEntry)));
         return new ScenarioCommand("delete", immutableMap(payload));
+    }
+
+    private static ScenarioCommand findOneAndUpdate(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Object updateValue = arguments.get("update");
+        if (updateValue == null) {
+            throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
+        }
+        if (updateValue instanceof List<?>) {
+            throw new UnsupportedOperationException("unsupported UTF update pipeline");
+        }
+        if (arguments.containsKey("arrayFilters")) {
+            throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
+        }
+
+        final Map<String, Object> payload = commandEnvelope("findOneAndUpdate", database, collection);
+        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("update", deepCopyValue(updateValue));
+        copyIfPresent(arguments, payload, "sort");
+        copyIfPresent(arguments, payload, "projection");
+        copyIfPresent(arguments, payload, "upsert");
+        copyNormalizedReturnDocumentIfPresent(arguments, payload);
+        copyIfPresent(arguments, payload, "hint");
+        copyIfPresent(arguments, payload, "collation");
+        return new ScenarioCommand("findOneAndUpdate", immutableMap(payload));
+    }
+
+    private static ScenarioCommand findOneAndReplace(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> replacement = asStringObjectMap(
+                arguments.get("replacement"),
+                "findOneAndReplace.arguments.replacement");
+        final Map<String, Object> payload = commandEnvelope("findOneAndReplace", database, collection);
+        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("replacement", deepCopyValue(replacement));
+        copyIfPresent(arguments, payload, "sort");
+        copyIfPresent(arguments, payload, "projection");
+        copyIfPresent(arguments, payload, "upsert");
+        copyNormalizedReturnDocumentIfPresent(arguments, payload);
+        copyIfPresent(arguments, payload, "hint");
+        copyIfPresent(arguments, payload, "collation");
+        return new ScenarioCommand("findOneAndReplace", immutableMap(payload));
     }
 
     private static ScenarioCommand bulkWrite(
@@ -548,6 +633,20 @@ public final class UnifiedSpecImporter {
             return;
         }
         target.put(key, deepCopyValue(source.get(key)));
+    }
+
+    private static void copyNormalizedReturnDocumentIfPresent(
+            final Map<String, Object> source,
+            final Map<String, Object> target) {
+        if (!source.containsKey("returnDocument")) {
+            return;
+        }
+        final Object rawValue = source.get("returnDocument");
+        if (rawValue instanceof String textValue) {
+            target.put("returnDocument", textValue.toLowerCase(Locale.ROOT));
+            return;
+        }
+        target.put("returnDocument", deepCopyValue(rawValue));
     }
 
     private static String readDefaultDatabase(final Map<String, Object> spec) {
@@ -705,6 +804,320 @@ public final class UnifiedSpecImporter {
 
     private static Map<String, Object> immutableMap(final Map<String, Object> source) {
         return Collections.unmodifiableMap(new LinkedHashMap<>(source));
+    }
+
+    private static final class FileConversionContext {
+        private final String defaultDatabase;
+        private final String defaultCollection;
+        private final Map<String, String> databaseAliases;
+        private final Map<String, CollectionTarget> collectionAliases;
+        private final Map<String, SessionState> sessions;
+
+        private FileConversionContext(
+                final String defaultDatabase,
+                final String defaultCollection,
+                final Map<String, String> databaseAliases,
+                final Map<String, CollectionTarget> collectionAliases,
+                final Map<String, SessionState> sessions) {
+            this.defaultDatabase = defaultDatabase;
+            this.defaultCollection = defaultCollection;
+            this.databaseAliases = databaseAliases;
+            this.collectionAliases = collectionAliases;
+            this.sessions = sessions;
+        }
+
+        private static FileConversionContext fromSpec(
+                final String defaultDatabase,
+                final String defaultCollection,
+                final Map<String, Object> spec) {
+            final FileConversionContext context = new FileConversionContext(
+                    defaultDatabase,
+                    defaultCollection,
+                    new LinkedHashMap<>(),
+                    new LinkedHashMap<>(),
+                    new LinkedHashMap<>());
+            final Object createEntities = spec.get("createEntities");
+            if (createEntities != null) {
+                context.applyCreateEntities(createEntities);
+            }
+            return context;
+        }
+
+        private FileConversionContext copy() {
+            final Map<String, SessionState> copiedSessions = new LinkedHashMap<>(sessions.size());
+            for (final Map.Entry<String, SessionState> entry : sessions.entrySet()) {
+                copiedSessions.put(entry.getKey(), entry.getValue().copy());
+            }
+            return new FileConversionContext(
+                    defaultDatabase,
+                    defaultCollection,
+                    new LinkedHashMap<>(databaseAliases),
+                    new LinkedHashMap<>(collectionAliases),
+                    copiedSessions);
+        }
+
+        private List<ScenarioCommand> convertOperation(final Map<String, Object> operation) {
+            final String operationName = requireText(operation.get("name"), "operation.name");
+            final String objectName = trimToEmpty(operation.get("object"));
+            final Map<String, Object> arguments = asStringObjectMap(
+                    operation.getOrDefault("arguments", Map.of()),
+                    "operation.arguments");
+
+            return switch (operationName) {
+                case "createEntities" -> handleCreateEntities(arguments);
+                case "startTransaction" -> {
+                    startTransaction(objectName, arguments);
+                    yield List.of();
+                }
+                case "commitTransaction" -> List.of(completeTransaction("commitTransaction", objectName, arguments));
+                case "abortTransaction" -> List.of(completeTransaction("abortTransaction", objectName, arguments));
+                case "failPoint" -> throw new UnsupportedOperationException("unsupported-by-policy UTF operation: failPoint");
+                default -> {
+                    final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
+                    final ScenarioCommand converted = convertCrudOperation(
+                            operationName,
+                            arguments,
+                            target.database(),
+                            target.collection());
+                    yield List.of(applySessionEnvelope(converted, arguments));
+                }
+            };
+        }
+
+        private List<ScenarioCommand> handleCreateEntities(final Map<String, Object> arguments) {
+            applyCreateEntities(arguments.get("entities"));
+            return List.of();
+        }
+
+        private void applyCreateEntities(final Object entitiesValue) {
+            final List<Object> entities = asList(entitiesValue, "createEntities.entities");
+            for (final Object entitySpec : entities) {
+                final Map<String, Object> wrapper = asStringObjectMap(entitySpec, "createEntities.entity");
+                if (wrapper.size() != 1) {
+                    throw new IllegalArgumentException("createEntities entity must contain exactly one type");
+                }
+                final Map.Entry<String, Object> entry = wrapper.entrySet().iterator().next();
+                final String entityType = entry.getKey();
+                final Map<String, Object> entity = asStringObjectMap(entry.getValue(), "createEntities." + entityType);
+                switch (entityType) {
+                    case "client" -> requireText(entity.get("id"), "createEntities.client.id");
+                    case "database" -> registerDatabaseEntity(entity);
+                    case "collection" -> registerCollectionEntity(entity);
+                    case "session" -> registerSessionEntity(entity);
+                    default -> throw new UnsupportedOperationException(
+                            "unsupported UTF createEntities entity type: " + entityType);
+                }
+            }
+        }
+
+        private void registerDatabaseEntity(final Map<String, Object> entity) {
+            final String id = requireText(entity.get("id"), "createEntities.database.id");
+            final String databaseName = firstNonBlank(
+                    trimToEmpty(entity.get("databaseName")),
+                    trimToEmpty(entity.get("database_name")),
+                    trimToEmpty(entity.get("database")));
+            databaseAliases.put(id, fallbackText(databaseName, defaultDatabase, "createEntities.database.databaseName"));
+        }
+
+        private void registerCollectionEntity(final Map<String, Object> entity) {
+            final String id = requireText(entity.get("id"), "createEntities.collection.id");
+            final String collectionName = firstNonBlank(
+                    trimToEmpty(entity.get("collectionName")),
+                    trimToEmpty(entity.get("collection_name")),
+                    trimToEmpty(entity.get("collection")));
+            final String databaseRef = firstNonBlank(
+                    trimToEmpty(entity.get("database")),
+                    trimToEmpty(entity.get("databaseName")),
+                    trimToEmpty(entity.get("database_name")));
+            final String databaseName = resolveDatabaseName(databaseRef);
+            collectionAliases.put(
+                    id,
+                    new CollectionTarget(
+                            fallbackText(databaseName, defaultDatabase, "database"),
+                            fallbackText(collectionName, defaultCollection, "collection")));
+        }
+
+        private void registerSessionEntity(final Map<String, Object> entity) {
+            final String id = requireText(entity.get("id"), "createEntities.session.id");
+            sessions.putIfAbsent(id, new SessionState());
+        }
+
+        private String resolveDatabaseName(final String rawDatabase) {
+            if (rawDatabase == null || rawDatabase.isBlank()) {
+                return defaultDatabase;
+            }
+            final String byAlias = databaseAliases.get(rawDatabase);
+            if (byAlias != null && !byAlias.isBlank()) {
+                return byAlias;
+            }
+            return rawDatabase;
+        }
+
+        private CollectionTarget resolveCollectionTarget(
+                final String objectName,
+                final Map<String, Object> arguments) {
+            String database = trimToEmpty(arguments.get("database"));
+            String collection = trimToEmpty(arguments.get("collection"));
+
+            final CollectionTarget byAlias = objectName.isEmpty() ? null : collectionAliases.get(objectName);
+            if (byAlias != null) {
+                if (database.isEmpty()) {
+                    database = byAlias.database();
+                }
+                if (collection.isEmpty()) {
+                    collection = byAlias.collection();
+                }
+            }
+
+            if (database.isEmpty() && !objectName.isEmpty() && databaseAliases.containsKey(objectName)) {
+                database = databaseAliases.get(objectName);
+            }
+            if (collection.isEmpty() && !objectName.isEmpty() && !"testRunner".equals(objectName)) {
+                collection = objectName;
+            }
+
+            return new CollectionTarget(
+                    fallbackText(database, defaultDatabase, "database"),
+                    fallbackText(collection, defaultCollection, "collection"));
+        }
+
+        private void startTransaction(final String objectName, final Map<String, Object> arguments) {
+            final String sessionId = resolveSessionId("startTransaction", objectName, arguments);
+            final SessionState state = sessions.computeIfAbsent(sessionId, key -> new SessionState());
+            state.startTransaction(arguments.get("readConcern"));
+        }
+
+        private ScenarioCommand completeTransaction(
+                final String commandName,
+                final String objectName,
+                final Map<String, Object> arguments) {
+            final String sessionId = resolveSessionId(commandName, objectName, arguments);
+            final SessionState state = sessions.computeIfAbsent(sessionId, key -> new SessionState());
+            final long txnNumber = state.txnNumberForCompletion();
+
+            final Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put(commandName, 1);
+            payload.put("$db", "admin");
+            payload.put("lsid", immutableMap(Map.of("id", sessionId)));
+            payload.put("txnNumber", txnNumber);
+            payload.put("autocommit", false);
+            copyIfPresent(arguments, payload, "writeConcern");
+            copyIfPresent(arguments, payload, "maxTimeMS");
+            copyIfPresent(arguments, payload, "maxCommitTimeMS");
+
+            state.finishTransaction();
+            return new ScenarioCommand(commandName, immutableMap(payload));
+        }
+
+        private ScenarioCommand applySessionEnvelope(
+                final ScenarioCommand command,
+                final Map<String, Object> arguments) {
+            final String sessionId = trimToEmpty(arguments.get("session"));
+            if (sessionId.isEmpty()) {
+                return command;
+            }
+
+            final SessionState state = sessions.computeIfAbsent(sessionId, key -> new SessionState());
+            final Map<String, Object> payload = new LinkedHashMap<>(command.payload());
+            payload.put("lsid", immutableMap(Map.of("id", sessionId)));
+
+            if (state.activeTxnNumber() != null) {
+                payload.put("txnNumber", state.activeTxnNumber());
+                payload.put("autocommit", false);
+                if (state.startPending()) {
+                    payload.put("startTransaction", true);
+                    if (state.pendingReadConcern() != null && !payload.containsKey("readConcern")) {
+                        payload.put("readConcern", deepCopyValue(state.pendingReadConcern()));
+                    }
+                    state.markStartConsumed();
+                }
+            }
+            return new ScenarioCommand(command.commandName(), immutableMap(payload));
+        }
+
+        private String resolveSessionId(
+                final String operationName,
+                final String objectName,
+                final Map<String, Object> arguments) {
+            final String sessionFromArgs = trimToEmpty(arguments.get("session"));
+            if (!sessionFromArgs.isEmpty()) {
+                return sessionFromArgs;
+            }
+            final String sessionFromObject = trimToEmpty(objectName);
+            if (!sessionFromObject.isEmpty()) {
+                return sessionFromObject;
+            }
+            throw new IllegalArgumentException(operationName + " requires a session identifier");
+        }
+    }
+
+    private record CollectionTarget(String database, String collection) {}
+
+    private static final class SessionState {
+        private long nextTxnNumber;
+        private Long activeTxnNumber;
+        private Long lastTxnNumber;
+        private boolean startPending;
+        private Object pendingReadConcern;
+
+        private SessionState() {
+            this.nextTxnNumber = 1L;
+        }
+
+        private SessionState(final SessionState source) {
+            this.nextTxnNumber = source.nextTxnNumber;
+            this.activeTxnNumber = source.activeTxnNumber;
+            this.lastTxnNumber = source.lastTxnNumber;
+            this.startPending = source.startPending;
+            this.pendingReadConcern = deepCopyValue(source.pendingReadConcern);
+        }
+
+        private SessionState copy() {
+            return new SessionState(this);
+        }
+
+        private void startTransaction(final Object readConcern) {
+            final long txnNumber = nextTxnNumber++;
+            this.activeTxnNumber = txnNumber;
+            this.lastTxnNumber = txnNumber;
+            this.startPending = true;
+            this.pendingReadConcern = deepCopyValue(readConcern);
+        }
+
+        private long txnNumberForCompletion() {
+            if (activeTxnNumber != null) {
+                return activeTxnNumber;
+            }
+            if (lastTxnNumber != null) {
+                return lastTxnNumber;
+            }
+            final long fallback = Math.max(1L, nextTxnNumber - 1L);
+            this.lastTxnNumber = fallback;
+            return fallback;
+        }
+
+        private void finishTransaction() {
+            this.activeTxnNumber = null;
+            this.startPending = false;
+            this.pendingReadConcern = null;
+        }
+
+        private Long activeTxnNumber() {
+            return activeTxnNumber;
+        }
+
+        private boolean startPending() {
+            return startPending;
+        }
+
+        private Object pendingReadConcern() {
+            return pendingReadConcern;
+        }
+
+        private void markStartConsumed() {
+            this.startPending = false;
+            this.pendingReadConcern = null;
+        }
     }
 
     public enum SkipKind {

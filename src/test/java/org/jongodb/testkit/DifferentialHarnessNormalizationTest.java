@@ -97,6 +97,41 @@ class DifferentialHarnessNormalizationTest {
         assertEquals(0, report.mismatchCount());
     }
 
+    @Test
+    void ignoresCursorIdDifferencesInSuccessComparison() {
+        Scenario scenario = new Scenario("s4", "cursor id normalization", List.of(new ScenarioCommand("find", Map.of())));
+        DifferentialBackend left = new StaticBackend(
+            "left",
+            ScenarioOutcome.success(
+                List.of(
+                    Map.of(
+                        "ok",
+                        1,
+                        "cursor",
+                        Map.of("id", 0, "ns", "app.users")
+                    )
+                )
+            )
+        );
+        DifferentialBackend right = new StaticBackend(
+            "right",
+            ScenarioOutcome.success(
+                List.of(
+                    Map.of(
+                        "ok",
+                        1,
+                        "cursor",
+                        Map.of("id", 987654321L, "ns", "app.users")
+                    )
+                )
+            )
+        );
+
+        DifferentialReport report = new DifferentialHarness(left, right).run(List.of(scenario));
+
+        assertEquals(0, report.mismatchCount());
+    }
+
     private static final class StaticBackend implements DifferentialBackend {
         private final String name;
         private final ScenarioOutcome outcome;

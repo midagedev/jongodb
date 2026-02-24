@@ -79,4 +79,51 @@ class ScenarioBsonCodecTest {
             message
         );
     }
+
+    @Test
+    void toRealMongodCommandDocumentTranslatesCountDocumentsToAggregatePipeline() {
+        ScenarioCommand command = new ScenarioCommand(
+            "countDocuments",
+            Map.of(
+                "countDocuments",
+                "users",
+                "filter",
+                Map.of("role", "member"),
+                "skip",
+                1,
+                "limit",
+                2
+            )
+        );
+
+        var commandDocument = ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real");
+
+        assertEquals("users", commandDocument.getString("aggregate").getValue());
+        assertTrue(commandDocument.get("pipeline").isArray());
+        assertEquals(4, commandDocument.getArray("pipeline").size());
+        assertTrue(commandDocument.get("cursor").isDocument());
+    }
+
+    @Test
+    void toRealMongodCommandDocumentTranslatesFindOneAndUpdateToFindAndModify() {
+        ScenarioCommand command = new ScenarioCommand(
+            "findOneAndUpdate",
+            Map.of(
+                "findOneAndUpdate",
+                "users",
+                "filter",
+                Map.of("_id", 1),
+                "update",
+                Map.of("$set", Map.of("name", "after")),
+                "returnDocument",
+                "after"
+            )
+        );
+
+        var commandDocument = ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real");
+
+        assertEquals("users", commandDocument.getString("findAndModify").getValue());
+        assertEquals(1, commandDocument.getDocument("query").getInt32("_id").getValue());
+        assertTrue(commandDocument.getBoolean("new").getValue());
+    }
 }
