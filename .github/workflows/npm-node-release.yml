@@ -130,7 +130,7 @@ jobs:
           - runner: windows-latest
             workspace: "@jongodb/memory-server-bin-win32-x64"
             workspace_dir: "packages/memory-server-bin-win32-x64"
-            output_name: "jongodb.exe"
+            output_name: "jongodb"
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
