@@ -1326,6 +1326,63 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void distinctCommandUsesTransactionalSnapshot() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":11,\"tag\":\"txn-distinct\"}],\"lsid\":{\"id\":\"session-d1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideDistinct = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"tag\",\"query\":{}}"));
+        assertEquals(0, outsideDistinct.getArray("values").size());
+
+        final BsonDocument transactionalDistinct = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"tag\",\"query\":{},\"lsid\":{\"id\":\"session-d1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1, transactionalDistinct.getArray("values").size());
+        assertEquals("txn-distinct", transactionalDistinct.getArray("values").get(0).asString().getValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-d1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideAfterCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"$db\":\"app\",\"key\":\"tag\",\"query\":{}}"));
+        assertEquals(1, outsideAfterCommit.getArray("values").size());
+        assertEquals("txn-distinct", outsideAfterCommit.getArray("values").get(0).asString().getValue());
+    }
+
+    @Test
+    void findAndModifyRemoveCommandUsesTransactionalEnvelopeAndCommitVisibility() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument seedInsert = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"victim\"}]}"));
+        assertEquals(1.0, seedInsert.get("ok").asNumber().doubleValue());
+
+        final BsonDocument removeInTxn = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"users\",\"$db\":\"app\",\"query\":{\"_id\":1},\"remove\":true,\"lsid\":{\"id\":\"session-fm1\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, removeInTxn.get("ok").asNumber().doubleValue());
+        assertEquals("victim", removeInTxn.getDocument("value").getString("name").getValue());
+
+        final BsonDocument outsideBeforeCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        assertEquals(1, outsideBeforeCommit.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument inTxnFind = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"lsid\":{\"id\":\"session-fm1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(0, inTxnFind.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-fm1\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument outsideAfterCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        assertEquals(0, outsideAfterCommit.getDocument("cursor").getArray("firstBatch").size());
+    }
+
+    @Test
     void aggregateCommandUsesTransactionalSnapshot() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
