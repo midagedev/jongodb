@@ -13,8 +13,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import org.bson.BsonArray;
+import org.bson.BsonBoolean;
 import org.bson.BsonDocument;
+import org.bson.BsonDouble;
+import org.bson.BsonInt32;
 import org.bson.BsonInt64;
+import org.bson.BsonNumber;
+import org.bson.BsonString;
 import org.bson.BsonValue;
 
 /**
@@ -66,22 +71,24 @@ public final class RealMongodBackend implements DifferentialBackend {
                 for (int i = 0; i < scenario.commands().size(); i++) {
                     ScenarioCommand command = scenario.commands().get(i);
                     MongoDatabase commandDatabase = resolveCommandDatabase(client, database, command.commandName());
-                    BsonDocument commandDocument;
-                    try {
-                        commandDocument = ScenarioBsonCodec.toRealMongodCommandDocument(command, databaseName);
-                    } catch (RuntimeException exception) {
-                        return ScenarioOutcome.failure(
-                            "invalid command payload for " + command.commandName() + ": " + exception.getMessage()
-                        );
-                    }
-
                     final ClientSession session = resolveSession(client, command, sessionPool);
-
                     BsonDocument responseBody;
                     try {
-                        responseBody = session == null
-                            ? commandDatabase.runCommand(commandDocument, BsonDocument.class)
-                            : commandDatabase.runCommand(session, commandDocument, BsonDocument.class);
+                        if ("bulkWrite".equals(command.commandName())) {
+                            responseBody = executeBulkWriteCommand(command, commandDatabase, session, databaseName);
+                        } else if ("replaceOne".equals(command.commandName())) {
+                            responseBody = executeReplaceOneCommand(command, commandDatabase, session, databaseName);
+                        } else {
+                            final BsonDocument commandDocument;
+                            try {
+                                commandDocument = ScenarioBsonCodec.toRealMongodCommandDocument(command, databaseName);
+                            } catch (RuntimeException exception) {
+                                return ScenarioOutcome.failure(
+                                    "invalid command payload for " + command.commandName() + ": " + exception.getMessage()
+                                );
+                            }
+                            responseBody = runCommand(commandDatabase, session, commandDocument);
+                        }
                     } catch (MongoCommandException commandException) {
                         responseBody = commandException.getResponse();
                     } catch (RuntimeException exception) {
@@ -103,6 +110,452 @@ public final class RealMongodBackend implements DifferentialBackend {
         } catch (RuntimeException exception) {
             return ScenarioOutcome.failure("failed to execute against real mongod: " + exception.getMessage());
         }
+    }
+
+    private static BsonDocument runCommand(
+        final MongoDatabase database,
+        final ClientSession session,
+        final BsonDocument commandDocument
+    ) {
+        return session == null
+            ? database.runCommand(commandDocument, BsonDocument.class)
+            : database.runCommand(session, commandDocument, BsonDocument.class);
+    }
+
+    private static BsonDocument executeReplaceOneCommand(
+        final ScenarioCommand command,
+        final MongoDatabase database,
+        final ClientSession session,
+        final String defaultDatabase
+    ) {
+        final BsonDocument source = ScenarioBsonCodec.toCommandDocument(command, defaultDatabase);
+        final BsonValue replacementValue = source.get("replacement");
+        if (replacementValue == null || !replacementValue.isDocument()) {
+            return typeMismatch("replacement must be a document");
+        }
+        final BsonDocument replacement = replacementValue.asDocument();
+        if (replacement.isEmpty()) {
+            return badValue("replacement must not be empty");
+        }
+        if (containsTopLevelOperator(replacement)) {
+            return badValue("replacement document must not contain update operators");
+        }
+
+        final BsonDocument translatedCommand = ScenarioBsonCodec.toRealMongodCommandDocument(command, defaultDatabase);
+        try {
+            return runCommand(database, session, translatedCommand);
+        } catch (final MongoCommandException exception) {
+            return exception.getResponse();
+        }
+    }
+
+    private static BsonDocument executeBulkWriteCommand(
+        final ScenarioCommand command,
+        final MongoDatabase database,
+        final ClientSession session,
+        final String defaultDatabase
+    ) {
+        final BsonDocument source = ScenarioBsonCodec.toCommandDocument(command, defaultDatabase);
+        final String collection = readRequiredString(source, "bulkWrite");
+        if (collection == null) {
+            return typeMismatch("bulkWrite must be a string");
+        }
+
+        BsonValue operationsValue = source.get("operations");
+        if (operationsValue == null) {
+            operationsValue = source.get("requests");
+        }
+        if (operationsValue == null || !operationsValue.isArray()) {
+            return typeMismatch("operations must be an array");
+        }
+        final BsonArray operations = operationsValue.asArray();
+        if (operations.isEmpty()) {
+            return badValue("operations must not be empty");
+        }
+
+        final BsonValue orderedValue = source.get("ordered");
+        final boolean ordered;
+        if (orderedValue == null) {
+            ordered = true;
+        } else if (!orderedValue.isBoolean()) {
+            return typeMismatch("ordered must be a boolean");
+        } else {
+            ordered = orderedValue.asBoolean().getValue();
+        }
+        if (!ordered) {
+            return badValue("bulkWrite currently supports ordered=true only");
+        }
+
+        int insertedCount = 0;
+        int matchedCount = 0;
+        int modifiedCount = 0;
+        int deletedCount = 0;
+        int upsertedCount = 0;
+        final BsonArray upserted = new BsonArray();
+        final BsonArray writeErrors = new BsonArray();
+
+        for (int index = 0; index < operations.size(); index++) {
+            final BsonValue operationValue = operations.get(index);
+            final BsonDocument operationResponse;
+            final String operationName;
+            if (operationValue == null || !operationValue.isDocument()) {
+                operationName = "unknown";
+                operationResponse = typeMismatch("all entries in operations must be BSON documents");
+            } else {
+                final BsonDocument operationDocument = operationValue.asDocument();
+                if (operationDocument.size() != 1) {
+                    operationName = "unknown";
+                    operationResponse = badValue("each bulkWrite operation must contain exactly one operation");
+                } else {
+                    operationName = operationDocument.getFirstKey().toLowerCase(Locale.ROOT);
+                    final BsonValue specificationValue = operationDocument.get(operationDocument.getFirstKey());
+                    if (specificationValue == null || !specificationValue.isDocument()) {
+                        operationResponse = typeMismatch(operationDocument.getFirstKey() + " must be a document");
+                    } else {
+                        operationResponse = executeBulkWriteOperation(
+                            database,
+                            session,
+                            source,
+                            collection,
+                            operationName,
+                            specificationValue.asDocument(),
+                            index == 0
+                        );
+                    }
+                }
+            }
+
+            if (!ScenarioBsonCodec.isSuccess(operationResponse)) {
+                writeErrors.add(bulkWriteError(index, operationResponse));
+                break;
+            }
+
+            final OperationCounts operationCounts = bulkWriteCounts(operationName, index, operationResponse);
+            insertedCount += operationCounts.insertedCount();
+            matchedCount += operationCounts.matchedCount();
+            modifiedCount += operationCounts.modifiedCount();
+            deletedCount += operationCounts.deletedCount();
+            upsertedCount += operationCounts.upsertedCount();
+            for (final BsonDocument upsertedEntry : operationCounts.upsertedEntries()) {
+                upserted.add(upsertedEntry);
+            }
+        }
+
+        final BsonDocument result = new BsonDocument()
+            .append("nInserted", new BsonInt32(insertedCount))
+            .append("nMatched", new BsonInt32(matchedCount))
+            .append("nModified", new BsonInt32(modifiedCount))
+            .append("nDeleted", new BsonInt32(deletedCount))
+            .append("nUpserted", new BsonInt32(upsertedCount));
+        if (!upserted.isEmpty()) {
+            result.append("upserted", upserted);
+        }
+        if (!writeErrors.isEmpty()) {
+            result.append("writeErrors", writeErrors);
+        }
+        return result.append("ok", new BsonDouble(1.0));
+    }
+
+    private static BsonDocument executeBulkWriteOperation(
+        final MongoDatabase database,
+        final ClientSession session,
+        final BsonDocument source,
+        final String collection,
+        final String operationName,
+        final BsonDocument operation,
+        final boolean includeStartTransaction
+    ) {
+        final BsonDocument translatedCommand = switch (operationName) {
+            case "insertone" -> translateBulkInsertCommand(source, collection, operation, includeStartTransaction);
+            case "updateone" -> translateBulkUpdateCommand(source, collection, operation, false, includeStartTransaction);
+            case "updatemany" -> translateBulkUpdateCommand(source, collection, operation, true, includeStartTransaction);
+            case "deleteone" -> translateBulkDeleteCommand(source, collection, operation, 1, includeStartTransaction);
+            case "deletemany" -> translateBulkDeleteCommand(source, collection, operation, 0, includeStartTransaction);
+            case "replaceone" -> translateBulkReplaceCommand(source, collection, operation, includeStartTransaction);
+            default -> badValue("unsupported bulkWrite operation: " + operationName);
+        };
+        if (translatedCommand.containsKey("ok")) {
+            return translatedCommand;
+        }
+        try {
+            return runCommand(database, session, translatedCommand);
+        } catch (final MongoCommandException exception) {
+            return exception.getResponse();
+        }
+    }
+
+    private static BsonDocument translateBulkInsertCommand(
+        final BsonDocument source,
+        final String collection,
+        final BsonDocument operation,
+        final boolean includeStartTransaction
+    ) {
+        final BsonValue document = operation.get("document");
+        if (document == null || !document.isDocument()) {
+            return typeMismatch("document must be a document");
+        }
+        final BsonDocument command = new BsonDocument("insert", new BsonString(collection))
+            .append("documents", new BsonArray(List.of(document.asDocument())));
+        copyBulkEnvelopeFields(source, command, includeStartTransaction);
+        return command;
+    }
+
+    private static BsonDocument translateBulkUpdateCommand(
+        final BsonDocument source,
+        final String collection,
+        final BsonDocument operation,
+        final boolean multi,
+        final boolean includeStartTransaction
+    ) {
+        final BsonValue filter = operation.get("filter");
+        if (filter == null || !filter.isDocument()) {
+            return typeMismatch("filter must be a document");
+        }
+        final BsonValue update = operation.get("update");
+        if (update == null) {
+            return typeMismatch("update must be a document");
+        }
+        if (update.isArray()) {
+            return badValue("update pipeline is not supported yet");
+        }
+        if (!update.isDocument()) {
+            return typeMismatch("update must be a document");
+        }
+        if (!isOperatorUpdate(update.asDocument())) {
+            return badValue("bulkWrite update operation requires atomic modifiers");
+        }
+
+        final BsonValue upsertValue = operation.get("upsert");
+        final boolean upsert;
+        if (upsertValue == null) {
+            upsert = false;
+        } else if (!upsertValue.isBoolean()) {
+            return typeMismatch("upsert must be a boolean");
+        } else {
+            upsert = upsertValue.asBoolean().getValue();
+        }
+
+        final BsonDocument updateEntry = new BsonDocument()
+            .append("q", filter.asDocument())
+            .append("u", update.asDocument())
+            .append("multi", BsonBoolean.valueOf(multi))
+            .append("upsert", BsonBoolean.valueOf(upsert));
+        appendIfPresent(operation, updateEntry, "hint");
+        appendIfPresent(operation, updateEntry, "collation");
+        appendIfPresent(operation, updateEntry, "arrayFilters");
+
+        final BsonDocument command = new BsonDocument("update", new BsonString(collection))
+            .append("updates", new BsonArray(List.of(updateEntry)));
+        copyBulkEnvelopeFields(source, command, includeStartTransaction);
+        return command;
+    }
+
+    private static BsonDocument translateBulkDeleteCommand(
+        final BsonDocument source,
+        final String collection,
+        final BsonDocument operation,
+        final int limit,
+        final boolean includeStartTransaction
+    ) {
+        final BsonValue filter = operation.get("filter");
+        if (filter == null || !filter.isDocument()) {
+            return typeMismatch("filter must be a document");
+        }
+
+        final BsonDocument deleteEntry = new BsonDocument()
+            .append("q", filter.asDocument())
+            .append("limit", new BsonInt32(limit));
+        appendIfPresent(operation, deleteEntry, "hint");
+        appendIfPresent(operation, deleteEntry, "collation");
+
+        final BsonDocument command = new BsonDocument("delete", new BsonString(collection))
+            .append("deletes", new BsonArray(List.of(deleteEntry)));
+        copyBulkEnvelopeFields(source, command, includeStartTransaction);
+        return command;
+    }
+
+    private static BsonDocument translateBulkReplaceCommand(
+        final BsonDocument source,
+        final String collection,
+        final BsonDocument operation,
+        final boolean includeStartTransaction
+    ) {
+        final BsonValue filter = operation.get("filter");
+        if (filter == null || !filter.isDocument()) {
+            return typeMismatch("filter must be a document");
+        }
+        final BsonValue replacement = operation.get("replacement");
+        if (replacement == null || !replacement.isDocument()) {
+            return typeMismatch("replacement must be a document");
+        }
+        if (replacement.asDocument().isEmpty()) {
+            return badValue("replacement must not be empty");
+        }
+        if (containsTopLevelOperator(replacement.asDocument())) {
+            return badValue("replacement document must not contain update operators");
+        }
+
+        final BsonValue upsertValue = operation.get("upsert");
+        final boolean upsert;
+        if (upsertValue == null) {
+            upsert = false;
+        } else if (!upsertValue.isBoolean()) {
+            return typeMismatch("upsert must be a boolean");
+        } else {
+            upsert = upsertValue.asBoolean().getValue();
+        }
+
+        final BsonDocument updateEntry = new BsonDocument()
+            .append("q", filter.asDocument())
+            .append("u", replacement.asDocument())
+            .append("multi", BsonBoolean.FALSE)
+            .append("upsert", BsonBoolean.valueOf(upsert));
+        appendIfPresent(operation, updateEntry, "hint");
+        appendIfPresent(operation, updateEntry, "collation");
+
+        final BsonDocument command = new BsonDocument("update", new BsonString(collection))
+            .append("updates", new BsonArray(List.of(updateEntry)));
+        copyBulkEnvelopeFields(source, command, includeStartTransaction);
+        return command;
+    }
+
+    private static void copyBulkEnvelopeFields(
+        final BsonDocument source,
+        final BsonDocument target,
+        final boolean includeStartTransaction
+    ) {
+        appendIfPresent(source, target, "txnNumber");
+        appendIfPresent(source, target, "autocommit");
+        if (includeStartTransaction) {
+            appendIfPresent(source, target, "startTransaction");
+            appendIfPresent(source, target, "readConcern");
+        }
+        appendIfPresent(source, target, "writeConcern");
+        appendIfPresent(source, target, "readPreference");
+        appendIfPresent(source, target, "$readPreference");
+    }
+
+    private static void appendIfPresent(final BsonDocument source, final BsonDocument target, final String key) {
+        if (!source.containsKey(key)) {
+            return;
+        }
+        target.put(key, source.get(key));
+    }
+
+    private static OperationCounts bulkWriteCounts(
+        final String operationName,
+        final int operationIndex,
+        final BsonDocument response
+    ) {
+        return switch (operationName) {
+            case "insertone" -> new OperationCounts(readCount(response, "n"), 0, 0, 0, 0, List.of());
+            case "deleteone", "deletemany" -> new OperationCounts(0, 0, 0, readCount(response, "n"), 0, List.of());
+            case "updateone", "updatemany", "replaceone" -> bulkWriteUpdateCounts(operationIndex, response);
+            default -> new OperationCounts(0, 0, 0, 0, 0, List.of());
+        };
+    }
+
+    private static OperationCounts bulkWriteUpdateCounts(final int operationIndex, final BsonDocument response) {
+        final int n = readCount(response, "n");
+        final int nModified = readCount(response, "nModified");
+        final BsonArray upsertedArray = response.containsKey("upserted") && response.get("upserted").isArray()
+            ? response.getArray("upserted")
+            : new BsonArray();
+        final int upsertedCount = upsertedArray.size();
+        final int matchedCount = Math.max(0, n - upsertedCount);
+
+        final List<BsonDocument> mappedUpserts = new ArrayList<>(upsertedCount);
+        for (final BsonValue upsertedValue : upsertedArray) {
+            if (upsertedValue == null || !upsertedValue.isDocument()) {
+                continue;
+            }
+            final BsonValue idValue = upsertedValue.asDocument().get("_id");
+            if (idValue == null) {
+                continue;
+            }
+            mappedUpserts.add(new BsonDocument("index", new BsonInt32(operationIndex)).append("_id", idValue));
+        }
+
+        return new OperationCounts(0, matchedCount, nModified, 0, mappedUpserts.size(), List.copyOf(mappedUpserts));
+    }
+
+    private static BsonDocument bulkWriteError(final int operationIndex, final BsonDocument response) {
+        final BsonDocument error = new BsonDocument("index", new BsonInt32(operationIndex));
+        final BsonValue code = response.get("code");
+        if (code instanceof BsonNumber codeNumber) {
+            error.put("code", new BsonInt32(codeNumber.intValue()));
+        }
+        final BsonValue codeName = response.get("codeName");
+        if (codeName != null && codeName.isString()) {
+            error.put("codeName", codeName.asString());
+        }
+        final BsonValue errmsg = response.get("errmsg");
+        if (errmsg != null && errmsg.isString()) {
+            error.put("errmsg", errmsg.asString());
+        }
+        return error;
+    }
+
+    private static boolean isOperatorUpdate(final BsonDocument update) {
+        if (update.isEmpty()) {
+            return false;
+        }
+        for (final String key : update.keySet()) {
+            if (!key.startsWith("$")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean containsTopLevelOperator(final BsonDocument document) {
+        for (final String key : document.keySet()) {
+            if (key.startsWith("$")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int readCount(final BsonDocument document, final String key) {
+        final BsonValue value = document.get(key);
+        if (!(value instanceof BsonNumber numberValue)) {
+            return 0;
+        }
+        return numberValue.intValue();
+    }
+
+    private static String readRequiredString(final BsonDocument document, final String key) {
+        final BsonValue value = document.get(key);
+        if (value == null || !value.isString()) {
+            return null;
+        }
+        return value.asString().getValue();
+    }
+
+    private static BsonDocument typeMismatch(final String message) {
+        return new BsonDocument()
+            .append("ok", new BsonDouble(0.0))
+            .append("code", new BsonInt32(14))
+            .append("codeName", new BsonString("TypeMismatch"))
+            .append("errmsg", new BsonString(message));
+    }
+
+    private static BsonDocument badValue(final String message) {
+        return new BsonDocument()
+            .append("ok", new BsonDouble(0.0))
+            .append("code", new BsonInt32(14))
+            .append("codeName", new BsonString("BadValue"))
+            .append("errmsg", new BsonString(message));
+    }
+
+    private record OperationCounts(
+        int insertedCount,
+        int matchedCount,
+        int modifiedCount,
+        int deletedCount,
+        int upsertedCount,
+        List<BsonDocument> upsertedEntries) {
     }
 
     static String scenarioDatabaseName(String databasePrefix, String scenarioId) {

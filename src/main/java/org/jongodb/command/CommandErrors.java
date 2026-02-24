@@ -16,6 +16,8 @@ final class CommandErrors {
     private static final int CODE_NOT_IMPLEMENTED = 238;
     private static final int CODE_CURSOR_NOT_FOUND = 43;
     private static final int CODE_NO_SUCH_TRANSACTION = 251;
+    private static final int CODE_TRANSACTION_COMMITTED = 256;
+    private static final int CODE_WRITE_CONFLICT = 112;
     private static final int CODE_DUPLICATE_KEY = 11000;
 
     private CommandErrors() {}
@@ -54,6 +56,14 @@ final class CommandErrors {
                 CODE_NO_SUCH_TRANSACTION,
                 "NoSuchTransaction",
                 List.of("UnknownTransactionCommitResult"));
+    }
+
+    static BsonDocument transactionCommitted(final String message) {
+        return error(message, CODE_TRANSACTION_COMMITTED, "TransactionCommitted");
+    }
+
+    static BsonDocument writeConflict(final String message) {
+        return error(message, CODE_WRITE_CONFLICT, "WriteConflict");
     }
 
     static BsonDocument duplicateKey(final String message) {

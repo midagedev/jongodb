@@ -79,6 +79,18 @@ public final class TransactionCommandValidator {
         }
 
         if (!sessionPool.hasActiveTransaction(parsedFields.sessionId(), parsedFields.txnNumber())) {
+            if (commitTransaction || abortTransaction) {
+                final SessionTransactionPool.TerminalState terminalState =
+                        sessionPool.terminalState(parsedFields.sessionId(), parsedFields.txnNumber());
+                if (terminalState != null) {
+                    return ValidationResult.transactional(
+                            parsedFields.sessionId(),
+                            parsedFields.txnNumber(),
+                            false,
+                            commitTransaction,
+                            abortTransaction);
+                }
+            }
             return ValidationResult.error(noSuchTransactionError(commandName, commitTransaction, abortTransaction));
         }
 

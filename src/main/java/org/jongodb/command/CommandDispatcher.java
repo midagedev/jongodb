@@ -6,7 +6,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 import org.bson.BsonDocument;
+import org.jongodb.engine.WriteConflictException;
 import org.jongodb.txn.SessionTransactionPool;
+import org.jongodb.txn.SessionTransactionPool.TerminalState;
 import org.jongodb.txn.TransactionCommandValidator;
 import org.jongodb.txn.TransactionCommandValidator.ValidationResult;
 
@@ -85,22 +87,35 @@ public final class CommandDispatcher {
         if (validation.commitTransaction()) {
             final SessionTransactionPool.ActiveTransaction activeTransaction =
                     sessionPool.activeTransaction(validation.sessionId(), validation.txnNumber());
-            if (activeTransaction == null) {
-                return noSuchTransactionError(commandName);
+            if (activeTransaction != null) {
+                try {
+                    globalStore.publishTransactionSnapshot(activeTransaction.store());
+                } catch (final WriteConflictException conflict) {
+                    sessionPool.completeTransaction(validation.sessionId(), validation.txnNumber(), TerminalState.ABORTED);
+                    return CommandErrors.writeConflict(conflict.getMessage());
+                }
+                if (!sessionPool.completeTransaction(validation.sessionId(), validation.txnNumber(), TerminalState.COMMITTED)) {
+                    return noSuchTransactionError(commandName);
+                }
+                return handler.handle(command);
             }
-
-            globalStore.publishTransactionSnapshot(activeTransaction.store());
-            if (!sessionPool.clearTransaction(validation.sessionId(), validation.txnNumber())) {
-                return noSuchTransactionError(commandName);
+            final TerminalState terminalState = sessionPool.terminalState(validation.sessionId(), validation.txnNumber());
+            if (terminalState == TerminalState.COMMITTED) {
+                return handler.handle(command);
             }
-            return handler.handle(command);
+            return noSuchTransactionError(commandName);
         }
 
         if (validation.abortTransaction()) {
-            if (!sessionPool.clearTransaction(validation.sessionId(), validation.txnNumber())) {
-                return noSuchTransactionError(commandName);
+            if (sessionPool.completeTransaction(validation.sessionId(), validation.txnNumber(), TerminalState.ABORTED)) {
+                return handler.handle(command);
             }
-            return handler.handle(command);
+            final TerminalState terminalState = sessionPool.terminalState(validation.sessionId(), validation.txnNumber());
+            if (terminalState == TerminalState.COMMITTED) {
+                return CommandErrors.transactionCommitted(
+                        "Transaction with { txnNumber: " + validation.txnNumber() + " } has been committed.");
+            }
+            return noSuchTransactionError(commandName);
         }
 
         final CommandStore transactionStore = sessionPool.transactionStore(validation.sessionId(), validation.txnNumber());

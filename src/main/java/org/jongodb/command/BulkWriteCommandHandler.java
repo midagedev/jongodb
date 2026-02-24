@@ -150,6 +150,9 @@ public final class BulkWriteCommandHandler implements CommandHandler {
         if (!updateValue.isDocument()) {
             return CommandErrors.typeMismatch("update must be a document");
         }
+        if (!isOperatorUpdate(updateValue.asDocument())) {
+            return CommandErrors.badValue("bulkWrite update operation requires atomic modifiers");
+        }
 
         final BsonValue upsertValue = operation.get("upsert");
         final boolean upsert;
@@ -347,6 +350,18 @@ public final class BulkWriteCommandHandler implements CommandHandler {
             return null;
         }
         return value.asDocument();
+    }
+
+    private static boolean isOperatorUpdate(final BsonDocument updateDocument) {
+        if (updateDocument.isEmpty()) {
+            return false;
+        }
+        for (final String key : updateDocument.keySet()) {
+            if (!key.startsWith("$")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String readDatabase(final BsonDocument command) {

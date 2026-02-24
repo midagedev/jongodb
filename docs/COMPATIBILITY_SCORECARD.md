@@ -7,20 +7,20 @@ It is not a production MongoDB parity claim.
 
 ## Scope
 
-- Baseline target: `v0.1.2` and current `main` evidence.
-- Primary objective: increase imported differential coverage while keeping behavior deterministic.
+- Baseline target: `v0.1.2` and current `main`.
+- Primary objective: increase imported differential coverage while keeping mismatch/error at zero.
 
 ## Evidence Sources
 
 | Evidence | Source run / artifact | Result |
 | --- | --- | --- |
-| Official UTF sharded differential | GitHub Actions `Official Suite Sharded` run `22339640229` | PASS |
-| R3 failure ledger | GitHub Actions `R3 Failure Ledger` run `22339640205` | FAIL (gate reports remaining mismatches) |
-| Real mongod baseline | GitHub Actions `Real Mongod Baseline` run `22339640211` | PASS |
+| Official UTF sharded differential (historical baseline) | GitHub Actions `Official Suite Sharded` run `22339640229` | PASS |
+| R3 failure ledger (current) | `build/reports/r3-failure-ledger-local/r3-failure-ledger.json` | PASS (`failureCount=0`) |
+| UTF differential (current, suite-level) | `build/reports/unified-spec-*-local/utf-differential-report.json` | PASS (`mismatch=0`, `error=0`) |
 
-## Frozen Baseline (Run `22339640229`)
+## Baseline vs Current
 
-Aggregated baseline metrics from shard artifacts:
+Historical frozen baseline (`22339640229`):
 
 | Metric | Value |
 | --- | --- |
@@ -32,46 +32,57 @@ Aggregated baseline metrics from shard artifacts:
 | mismatch | 54 |
 | error | 0 |
 
-## R3 Ledger Snapshot (Run `22339640205`)
+Current local certification snapshot (`r3-failure-ledger-local`, generated 2026-02-24T07:35:28Z):
+
+| Metric | Value |
+| --- | --- |
+| imported | 480 |
+| skipped | 575 |
+| unsupported | 526 |
+| total differential cases | 480 |
+| match | 480 |
+| mismatch | 0 |
+| error | 0 |
+
+## Current R3 Ledger Snapshot
 
 | Suite | Imported | Unsupported | Mismatch | Error |
 | --- | --- | --- | --- | --- |
-| `crud-unified` | 188 | 362 | 54 | 0 |
-| `transactions-unified` | 0 | 396 | 0 | 0 |
-| `sessions` | 12 | 56 | 0 | 0 |
+| `crud-unified` | 298 | 252 | 0 | 0 |
+| `transactions-unified` | 162 | 228 | 0 | 0 |
+| `sessions` | 20 | 46 | 0 | 0 |
 
 Current ledger gate status:
 
-- `failureCount=54` (all `MISMATCH`, no `ERROR`)
-- primary mismatch bucket: `bulkWrite` protocol scenarios
+- `failureCount=0`
+- `byTrack={}`
+- `byStatus={}`
 
-## Top Unsupported Reasons (Baseline)
+## Top Unsupported Reasons (Current)
 
 | Reason | Count |
 | --- | --- |
-| `unsupported UTF operation: startTransaction` | 234 |
-| `unsupported UTF operation: failPoint` | 134 |
-| `unsupported UTF operation: clientBulkWrite` | 86 |
-| `unsupported UTF operation: findOneAndUpdate` | 48 |
-| `unsupported UTF operation: createEntities` | 40 |
-| `unsupported UTF operation: findOneAndReplace` | 36 |
+| `unsupported-by-policy UTF operation: failPoint` | 136 |
+| `unsupported UTF operation: clientBulkWrite` | 92 |
+| `unsupported UTF operation: targetedFailPoint` | 58 |
+| `unsupported UTF update option: arrayFilters` | 32 |
 | `unsupported UTF aggregate stage in pipeline` | 28 |
-| `unsupported UTF update option: arrayFilters` | 26 |
-| `unsupported UTF operation: countDocuments` | 24 |
-| `unsupported UTF operation: replaceOne` | 22 |
+| `unsupported UTF operation: findOneAndDelete` | 26 |
+| `unsupported UTF operation: distinct` | 26 |
+| `unsupported UTF operation: runCommand` | 14 |
+| `unsupported UTF operation: count` | 12 |
+| `unsupported UTF update pipeline` | 10 |
 
 ## Policy Exclusions
 
-- `failPoint` is currently treated as a policy exclusion for deterministic in-process execution.
-- Scorecard accounting distinguishes this as `unsupported-by-policy UTF operation: failPoint` in importer output.
+- `failPoint` remains a policy exclusion for deterministic in-process execution.
+- Scorecard accounting distinguishes this as `unsupported-by-policy UTF operation: failPoint`.
 
 ## Gap-to-Issue Mapping
 
-- `#100`: transaction operation adapter coverage (`startTransaction` and lifecycle wiring)
-- `#101`: unified CRUD adapter coverage (`findOneAndUpdate`, `findOneAndReplace`, `countDocuments`, `replaceOne`)
-- `#102`: `createEntities` subset for official suites
-- `#103`: explicit `failPoint` policy for deterministic in-memory backend
-- `#104`: aggregate-stage unsupported reduction
+- `#100`: transaction operation adapter coverage (`startTransaction` and lifecycle wiring) - completed.
+- `#101`: unified CRUD adapter coverage (`bulkWrite`, `findOneAndUpdate`, `findOneAndReplace`, `countDocuments`, `replaceOne`) - completed.
+- `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction
 

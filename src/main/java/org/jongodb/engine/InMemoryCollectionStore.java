@@ -19,7 +19,12 @@ public final class InMemoryCollectionStore implements CollectionStore {
     private final List<Document> documents = new ArrayList<>();
     private final Map<String, IndexMetadata> indexesByName = new LinkedHashMap<>();
 
-    InMemoryCollectionStore() {}
+    InMemoryCollectionStore() {
+        final Document idIndexKey = new Document("_id", 1);
+        indexesByName.put(
+                "_id_",
+                new IndexMetadata("_id_", idIndexKey, true, false, null, null, null, List.of("_id")));
+    }
 
     private InMemoryCollectionStore(final InMemoryCollectionStore source) {
         for (final Document sourceDocument : source.documents) {
@@ -93,6 +98,11 @@ public final class InMemoryCollectionStore implements CollectionStore {
         for (final Document addedDocument : addedDocuments) {
             final Object addedId = addedDocument.get("_id");
             if (addedId != null) {
+                final boolean presentInBaseline = containsDocumentWithId(baseline.documents(), addedId);
+                final boolean presentInCurrent = containsDocumentWithId(mergedDocuments, addedId);
+                if (presentInCurrent && !presentInBaseline) {
+                    throw new WriteConflictException("commit transaction write conflict on _id=" + addedId);
+                }
                 removeFirstDocumentById(mergedDocuments, addedId);
             }
             mergedDocuments.add(DocumentCopies.copy(addedDocument));
@@ -336,6 +346,9 @@ public final class InMemoryCollectionStore implements CollectionStore {
                 continue;
             }
             if (isOperatorDocument(entry.getValue())) {
+                if (seedFromOperatorFilter(seed, key, entry.getValue())) {
+                    continue;
+                }
                 continue;
             }
             setPathValue(seed, key, entry.getValue());
@@ -353,6 +366,40 @@ public final class InMemoryCollectionStore implements CollectionStore {
             }
         }
         return true;
+    }
+
+    private static boolean seedFromOperatorFilter(final Document seed, final String key, final Object value) {
+        if (!"_id".equals(key) || !(value instanceof Map<?, ?> operatorMap)) {
+            return false;
+        }
+        final Object typeOperand = operatorMap.get("$type");
+        if (isNullType(typeOperand)) {
+            setPathValue(seed, key, null);
+            return true;
+        }
+
+        if (operatorMap.containsKey("$eq") && operatorMap.get("$eq") == null) {
+            setPathValue(seed, key, null);
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isNullType(final Object value) {
+        if (value instanceof String textValue) {
+            return "null".equalsIgnoreCase(textValue);
+        }
+        if (value instanceof Number numberValue) {
+            return numberValue.intValue() == 10;
+        }
+        if (value instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (isNullType(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void setPathValue(final Document target, final String path, final Object value) {
@@ -568,6 +615,15 @@ public final class InMemoryCollectionStore implements CollectionStore {
             final Document candidate = iterator.next();
             if (Objects.deepEquals(candidate.get("_id"), targetId)) {
                 iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsDocumentWithId(final List<Document> documents, final Object targetId) {
+        for (final Document candidate : documents) {
+            if (Objects.deepEquals(candidate.get("_id"), targetId)) {
                 return true;
             }
         }

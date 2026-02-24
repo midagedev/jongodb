@@ -173,7 +173,7 @@ public final class EngineBackedCommandStore implements CommandStore {
                     collectionStore.update(query, update, updateRequest.multi(), updateRequest.upsert());
             matchedCount += toBoundedInt(result.matchedCount());
             modifiedCount += toBoundedInt(result.modifiedCount());
-            if (result.upsertedId() != null) {
+            if (result.upserted()) {
                 upserted.add(new Upserted(index, toBsonValue(result.upsertedId())));
             }
         }

@@ -422,13 +422,21 @@ class InMemoryCollectionStoreTest {
 
         collation.put("locale", "fr");
         List<CollectionStore.IndexDefinition> firstListed = store.listIndexes();
-        assertEquals(1, firstListed.size());
-        assertEquals("en", firstListed.get(0).collation().getString("locale"));
-        assertEquals(2, firstListed.get(0).collation().getInteger("strength"));
+        assertEquals(2, firstListed.size());
+        final CollectionStore.IndexDefinition firstEmailIndex = firstListed.stream()
+                .filter(index -> "email_1".equals(index.name()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("en", firstEmailIndex.collation().getString("locale"));
+        assertEquals(2, firstEmailIndex.collation().getInteger("strength"));
 
-        firstListed.get(0).collation().put("locale", "de");
+        firstEmailIndex.collation().put("locale", "de");
         List<CollectionStore.IndexDefinition> secondListed = store.listIndexes();
-        assertEquals("en", secondListed.get(0).collation().getString("locale"));
+        final CollectionStore.IndexDefinition secondEmailIndex = secondListed.stream()
+                .filter(index -> "email_1".equals(index.name()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("en", secondEmailIndex.collation().getString("locale"));
     }
 
     @Test
@@ -453,10 +461,13 @@ class InMemoryCollectionStoreTest {
                 new Document("locale", "fr"),
                 null)));
 
-        assertEquals(2, store.listIndexes().size());
-        assertEquals(1, snapshot.listIndexes().size());
-        assertEquals("email_1", snapshot.listIndexes().get(0).name());
-        assertEquals("en", snapshot.listIndexes().get(0).collation().getString("locale"));
+        assertEquals(3, store.listIndexes().size());
+        assertEquals(2, snapshot.listIndexes().size());
+        final CollectionStore.IndexDefinition snapshotEmailIndex = snapshot.listIndexes().stream()
+                .filter(index -> "email_1".equals(index.name()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("en", snapshotEmailIndex.collation().getString("locale"));
     }
 
     @Test

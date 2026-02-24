@@ -423,9 +423,17 @@ class CommandDispatcherE2ETest {
         assertEquals(1.0, listIndexesResponse.get("ok").asNumber().doubleValue());
         final BsonDocument cursor = listIndexesResponse.getDocument("cursor");
         assertEquals("app.users", cursor.getString("ns").getValue());
-        assertEquals(1, cursor.getArray("firstBatch").size());
+        assertEquals(2, cursor.getArray("firstBatch").size());
 
-        final BsonDocument index = cursor.getArray("firstBatch").get(0).asDocument();
+        BsonDocument index = null;
+        for (final var value : cursor.getArray("firstBatch")) {
+            final BsonDocument candidate = value.asDocument();
+            if ("email_1".equals(candidate.getString("name").getValue())) {
+                index = candidate;
+                break;
+            }
+        }
+        assertNotNull(index);
         assertEquals(2, index.getInt32("v").getValue());
         assertEquals("email_1", index.getString("name").getValue());
         assertEquals("app.users", index.getString("ns").getValue());
@@ -941,7 +949,62 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument secondCommitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertNoSuchTransactionError(secondCommitResponse, "UnknownTransactionCommitResult");
+        assertEquals(1.0, secondCommitResponse.get("ok").asNumber().doubleValue());
+    }
+
+    @Test
+    void abortAfterCommitReturnsTransactionCommitted() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-commit-abort\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-commit-abort\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument abortAfterCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-commit-abort\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertCommandError(abortAfterCommit, 256, "TransactionCommitted");
+    }
+
+    @Test
+    void secondAbortReturnsNoSuchTransaction() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument startResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-double-abort\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, startResponse.get("ok").asNumber().doubleValue());
+
+        final BsonDocument firstAbort = dispatcher.dispatch(BsonDocument.parse(
+                "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-double-abort\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, firstAbort.get("ok").asNumber().doubleValue());
+
+        final BsonDocument secondAbort = dispatcher.dispatch(BsonDocument.parse(
+                "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-double-abort\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertNoSuchTransactionError(secondAbort);
+    }
+
+    @Test
+    void commitReturnsWriteConflictWhenConcurrentTransactionsInsertSameId() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument firstTxnStart = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-a\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, firstTxnStart.get("ok").asNumber().doubleValue());
+
+        final BsonDocument secondTxnStart = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"lsid\":{\"id\":\"session-b\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, secondTxnStart.get("ok").asNumber().doubleValue());
+
+        final BsonDocument firstCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-a\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, firstCommit.get("ok").asNumber().doubleValue());
+
+        final BsonDocument secondCommit = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-b\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertCommandError(secondCommit, 112, "WriteConflict");
     }
 
     @Test

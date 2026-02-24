@@ -3,9 +3,13 @@ package org.jongodb.engine;
 /**
  * Result of an update operation.
  */
-public record UpdateManyResult(long matchedCount, long modifiedCount, Object upsertedId) {
+public record UpdateManyResult(long matchedCount, long modifiedCount, boolean upserted, Object upsertedId) {
     public UpdateManyResult(final long matchedCount, final long modifiedCount) {
-        this(matchedCount, modifiedCount, null);
+        this(matchedCount, modifiedCount, false, null);
+    }
+
+    public UpdateManyResult(final long matchedCount, final long modifiedCount, final Object upsertedId) {
+        this(matchedCount, modifiedCount, true, upsertedId);
     }
 
     public UpdateManyResult {
@@ -18,11 +22,15 @@ public record UpdateManyResult(long matchedCount, long modifiedCount, Object ups
         if (modifiedCount > matchedCount) {
             throw new IllegalArgumentException("modifiedCount must be <= matchedCount");
         }
-        if (upsertedId != null && matchedCount != 0) {
-            throw new IllegalArgumentException("upsertedId requires matchedCount to be 0");
-        }
-        if (upsertedId != null && modifiedCount != 0) {
-            throw new IllegalArgumentException("upsertedId requires modifiedCount to be 0");
+        if (upserted) {
+            if (matchedCount != 0) {
+                throw new IllegalArgumentException("upserted result requires matchedCount to be 0");
+            }
+            if (modifiedCount != 0) {
+                throw new IllegalArgumentException("upserted result requires modifiedCount to be 0");
+            }
+        } else if (upsertedId != null) {
+            throw new IllegalArgumentException("upsertedId requires upserted=true");
         }
     }
 }
