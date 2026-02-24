@@ -78,6 +78,7 @@ Notes:
 - UTF importer now supports subset adapters for `runCommand` and `clientBulkWrite` (`#229`, `#231`).
 - The counts above are from the latest frozen snapshot; rerunning the ledger will shift those categories toward narrower unsupported reasons (for example unsupported command names/options).
 - Profile context matters: this snapshot is strict-profile (`failPoint` policy exclusion enabled). Compat-profile runs track failpoint categories separately.
+- Deployment profile context matters: standalone and single-node-replica-set runs may surface different compatibility deltas in handshake/read-preference/concern paths.
 
 ## Policy Exclusions
 
@@ -93,6 +94,8 @@ Notes:
 - `#231`: UTF `clientBulkWrite` subset adapter (ordered single-namespace rewrite to `bulkWrite`) - completed.
 - `#233`: update pipeline subset adapter (`$set`/`$unset` with literal values) - completed.
 - `#234`: profile-based failpoint handling (`strict` vs `compat`) - completed.
+- `#236`: advanced retryable transaction semantics subset (deterministic retry labels and replay behavior) - completed.
+- `#245`: single-node replica-set semantic profile (URI/handshake/primary-only read-preference contract) - completed.
 - `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction

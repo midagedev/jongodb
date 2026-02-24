@@ -13,7 +13,7 @@ Certification context:
 
 | Command | Status | Notes |
 | --- | --- | --- |
-| `hello`, `isMaster` | Supported | Basic handshake shape |
+| `hello`, `isMaster` | Supported | Basic handshake shape; optional single-node replica-set profile adds `setName`/`hosts`/`primary`/`topologyVersion` fields |
 | `ping` | Supported | Returns `{ok: 1}` |
 | `buildInfo` | Partial | Stable subset of fields |
 | `getParameter` | Partial | Only selected parameters |
@@ -141,11 +141,31 @@ Supported:
 - start/commit/abort flow
 - namespace-aware commit merge for transaction writes
 - expected transaction error labels for no-such-transaction cases
+- deterministic retry replay behavior for duplicate commit/abort paths (including `UnknownTransactionCommitResult` and `TransientTransactionError` label contracts by failure type)
 - deterministic conflict rule: transactional writes win when transactional and non-transactional paths touch the same `_id`
 
 Current scope:
 - single in-memory process semantics
 - no distributed transaction behavior
+
+## Deployment Profiles
+
+Supported runtime profiles:
+- `standalone` (default): classic direct standalone semantics
+- `singleNodeReplicaSet`: single-process replica-set semantic contract for driver/framework compatibility
+
+`singleNodeReplicaSet` profile contract:
+- URI includes `replicaSet=<name>`
+- `hello`/`isMaster` include deterministic replica-set topology fields
+- primary-only read preference (`mode=primary`); non-primary modes fail deterministically
+- constrained concern subset:
+  - writeConcern: `w=1` or `w="majority"` (with validated `wtimeout`)
+  - readConcern levels: `local`, `majority`, `snapshot`
+
+Not in scope for this profile:
+- elections/step-down
+- replication lag simulation
+- multi-node member state transitions
 
 ## Error Contract
 

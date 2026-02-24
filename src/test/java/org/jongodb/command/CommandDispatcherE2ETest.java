@@ -30,6 +30,53 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void helloCommandIncludesReplicaSetFieldsWhenSingleNodeReplicaSetProfileEnabled() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(
+                store,
+                TopologyProfile.SINGLE_NODE_REPLICA_SET,
+                "127.0.0.1:27017",
+                "rs-test");
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse("{\"hello\": 1, \"$db\": \"admin\"}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals("rs-test", response.getString("setName").getValue());
+        assertEquals("127.0.0.1:27017", response.getString("primary").getValue());
+        assertEquals("127.0.0.1:27017", response.getString("me").getValue());
+        assertEquals(1, response.getArray("hosts").size());
+        assertEquals("127.0.0.1:27017", response.getArray("hosts").get(0).asString().getValue());
+        assertTrue(response.getDocument("topologyVersion").containsKey("processId"));
+        assertEquals(1L, response.getDocument("topologyVersion").getInt64("counter").getValue());
+    }
+
+    @Test
+    void singleNodeReplicaSetProfileValidatesConcernAndReadPreferenceSubset() {
+        final RecordingStore store = new RecordingStore();
+        final CommandDispatcher dispatcher = new CommandDispatcher(
+                store,
+                TopologyProfile.SINGLE_NODE_REPLICA_SET,
+                "127.0.0.1:27017",
+                "rs-test");
+
+        final BsonDocument badReadPreference = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"readPreference\":{\"mode\":\"secondary\"}}"));
+        assertCommandError(badReadPreference, "BadValue");
+
+        final BsonDocument badWriteConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"writeConcern\":{\"w\":2}}"));
+        assertCommandError(badWriteConcern, "BadValue");
+
+        final BsonDocument badReadConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"readConcern\":{\"level\":\"linearizable\"}}"));
+        assertCommandError(badReadConcern, "BadValue");
+
+        final BsonDocument acceptedMajorityWriteConcern = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2}],\"writeConcern\":{\"w\":\"majority\",\"wtimeout\":1000}}"));
+        assertEquals(1.0, acceptedMajorityWriteConcern.get("ok").asNumber().doubleValue());
+    }
+
+    @Test
     void pingCommandReturnsOk() {
         final RecordingStore store = new RecordingStore();
         final CommandDispatcher dispatcher = new CommandDispatcher(store);
@@ -1263,6 +1310,16 @@ class CommandDispatcherE2ETest {
         final BsonDocument abortAfterCommit = dispatcher.dispatch(BsonDocument.parse(
                 "{\"abortTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-commit-abort\"},\"txnNumber\":1,\"autocommit\":false}"));
         assertCommandError(abortAfterCommit, 256, "TransactionCommitted");
+    }
+
+    @Test
+    void commitWithoutActiveTransactionReturnsUnknownCommitResultLabel() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument commitWithoutActive = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-no-active\"},\"txnNumber\":1,\"autocommit\":false}"));
+
+        assertNoSuchTransactionError(commitWithoutActive, "UnknownTransactionCommitResult");
     }
 
     @Test
