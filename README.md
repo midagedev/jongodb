@@ -1,6 +1,6 @@
 # jongodb
 
-In-memory MongoDB-compatible backend for integration tests.
+In-memory MongoDB-compatible backend for fast Spring integration tests.
 
 `jongodb` targets fast, deterministic Spring Boot test execution without starting a MongoDB container or external process.
 It is not a production MongoDB replacement.
@@ -64,6 +64,15 @@ dependencies {
 ```
 
 ### 2) Spring Boot integration
+
+Single-hook annotation style:
+
+```java
+@SpringBootTest
+@JongodbMongoTest
+class MyIntegrationTest {
+}
+```
 
 Initializer style:
 
@@ -161,7 +170,7 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 ### From mongo-java-server and similar backends
 
 1. Replace test dependency with `io.github.midagedev:jongodb:<version>`.
-2. Switch bootstrap to `JongodbMongoInitializer` or `JongodbMongoDynamicPropertySupport`.
+2. Switch bootstrap to `JongodbMongoTest`, `JongodbMongoInitializer`, or `JongodbMongoDynamicPropertySupport`.
 3. Run integration tests and classify failures.
 4. Keep a fallback profile for unsupported feature paths.
 

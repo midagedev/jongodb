@@ -6,6 +6,7 @@ This guide explains how to use `jongodb` from Spring Boot tests and how to migra
 
 ## Supported Integration Styles
 
+- Single-hook annotation: `org.jongodb.spring.test.JongodbMongoTest`
 - `ApplicationContextInitializer`: `org.jongodb.spring.test.JongodbMongoInitializer`
 - `@DynamicPropertySource`: `org.jongodb.spring.test.JongodbMongoDynamicPropertySupport`
 
@@ -25,6 +26,15 @@ dependencies {
 ```
 
 ### 2) Replace test bootstrap
+
+Single-hook annotation style (recommended for most Spring Boot tests):
+
+```java
+@SpringBootTest
+@JongodbMongoTest
+class MyIntegrationTest {
+}
+```
 
 Initializer style:
 
@@ -48,6 +58,7 @@ class MyIntegrationTest {
 ```
 
 Optional test database name:
+- `@TestPropertySource(properties = "jongodb.test.database=<dbName>")` (single-hook/initializer style)
 - `jongodb.test.database=<dbName>` (initializer style)
 - `JongodbMongoDynamicPropertySupport.register(registry, "<dbName>")` (dynamic style)
 

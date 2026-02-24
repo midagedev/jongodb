@@ -35,7 +35,23 @@ If you need command-level integration without sockets, instantiate `WireCommandI
 
 ## Spring Boot Test Integration
 
-### Option A: `ApplicationContextInitializer`
+### Option A: Single-hook annotation
+
+Use `JongodbMongoTest` to opt in with one annotation instead of custom initializer or `@DynamicPropertySource` boilerplate:
+
+```java
+import org.jongodb.spring.test.JongodbMongoTest;
+
+@SpringBootTest
+@JongodbMongoTest
+class AccountIntegrationTest {
+}
+```
+
+Optional database override:
+- add `@TestPropertySource(properties = "jongodb.test.database=<dbName>")`.
+
+### Option B: `ApplicationContextInitializer`
 
 Use `JongodbMongoInitializer` when your tests already use `@ContextConfiguration` initializers:
 
@@ -52,7 +68,7 @@ class AccountIntegrationTest {
 Optional database override:
 - set `jongodb.test.database=<dbName>` as a test property.
 
-### Option B: `@DynamicPropertySource`
+### Option C: `@DynamicPropertySource`
 
 Use `JongodbMongoDynamicPropertySupport` as a drop-in replacement pattern for many Testcontainers setups:
 
