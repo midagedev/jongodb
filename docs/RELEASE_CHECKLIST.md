@@ -31,6 +31,17 @@ Before creating a release tag:
 5. Push the release tag (`git tag -a vX.Y.Z <commit> -m "jongodb X.Y.Z"` then `git push origin vX.Y.Z`).
 6. Confirm `.github/workflows/maven-central-release.yml` completed and a GitHub Release exists for the tag.
 
+## Node Adapter Release Gate (Draft)
+
+Use this when publishing `@jongodb/memory-server`:
+
+1. Confirm `Node Adapter Release` workflow verify job is green.
+2. Confirm package version is set explicitly (tag `node-vX.Y.Z` or manual input).
+3. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
+4. Run `npm publish --dry-run` and review package contents.
+5. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
+6. Update README usage examples with the released package version.
+
 ## Release History
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |

@@ -1,0 +1,113 @@
+name: Node Adapter Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Node package version (required for manual publish)"
+        required: false
+        type: string
+      publish:
+        description: "Publish to npm (false runs dry-run only)"
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "node-v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: node-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Node package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run node:build
+
+      - name: Typecheck
+        run: npm run node:typecheck
+
+      - name: Test
+        run: npm run node:test
+
+  publish:
+    name: Publish Node package
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Resolve release version
+        id: meta
+        shell: bash
+        run: |
+          PUBLISH_INPUT="${{ inputs.publish }}"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            VERSION="${GITHUB_REF_NAME#node-v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+
+          if [[ "$VERSION" == *"-SNAPSHOT" ]]; then
+            echo "Version must not end with -SNAPSHOT: $VERSION"
+            exit 1
+          fi
+
+          if [[ -z "$VERSION" ]]; then
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "$PUBLISH_INPUT" == "true" ]]; then
+              echo "Manual publish requires an explicit version input."
+              exit 1
+            fi
+            echo "No version input provided. Publish job will run in dry-run mode."
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set package version for release job
+        if: steps.meta.outputs.version != ''
+        run: npm version "${{ steps.meta.outputs.version }}" --workspace @jongodb/memory-server --no-git-tag-version
+
+      - name: npm publish dry-run
+        run: npm publish --workspace @jongodb/memory-server --access public --provenance --dry-run
+
+      - name: npm publish
+        if: env.NPM_TOKEN != '' && (github.event_name == 'push' || inputs.publish)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace @jongodb/memory-server --access public --provenance
