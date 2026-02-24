@@ -25,44 +25,55 @@
   "license": "Apache-2.0",
   "author": "jongodb contributors",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/esm/index.js"
     },
     "./jest": {
-      "types": "./dist/jest.d.ts",
-      "default": "./dist/jest.js"
+      "types": "./dist/esm/jest.d.ts",
+      "import": "./dist/esm/jest.js",
+      "require": "./dist/cjs/jest.js",
+      "default": "./dist/esm/jest.js"
     },
     "./runtime": {
-      "types": "./dist/runtime.d.ts",
-      "default": "./dist/runtime.js"
+      "types": "./dist/esm/runtime.d.ts",
+      "import": "./dist/esm/runtime.js",
+      "require": "./dist/cjs/runtime.js",
+      "default": "./dist/esm/runtime.js"
     },
     "./nestjs": {
-      "types": "./dist/nestjs.d.ts",
-      "default": "./dist/nestjs.js"
+      "types": "./dist/esm/nestjs.d.ts",
+      "import": "./dist/esm/nestjs.js",
+      "require": "./dist/cjs/nestjs.js",
+      "default": "./dist/esm/nestjs.js"
     },
     "./vitest": {
-      "types": "./dist/vitest.d.ts",
-      "default": "./dist/vitest.js"
+      "types": "./dist/esm/vitest.d.ts",
+      "import": "./dist/esm/vitest.js",
+      "require": "./dist/cjs/vitest.js",
+      "default": "./dist/esm/vitest.js"
     },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "jest": [
-        "./dist/jest.d.ts"
+        "./dist/esm/jest.d.ts"
       ],
       "runtime": [
-        "./dist/runtime.d.ts"
+        "./dist/esm/runtime.d.ts"
       ],
       "nestjs": [
-        "./dist/nestjs.d.ts"
+        "./dist/esm/nestjs.d.ts"
       ],
       "vitest": [
-        "./dist/vitest.d.ts"
+        "./dist/esm/vitest.d.ts"
       ]
     }
   },
@@ -87,18 +98,24 @@
     "dist",
     "README.md",
     "LICENSE",
-    "!dist/test",
-    "!dist/test/**"
+    "!dist/**/test",
+    "!dist/**/test/**",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run build:esm && npm run build:cjs && npm run build:post",
+    "build:esm": "tsc -p tsconfig.build.esm.json",
+    "build:cjs": "tsc -p tsconfig.build.cjs.json",
+    "build:post": "node ./scripts/write-cjs-package.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "npm run build",
-    "test": "node --test dist/test/*.test.js",
+    "test": "node --test dist/esm/test/*.test.js && node ./scripts/cjs-smoke.cjs",
     "prepack": "npm run clean && npm run build",
     "release:check": "npm run build && npm run typecheck && npm run test && npm pack --dry-run"
   },

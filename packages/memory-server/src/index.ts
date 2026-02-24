@@ -4,7 +4,9 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-const require = createRequire(import.meta.url);
+const moduleRequire = createRequire(
+  resolve(process.cwd(), "__jongodb_module_resolver__.js")
+);
 
 const READY_PREFIX = "JONGODB_URI=";
 const FAILURE_PREFIX = "JONGODB_START_FAILURE=";
@@ -390,7 +392,7 @@ function detectLinuxLibcVariant(): "gnu" | "musl" {
 
 function resolveBinaryPathFromPackage(packageName: string): string | null {
   try {
-    const packageJsonPath = require.resolve(`${packageName}/package.json`);
+    const packageJsonPath = moduleRequire.resolve(`${packageName}/package.json`);
     const packageDir = dirname(packageJsonPath);
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
       bin?: string | Record<string, string>;

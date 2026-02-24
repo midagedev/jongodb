@@ -70,6 +70,13 @@ Your actual delta depends on test shape, I/O, and query workload.
 npm i -D @jongodb/memory-server
 ```
 
+## Module Format
+
+This package supports both:
+
+- ESM (`import`)
+- CommonJS (`require`)
+
 ## Quick Start (Recommended)
 
 Use `createJongodbEnvRuntime` and keep one runtime per test process.
@@ -89,6 +96,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await runtime.teardown();
 });
+```
+
+CommonJS example:
+
+```js
+const { createJongodbEnvRuntime } = require("@jongodb/memory-server/runtime");
+
+const runtime = createJongodbEnvRuntime({ databaseName: "test" });
 ```
 
 Behavior:
