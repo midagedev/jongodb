@@ -96,6 +96,7 @@ class UnifiedSpecCorpusRunnerTest {
         final UnifiedSpecCorpusRunner.ArtifactPaths artifactPaths = UnifiedSpecCorpusRunner.artifactPaths(outputDir);
         assertTrue(Files.exists(artifactPaths.jsonArtifact()));
         assertTrue(Files.exists(artifactPaths.markdownArtifact()));
+        assertTrue(Files.exists(artifactPaths.replayBundleDir().resolve(DeterministicReplayBundles.MANIFEST_FILE_NAME)));
 
         final Document json = Document.parse(Files.readString(artifactPaths.jsonArtifact()));
         assertEquals(3, json.get("importSummary", Document.class).getInteger("imported"));
@@ -103,12 +104,14 @@ class UnifiedSpecCorpusRunnerTest {
         assertEquals(1, json.get("differentialSummary", Document.class).getInteger("match"));
         assertEquals(1, json.get("differentialSummary", Document.class).getInteger("mismatch"));
         assertEquals(1, json.get("differentialSummary", Document.class).getInteger("error"));
+        assertEquals(2, json.get("replayBundles", Document.class).getInteger("count"));
 
         final String markdown = Files.readString(artifactPaths.markdownArtifact());
         assertTrue(markdown.contains("pass: 1"));
         assertTrue(markdown.contains("unsupported: 1"));
         assertTrue(markdown.contains("mismatch-case"));
         assertTrue(markdown.contains("error-case"));
+        assertTrue(markdown.contains("## Replay Bundles"));
     }
 
     private static ScenarioOutcome successResult(final String marker) {

@@ -80,6 +80,14 @@ gradle utfCorpusEvidence \
   -PutfMongoUri="mongodb://localhost:27017"
 ```
 
+Replay a single failure bundle from UTF artifacts:
+
+```bash
+gradle replayFailureBundle \
+  -PreplayBundleDir="build/reports/unified-spec/failure-replay-bundles" \
+  -PreplayFailureId="utf::some-case-id"
+```
+
 Run Spring compatibility matrix:
 
 ```bash
@@ -139,6 +147,7 @@ GitHub Actions workflow:
 - UTF differential:
   - `build/reports/unified-spec/utf-differential-report.json`
   - `build/reports/unified-spec/utf-differential-report.md`
+  - `build/reports/unified-spec/failure-replay-bundles/manifest.json`
 - Spring matrix:
   - `build/reports/spring-matrix/spring-compatibility-matrix.json`
   - `build/reports/spring-matrix/spring-compatibility-matrix.md`

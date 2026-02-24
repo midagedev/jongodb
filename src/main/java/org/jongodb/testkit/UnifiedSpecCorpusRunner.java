@@ -28,6 +28,7 @@ public final class UnifiedSpecCorpusRunner {
     private static final int DEFAULT_REPLAY_LIMIT = 20;
     private static final String JSON_ARTIFACT_FILE = "utf-differential-report.json";
     private static final String MARKDOWN_ARTIFACT_FILE = "utf-differential-report.md";
+    private static final String REPLAY_BUNDLE_DIR = DeterministicReplayBundles.DEFAULT_BUNDLE_DIR_NAME;
 
     private final Clock clock;
     private final UnifiedSpecImporter importer;
@@ -95,6 +96,7 @@ public final class UnifiedSpecCorpusRunner {
         Files.createDirectories(config.outputDir());
         Files.writeString(paths.jsonArtifact(), renderJson(result), StandardCharsets.UTF_8);
         Files.writeString(paths.markdownArtifact(), renderMarkdown(result), StandardCharsets.UTF_8);
+        DeterministicReplayBundles.writeBundles(paths.replayBundleDir(), result.replayBundles());
         return result;
     }
 
@@ -119,6 +121,8 @@ public final class UnifiedSpecCorpusRunner {
         final DifferentialReport report = harness.run(List.copyOf(scenarios));
         final List<FailureReplay> failureReplays =
                 buildFailureReplays(report, scenarioById, config.replayLimit());
+        final List<DeterministicReplayBundles.Bundle> replayBundles =
+                buildReplayBundles(report, scenarioById);
 
         return new RunResult(
                 config,
@@ -127,7 +131,8 @@ public final class UnifiedSpecCorpusRunner {
                 report.generatedAt(),
                 importResult,
                 report,
-                failureReplays);
+                failureReplays,
+                replayBundles);
     }
 
     public static ArtifactPaths artifactPaths(final Path outputDir) {
@@ -135,7 +140,8 @@ public final class UnifiedSpecCorpusRunner {
         final Path normalized = outputDir.normalize();
         return new ArtifactPaths(
                 normalized.resolve(JSON_ARTIFACT_FILE),
-                normalized.resolve(MARKDOWN_ARTIFACT_FILE));
+                normalized.resolve(MARKDOWN_ARTIFACT_FILE),
+                normalized.resolve(REPLAY_BUNDLE_DIR));
     }
 
     private static List<UnifiedSpecImporter.ImportedScenario> orderedScenarios(
@@ -178,6 +184,21 @@ public final class UnifiedSpecCorpusRunner {
                     scenario == null ? List.of() : scenario.commands()));
         }
         return List.copyOf(replays);
+    }
+
+    private static List<DeterministicReplayBundles.Bundle> buildReplayBundles(
+            final DifferentialReport report,
+            final Map<String, Scenario> scenarioById) {
+        final List<DeterministicReplayBundles.Bundle> bundles = new ArrayList<>();
+        for (final DiffResult result : report.results()) {
+            if (result.status() == DiffStatus.MATCH) {
+                continue;
+            }
+            final Scenario scenario = scenarioById.get(result.scenarioId());
+            final List<ScenarioCommand> commands = scenario == null ? List.of() : scenario.commands();
+            bundles.add(DeterministicReplayBundles.fromFailure("utf", result, commands));
+        }
+        return List.copyOf(bundles);
     }
 
     private static String replayMessage(final DiffResult result) {
@@ -238,6 +259,10 @@ public final class UnifiedSpecCorpusRunner {
                     .append("commands", commands));
         }
         root.put("failureReplays", failureReplays);
+        root.put("replayBundles", new Document()
+                .append("dir", REPLAY_BUNDLE_DIR)
+                .append("count", result.replayBundles().size())
+                .append("manifest", REPLAY_BUNDLE_DIR + "/" + DeterministicReplayBundles.MANIFEST_FILE_NAME));
 
         return root.toJson();
     }
@@ -275,6 +300,16 @@ public final class UnifiedSpecCorpusRunner {
                         .append('\n');
             }
         }
+        markdown.append('\n');
+
+        markdown.append("## Replay Bundles\n\n");
+        markdown.append("- dir: ").append(REPLAY_BUNDLE_DIR).append('\n');
+        markdown.append("- bundleCount: ").append(result.replayBundles().size()).append('\n');
+        markdown.append("- manifest: ")
+                .append(REPLAY_BUNDLE_DIR)
+                .append('/')
+                .append(DeterministicReplayBundles.MANIFEST_FILE_NAME)
+                .append('\n');
         markdown.append('\n');
 
         markdown.append("## Skipped / Unsupported\n\n");
@@ -342,7 +377,7 @@ public final class UnifiedSpecCorpusRunner {
         System.out.println("  --help, -h                 Show this help");
     }
 
-    public record ArtifactPaths(Path jsonArtifact, Path markdownArtifact) {}
+    public record ArtifactPaths(Path jsonArtifact, Path markdownArtifact, Path replayBundleDir) {}
 
     public record FailureReplay(String scenarioId, DiffStatus status, String message, List<ScenarioCommand> commands) {
         public FailureReplay {
@@ -360,7 +395,8 @@ public final class UnifiedSpecCorpusRunner {
             Instant generatedAt,
             UnifiedSpecImporter.ImportResult importResult,
             DifferentialReport differentialReport,
-            List<FailureReplay> failureReplays) {
+            List<FailureReplay> failureReplays,
+            List<DeterministicReplayBundles.Bundle> replayBundles) {
         public RunResult {
             config = Objects.requireNonNull(config, "config");
             seed = requireText(seed, "seed");
@@ -368,6 +404,7 @@ public final class UnifiedSpecCorpusRunner {
             importResult = Objects.requireNonNull(importResult, "importResult");
             differentialReport = Objects.requireNonNull(differentialReport, "differentialReport");
             failureReplays = List.copyOf(Objects.requireNonNull(failureReplays, "failureReplays"));
+            replayBundles = List.copyOf(Objects.requireNonNull(replayBundles, "replayBundles"));
         }
     }
 
