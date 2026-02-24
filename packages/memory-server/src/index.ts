@@ -21,11 +21,14 @@ const BUNDLED_BINARY_PACKAGE_PREFIX = "@jongodb/memory-server-bin";
 
 type LogLevel = "silent" | "info" | "debug";
 type LaunchMode = "auto" | "binary" | "java";
+type DatabaseNameStrategy = "static" | "worker";
 
 export interface JongodbMemoryServerOptions {
   host?: string;
   port?: number;
   databaseName?: string;
+  databaseNameSuffix?: string;
+  databaseNameStrategy?: DatabaseNameStrategy;
   startupTimeoutMs?: number;
   stopTimeoutMs?: number;
   javaPath?: string;
@@ -71,7 +74,7 @@ export async function startJongodbMemoryServer(
   );
   const host = normalizeHost(options.host);
   const port = normalizePort(options.port);
-  const databaseName = normalizeDatabaseName(options.databaseName);
+  const databaseName = resolveDatabaseName(options);
   const logLevel = options.logLevel ?? "silent";
   const launchConfigs = resolveLaunchConfigs(options, {
     host,
@@ -499,12 +502,72 @@ function normalizePort(port: number | undefined): number {
   return normalized;
 }
 
-function normalizeDatabaseName(databaseName: string | undefined): string {
-  const normalized = databaseName?.trim() || DEFAULT_DATABASE;
+function resolveDatabaseName(options: JongodbMemoryServerOptions): string {
+  const base = normalizeDatabaseNameBase(options.databaseName);
+  const explicitSuffix = normalizeDatabaseNameSuffix(options.databaseNameSuffix);
+  const workerSuffix = resolveWorkerDatabaseNameSuffix(options.databaseNameStrategy);
+  return `${base}${explicitSuffix}${workerSuffix}`;
+}
+
+function normalizeDatabaseNameBase(databaseName: string | undefined): string {
+  return databaseName?.trim() || DEFAULT_DATABASE;
+}
+
+function normalizeDatabaseNameSuffix(databaseNameSuffix: string | undefined): string {
+  if (databaseNameSuffix === undefined) {
+    return "";
+  }
+
+  const normalized = databaseNameSuffix.trim();
   if (normalized.length === 0) {
-    throw new Error("databaseName must not be empty.");
+    throw new Error("databaseNameSuffix must not be empty when provided.");
   }
   return normalized;
+}
+
+function resolveWorkerDatabaseNameSuffix(
+  strategy: DatabaseNameStrategy | undefined
+): string {
+  const resolvedStrategy = strategy ?? "static";
+  if (resolvedStrategy !== "static" && resolvedStrategy !== "worker") {
+    throw new Error(
+      `databaseNameStrategy must be one of: static, worker (got: ${String(strategy)}).`
+    );
+  }
+
+  if (resolvedStrategy === "static") {
+    return "";
+  }
+
+  const workerToken = resolveWorkerToken();
+  return `_w${sanitizeDatabaseNameToken(workerToken)}`;
+}
+
+function resolveWorkerToken(): string {
+  const envCandidates = [
+    process.env.JONGODB_WORKER_ID,
+    process.env.JEST_WORKER_ID,
+    process.env.VITEST_WORKER_ID,
+    process.env.VITEST_POOL_ID,
+    process.env.NODE_UNIQUE_ID,
+  ];
+
+  for (const candidate of envCandidates) {
+    const normalized = candidate?.trim();
+    if (normalized !== undefined && normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return String(process.pid);
+}
+
+function sanitizeDatabaseNameToken(token: string): string {
+  const sanitized = token.replace(/[^A-Za-z0-9_-]/g, "_");
+  if (sanitized.length > 0) {
+    return sanitized;
+  }
+  return "unknown";
 }
 
 function resolveClasspathOrNull(classpath: string | string[] | undefined): string | null {

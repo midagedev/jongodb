@@ -60,6 +60,63 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer appends explicit databaseNameSuffix",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const server = await startJongodbMemoryServer({
+        launchMode: "binary",
+        binaryPath,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "suffix_base",
+        databaseNameSuffix: "_ci",
+      });
+
+      try {
+        assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/suffix_base_ci$/u);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer supports worker databaseNameStrategy for isolation",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const previous = process.env.JONGODB_WORKER_ID;
+      process.env.JONGODB_WORKER_ID = "worker 2/A";
+
+      try {
+        const server = await startJongodbMemoryServer({
+          launchMode: "binary",
+          binaryPath,
+          host: "127.0.0.1",
+          port: 0,
+          databaseName: "worker_db",
+          databaseNameStrategy: "worker",
+        });
+
+        try {
+          assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/worker_db_wworker_2_A$/u);
+        } finally {
+          await server.stop();
+        }
+      } finally {
+        if (previous === undefined) {
+          delete process.env.JONGODB_WORKER_ID;
+        } else {
+          process.env.JONGODB_WORKER_ID = previous;
+        }
+      }
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer falls back to java in auto mode when binary launcher exits",
   { concurrency: false },
   async () => {

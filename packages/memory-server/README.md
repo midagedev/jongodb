@@ -1,6 +1,6 @@
 # @jongodb/memory-server
 
-Node test runtime adapter for `jongodb`.
+Node test runtime adapter for [`jongodb`](https://github.com/midagedev/jongodb).
 
 It starts a local `jongodb` launcher process, exposes a MongoDB URI, and manages process lifecycle for test runners.
 
@@ -105,6 +105,18 @@ const { createJongodbEnvRuntime } = require("@jongodb/memory-server/runtime");
 
 const runtime = createJongodbEnvRuntime({ databaseName: "test" });
 ```
+
+Parallel worker example:
+
+```ts
+const runtime = createJongodbEnvRuntime({
+  databaseName: "test",
+  databaseNameSuffix: "_it",
+  databaseNameStrategy: "worker"
+});
+```
+
+This produces worker-isolated names such as `test_it_w1`, `test_it_w2`, and helps prevent data collisions in parallel runs.
 
 Behavior:
 
@@ -264,6 +276,8 @@ Core options:
 - `javaPath`: Java executable path (default: `java`)
 - `launcherClass`: Java launcher class (default: `org.jongodb.server.TcpMongoServerLauncher`)
 - `databaseName`: default DB in generated URI (default: `test`)
+- `databaseNameSuffix`: appended to `databaseName` (for example `_ci`)
+- `databaseNameStrategy`: `static` | `worker` (default: `static`)
 - `host`: bind host (default: `127.0.0.1`)
 - `port`: bind port (`0` for ephemeral, default: `0`)
 - `startupTimeoutMs`: startup timeout (default: `15000`)
