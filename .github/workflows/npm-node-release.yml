@@ -101,7 +101,14 @@ jobs:
         run: npm run node:typecheck
 
       - name: Test
-        run: npm run node:test
+        shell: bash
+        run: |
+          JCP="$(gradle --no-daemon -q printLauncherClasspath | awk 'NF{line=$0} END{print line}')"
+          if [[ -z "$JCP" ]]; then
+            echo "Failed to resolve JONGODB_TEST_CLASSPATH from Gradle output."
+            exit 1
+          fi
+          JONGODB_TEST_CLASSPATH="$JCP" npm run node:test
 
   publish-binaries:
     name: Publish platform binary package (${{ matrix.workspace }})

@@ -66,10 +66,6 @@ import { beforeAll, afterAll } from "@jest/globals";
 import { createJongodbEnvRuntime } from "@jongodb/memory-server/runtime";
 
 const runtime = createJongodbEnvRuntime({
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI",
   databaseName: "test"
 });
 
@@ -84,7 +80,7 @@ afterAll(async () => {
 
 Behavior:
 
-- `setup()` starts launcher and writes `process.env[envVarName]`
+- `setup()` starts launcher and writes `process.env.MONGODB_URI` (default)
 - `teardown()` stops launcher and restores previous env value
 
 ## Launcher Modes
@@ -158,12 +154,7 @@ The adapter relies on this contract for deterministic startup/teardown handling.
 import { beforeAll, afterAll } from "@jest/globals";
 import { registerJongodbForJest } from "@jongodb/memory-server/jest";
 
-registerJongodbForJest({ beforeAll, afterAll }, {
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI"
-});
+registerJongodbForJest({ beforeAll, afterAll });
 ```
 
 ### Jest (global setup/teardown)
@@ -173,12 +164,7 @@ registerJongodbForJest({ beforeAll, afterAll }, {
 ```ts
 import { createJestGlobalSetup } from "@jongodb/memory-server/jest";
 
-export default createJestGlobalSetup({
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI"
-});
+export default createJestGlobalSetup();
 ```
 
 `jest.global-teardown.ts`:
@@ -195,12 +181,7 @@ export default createJestGlobalTeardown();
 import { beforeAll, afterAll } from "vitest";
 import { registerJongodbForVitest } from "@jongodb/memory-server/vitest";
 
-registerJongodbForVitest({ beforeAll, afterAll }, {
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI"
-});
+registerJongodbForVitest({ beforeAll, afterAll });
 ```
 
 ### NestJS (Jest E2E)
@@ -209,12 +190,7 @@ registerJongodbForVitest({ beforeAll, afterAll }, {
 import { beforeAll, afterAll } from "@jest/globals";
 import { registerJongodbForNestJest } from "@jongodb/memory-server/nestjs";
 
-registerJongodbForNestJest({ beforeAll, afterAll }, {
-  launchMode: "auto",
-  binaryPath: process.env.JONGODB_BINARY_PATH,
-  classpath: process.env.JONGODB_CLASSPATH,
-  envVarName: "MONGODB_URI"
-});
+registerJongodbForNestJest({ beforeAll, afterAll });
 ```
 
 ## Common Integration Patterns
