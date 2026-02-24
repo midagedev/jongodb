@@ -29,8 +29,8 @@ Certification context:
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `countDocuments` | Partial | Filter + skip/limit + hint/collation/readConcern shape validation |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
-| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; operator updates only |
-| `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only |
+| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; operator updates only; supports projection include/exclude subset (including `_id` override) |
+| `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
 
 ## Query Operators
