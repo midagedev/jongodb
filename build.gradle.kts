@@ -218,6 +218,22 @@ tasks.register<JavaExec>("utfCorpusEvidence") {
     }
 }
 
+tasks.register<JavaExec>("replayFailureBundle") {
+    group = "verification"
+    description = "Replays one deterministic failure bundle by failure-id."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.DeterministicReplayBundleRunner")
+
+    val bundleDir = (findProperty("replayBundleDir") as String?)
+        ?: "build/reports/unified-spec/failure-replay-bundles"
+    val failureId = (findProperty("replayFailureId") as String?) ?: ""
+
+    args("--bundle-dir=$bundleDir")
+    if (failureId.isNotBlank()) {
+        args("--failure-id=$failureId")
+    }
+}
+
 tasks.register<JavaExec>("finalReadinessEvidence") {
     group = "verification"
     description = "Aggregates R1 release-readiness evidence into a unified JSON/MD report."
