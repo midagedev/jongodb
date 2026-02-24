@@ -8,13 +8,16 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.bson.BsonBinaryWriter;
 import org.bson.BsonDocument;
+import org.bson.BsonString;
 import org.bson.RawBsonDocument;
 import org.bson.codecs.BsonDocumentCodec;
 import org.bson.codecs.EncoderContext;
@@ -40,6 +43,9 @@ public final class TcpMongoServer implements AutoCloseable {
     private static final int OP_REPLY = 1;
     private static final int OP_QUERY = 2004;
     private static final int OP_MSG = 2013;
+    private static final int DEFAULT_MAX_ACCEPT_FAILURES = 8;
+    private static final long DEFAULT_ACCEPT_BACKOFF_BASE_MILLIS = 10L;
+    private static final long DEFAULT_ACCEPT_BACKOFF_MAX_MILLIS = 500L;
 
     private final CommandDispatcher dispatcher;
     private final OpMsgCodec opMsgCodec = new OpMsgCodec();
@@ -49,6 +55,9 @@ public final class TcpMongoServer implements AutoCloseable {
     private final List<Socket> clientSockets = new CopyOnWriteArrayList<>();
     private final Thread acceptThread;
     private final String host;
+    private final int maxConsecutiveAcceptFailures;
+    private final long acceptBackoffBaseMillis;
+    private final long acceptBackoffMaxMillis;
 
     public static TcpMongoServer inMemory() {
         return new TcpMongoServer();
@@ -71,12 +80,31 @@ public final class TcpMongoServer implements AutoCloseable {
     }
 
     public TcpMongoServer(final CommandStore commandStore, final String host, final int port) {
-        Objects.requireNonNull(commandStore, "commandStore");
-        final String normalizedHost = normalizeHost(host);
-        final int normalizedPort = normalizePort(port);
-        this.dispatcher = new CommandDispatcher(commandStore);
-        this.host = normalizedHost;
-        this.serverSocket = newServerSocket(normalizedHost, normalizedPort);
+        this(
+                Objects.requireNonNull(commandStore, "commandStore"),
+                normalizeHost(host),
+                newServerSocket(normalizeHost(host), normalizePort(port)),
+                DEFAULT_MAX_ACCEPT_FAILURES,
+                DEFAULT_ACCEPT_BACKOFF_BASE_MILLIS,
+                DEFAULT_ACCEPT_BACKOFF_MAX_MILLIS);
+    }
+
+    TcpMongoServer(
+            final CommandStore commandStore,
+            final String host,
+            final ServerSocket serverSocket,
+            final int maxConsecutiveAcceptFailures,
+            final long acceptBackoffBaseMillis,
+            final long acceptBackoffMaxMillis) {
+        this.dispatcher = new CommandDispatcher(Objects.requireNonNull(commandStore, "commandStore"));
+        this.host = normalizeHost(host);
+        this.serverSocket = Objects.requireNonNull(serverSocket, "serverSocket");
+        this.maxConsecutiveAcceptFailures = normalizeMaxAcceptFailures(maxConsecutiveAcceptFailures);
+        this.acceptBackoffBaseMillis = normalizeBackoff(acceptBackoffBaseMillis, "acceptBackoffBaseMillis");
+        this.acceptBackoffMaxMillis = normalizeBackoff(acceptBackoffMaxMillis, "acceptBackoffMaxMillis");
+        if (this.acceptBackoffMaxMillis < this.acceptBackoffBaseMillis) {
+            throw new IllegalArgumentException("acceptBackoffMaxMillis must be >= acceptBackoffBaseMillis");
+        }
         this.acceptThread = new Thread(this::acceptLoop, "jongodb-tcp-accept");
         this.acceptThread.setDaemon(true);
     }
@@ -106,10 +134,7 @@ public final class TcpMongoServer implements AutoCloseable {
 
     @Override
     public void close() {
-        if (!running.compareAndSet(true, false)) {
-            return;
-        }
-
+        running.set(false);
         closeQuietly(serverSocket);
         for (final Socket socket : clientSockets) {
             closeQuietly(socket);
@@ -139,15 +164,46 @@ public final class TcpMongoServer implements AutoCloseable {
     }
 
     private void acceptLoop() {
+        int consecutiveFailures = 0;
+        long firstFailureNanos = 0L;
         while (running.get()) {
             final Socket socket;
             try {
                 socket = serverSocket.accept();
+                consecutiveFailures = 0;
+                firstFailureNanos = 0L;
             } catch (final IOException ioException) {
-                if (running.get()) {
-                    throw new IllegalStateException("failed to accept tcp client", ioException);
+                if (isExpectedAcceptShutdown(ioException)) {
+                    return;
                 }
-                return;
+                consecutiveFailures++;
+                if (firstFailureNanos == 0L) {
+                    firstFailureNanos = System.nanoTime();
+                }
+                final long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - firstFailureNanos);
+                if (consecutiveFailures >= maxConsecutiveAcceptFailures) {
+                    running.set(false);
+                    System.err.println(
+                            "jongodb tcp accept terminal failure"
+                                    + " port=" + serverSocket.getLocalPort()
+                                    + " attempts=" + consecutiveFailures
+                                    + " elapsedMs=" + elapsedMillis
+                                    + " error=" + ioException.getMessage());
+                    closeQuietly(serverSocket);
+                    return;
+                }
+                System.err.println(
+                        "jongodb tcp accept transient failure"
+                                + " port=" + serverSocket.getLocalPort()
+                                + " attempt=" + consecutiveFailures
+                                + " elapsedMs=" + elapsedMillis
+                                + " retryBackoffMs=" + nextBackoffMillis(consecutiveFailures)
+                                + " error=" + ioException.getMessage());
+                if (!sleepBeforeAcceptRetry(consecutiveFailures)) {
+                    running.set(false);
+                    return;
+                }
+                continue;
             }
 
             clientSockets.add(socket);
@@ -157,6 +213,31 @@ public final class TcpMongoServer implements AutoCloseable {
             worker.setDaemon(true);
             worker.start();
         }
+    }
+
+    private boolean isExpectedAcceptShutdown(final IOException ioException) {
+        return !running.get() || serverSocket.isClosed();
+    }
+
+    private boolean sleepBeforeAcceptRetry(final int consecutiveFailures) {
+        try {
+            Thread.sleep(nextBackoffMillis(consecutiveFailures));
+            return true;
+        } catch (final InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private long nextBackoffMillis(final int consecutiveFailures) {
+        long computed = acceptBackoffBaseMillis;
+        for (int index = 1; index < consecutiveFailures; index++) {
+            if (computed >= acceptBackoffMaxMillis / 2L) {
+                return acceptBackoffMaxMillis;
+            }
+            computed *= 2L;
+        }
+        return Math.min(computed, acceptBackoffMaxMillis);
     }
 
     private void handleClient(final Socket socket) {
@@ -213,7 +294,10 @@ public final class TcpMongoServer implements AutoCloseable {
         final int requestId = readIntLE(request, 4);
         int cursor = HEADER_LENGTH;
         cursor += 4; // flags
+        final int namespaceOffset = cursor;
         cursor = readCString(request, cursor); // fullCollectionName
+        final String fullCollectionName = readCStringValue(request, namespaceOffset, cursor);
+        final String namespaceDatabase = parseDatabaseFromNamespace(fullCollectionName);
         cursor += 4; // numberToSkip
         cursor += 4; // numberToReturn
 
@@ -223,7 +307,8 @@ public final class TcpMongoServer implements AutoCloseable {
         }
         final byte[] queryBytes = java.util.Arrays.copyOfRange(request, cursor, cursor + documentLength);
         final BsonDocument queryDocument = new RawBsonDocument(queryBytes);
-        final BsonDocument responseBody = dispatcher.dispatch(queryDocument);
+        final BsonDocument dispatchDocument = withNamespaceDatabase(queryDocument, namespaceDatabase);
+        final BsonDocument responseBody = dispatcher.dispatch(dispatchDocument);
         return encodeOpReply(requestId, responseBody);
     }
 
@@ -308,6 +393,36 @@ public final class TcpMongoServer implements AutoCloseable {
         return index + 1;
     }
 
+    private static String readCStringValue(final byte[] bytes, final int offset, final int nextOffset) {
+        if (nextOffset <= offset) {
+            return "";
+        }
+        return new String(bytes, offset, nextOffset - offset - 1, StandardCharsets.UTF_8);
+    }
+
+    private static String parseDatabaseFromNamespace(final String fullCollectionName) {
+        if (fullCollectionName == null || fullCollectionName.isBlank()) {
+            return null;
+        }
+        final int delimiter = fullCollectionName.indexOf('.');
+        if (delimiter <= 0) {
+            return null;
+        }
+        final String database = fullCollectionName.substring(0, delimiter);
+        return database.isBlank() ? null : database;
+    }
+
+    private static BsonDocument withNamespaceDatabase(final BsonDocument commandDocument, final String database) {
+        if (database == null || commandDocument.containsKey("$db")) {
+            return commandDocument;
+        }
+        final BsonDocument mutable = new BsonDocument();
+        for (final String key : commandDocument.keySet()) {
+            mutable.put(key, commandDocument.get(key));
+        }
+        return mutable.append("$db", new BsonString(database));
+    }
+
     private static int readIntLE(final byte[] bytes, final int offset) {
         if (offset < 0 || offset + 4 > bytes.length) {
             throw new IllegalArgumentException("unable to read int32 at offset " + offset);
@@ -344,5 +459,19 @@ public final class TcpMongoServer implements AutoCloseable {
             throw new IllegalArgumentException("port must be between 0 and 65535: " + port);
         }
         return port;
+    }
+
+    private static int normalizeMaxAcceptFailures(final int maxConsecutiveAcceptFailures) {
+        if (maxConsecutiveAcceptFailures <= 0) {
+            throw new IllegalArgumentException("maxConsecutiveAcceptFailures must be > 0");
+        }
+        return maxConsecutiveAcceptFailures;
+    }
+
+    private static long normalizeBackoff(final long backoffMillis, final String fieldName) {
+        if (backoffMillis <= 0L) {
+            throw new IllegalArgumentException(fieldName + " must be > 0");
+        }
+        return backoffMillis;
     }
 }

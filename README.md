@@ -157,7 +157,7 @@ This project targets integration-test compatibility for common Spring data paths
 | Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced parity incomplete |
 | Aggregation | Core stages + selected Tier-2 stages | Full operator coverage not implemented |
 | Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) |
-| Wire protocol | `OP_MSG` + `OP_QUERY` | In-process ingress and standalone TCP launcher mode |
+| Wire protocol | `OP_MSG` + `OP_QUERY` | In-process ingress and standalone TCP launcher mode, with OP_QUERY namespace-based `$db` fallback |
 
 Support manifest summary:
 - `Supported`: 7

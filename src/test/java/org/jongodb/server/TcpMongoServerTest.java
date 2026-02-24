@@ -64,6 +64,62 @@ final class TcpMongoServerTest {
         }
     }
 
+    @Test
+    void opQueryUsesNamespaceDatabaseWhenPayloadDbIsMissing() throws IOException {
+        try (TcpMongoServer server = TcpMongoServer.inMemory()) {
+            server.start();
+
+            try (MongoClient client = MongoClients.create(server.connectionString("app"))) {
+                client.getDatabase("app").runCommand(BsonDocument.parse(
+                        "{\"insert\":\"users\",\"documents\":[{\"_id\":1,\"name\":\"alice\"}]}"));
+            }
+
+            try (Socket socket = new Socket(server.host(), server.port());
+                    BufferedOutputStream output = new BufferedOutputStream(socket.getOutputStream());
+                    BufferedInputStream input = new BufferedInputStream(socket.getInputStream())) {
+                final byte[] request = encodeOpQueryCommand(43, "app.$cmd", BsonDocument.parse("{\"count\":\"users\",\"query\":{}}"));
+                output.write(request);
+                output.flush();
+
+                final byte[] response = readMessage(input);
+                assertNotNull(response);
+                final BsonDocument responseDoc = decodeReplyDocument(response);
+                assertEquals(1.0, responseDoc.getNumber("ok").doubleValue(), 0.0);
+                assertEquals(1L, responseDoc.getInt64("n").getValue());
+                assertEquals(1L, responseDoc.getInt64("count").getValue());
+            }
+        }
+    }
+
+    @Test
+    void opQueryPayloadDbOverridesNamespaceDatabase() throws IOException {
+        try (TcpMongoServer server = TcpMongoServer.inMemory()) {
+            server.start();
+
+            try (MongoClient client = MongoClients.create(server.connectionString("app"))) {
+                client.getDatabase("app").runCommand(BsonDocument.parse(
+                        "{\"insert\":\"users\",\"documents\":[{\"_id\":1,\"name\":\"alice\"}]}"));
+            }
+
+            try (Socket socket = new Socket(server.host(), server.port());
+                    BufferedOutputStream output = new BufferedOutputStream(socket.getOutputStream());
+                    BufferedInputStream input = new BufferedInputStream(socket.getInputStream())) {
+                final byte[] request = encodeOpQueryCommand(
+                        44,
+                        "admin.$cmd",
+                        BsonDocument.parse("{\"count\":\"users\",\"$db\":\"app\",\"query\":{}}"));
+                output.write(request);
+                output.flush();
+
+                final byte[] response = readMessage(input);
+                assertNotNull(response);
+                final BsonDocument responseDoc = decodeReplyDocument(response);
+                assertEquals(1.0, responseDoc.getNumber("ok").doubleValue(), 0.0);
+                assertEquals(1L, responseDoc.getInt64("n").getValue());
+            }
+        }
+    }
+
     private static byte[] encodeOpQueryCommand(final int requestId, final String namespace, final BsonDocument command) {
         final byte[] namespaceBytes = namespace.getBytes(StandardCharsets.UTF_8);
         final byte[] commandBytes = encodeBson(command);
