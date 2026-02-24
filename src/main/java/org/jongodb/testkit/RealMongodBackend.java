@@ -7,6 +7,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -631,6 +632,14 @@ public final class RealMongodBackend implements DifferentialBackend {
         final ScenarioCommand command,
         final BsonDocument responseBody
     ) {
+        if ("distinct".equals(command.commandName())) {
+            final BsonValue valuesValue = responseBody.get("values");
+            if (valuesValue != null && valuesValue.isArray()) {
+                return responseBody.clone().append("values", normalizeDistinctValues(valuesValue.asArray()));
+            }
+            return responseBody;
+        }
+
         if (!"countDocuments".equals(command.commandName())) {
             return responseBody;
         }
@@ -660,6 +669,78 @@ public final class RealMongodBackend implements DifferentialBackend {
                 .append("ok", responseBody.get("ok"));
         }
         return responseBody.clone().append("count", responseBody.get("n"));
+    }
+
+    private static BsonArray normalizeDistinctValues(final BsonArray values) {
+        final List<BsonValue> sorted = new ArrayList<>(values.getValues());
+        sorted.sort(Comparator.comparing(RealMongodBackend::distinctSortKey));
+        return new BsonArray(sorted);
+    }
+
+    private static String distinctSortKey(final BsonValue value) {
+        final StringBuilder builder = new StringBuilder();
+        builder.append(typeRank(value)).append('|');
+        appendDistinctSortValue(value, builder);
+        return builder.toString();
+    }
+
+    private static int typeRank(final BsonValue value) {
+        if (value == null || value.isNull()) {
+            return 0;
+        }
+        if (value.isInt32() || value.isInt64() || value.isDouble() || value.isDecimal128()) {
+            return 1;
+        }
+        if (value.isString()) {
+            return 2;
+        }
+        if (value.isDocument()) {
+            return 3;
+        }
+        if (value.isArray()) {
+            return 4;
+        }
+        if (value.isBoolean()) {
+            return 5;
+        }
+        if (value.isDateTime() || value.isTimestamp()) {
+            return 6;
+        }
+        return 9;
+    }
+
+    private static void appendDistinctSortValue(final BsonValue value, final StringBuilder builder) {
+        if (value == null || value.isNull()) {
+            builder.append("NULL:null");
+            return;
+        }
+        builder.append(value.getBsonType().name()).append(':');
+        if (value.isDocument()) {
+            builder.append('{');
+            boolean first = true;
+            for (final String key : value.asDocument().keySet()) {
+                if (!first) {
+                    builder.append(',');
+                }
+                first = false;
+                builder.append(key).append('=');
+                appendDistinctSortValue(value.asDocument().get(key), builder);
+            }
+            builder.append('}');
+            return;
+        }
+        if (value.isArray()) {
+            builder.append('[');
+            for (int index = 0; index < value.asArray().size(); index++) {
+                if (index > 0) {
+                    builder.append(',');
+                }
+                appendDistinctSortValue(value.asArray().get(index), builder);
+            }
+            builder.append(']');
+            return;
+        }
+        builder.append(value);
     }
 
     private static void resetDatabase(MongoDatabase database) {
