@@ -1,6 +1,6 @@
 # Roadmap
 
-Status date: 2026-02-23
+Status date: 2026-02-24
 
 This roadmap is implementation-focused and tied to testable outcomes.
 
@@ -41,6 +41,14 @@ Target outcomes:
 
 Primary measure:
 - lower mismatch/error counts in UTF and real differential runs
+
+## R3 Certification (Completed)
+
+Completed:
+- official UTF sharded differential gate on pinned spec ref
+- deterministic R3 failure-ledger gate (`failureCount=0`)
+- external canary certification gate for 3 Spring projects
+- final scorecard/support manifest publication
 
 ## Remaining Exit Criteria for R2 Sign-Off
 

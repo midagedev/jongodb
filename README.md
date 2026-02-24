@@ -10,7 +10,7 @@ The current implementation is focused on:
 
 It is not a full drop-in replacement for production MongoDB.
 
-Status snapshot (2026-02-23): active development, R2 compatibility infrastructure in place.
+Status snapshot (2026-02-24): active development, R3 certification evidence published.
 
 ## Compatibility Level (Current)
 
@@ -33,6 +33,21 @@ Recommended usage:
 Not a fit yet:
 - full MongoDB compatibility requirements
 - heavy use of advanced update operators, collation semantics, or TTL runtime behavior
+
+## R3 Certification Snapshot (2026-02-24)
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Official UTF sharded differential | PASS | Run `22332998372` |
+| R3 failure ledger | PASS | Run `22332937657` |
+| External Spring canary certification | PASS | Run `22332937633` |
+| Compatibility scorecard | PASS | `docs/COMPATIBILITY_SCORECARD.md` |
+| Support boundary manifest | Published | `docs/SUPPORT_MATRIX.md` |
+
+Certification references:
+- `docs/COMPATIBILITY_SCORECARD.md`
+- `docs/SUPPORT_MATRIX.md`
+- `docs/RELEASE_CHECKLIST.md`
 
 ## Scope
 
@@ -164,6 +179,9 @@ GitHub Actions workflow:
 
 - Usage: `docs/USAGE.md`
 - Compatibility matrix: `docs/COMPATIBILITY.md`
+- Compatibility scorecard: `docs/COMPATIBILITY_SCORECARD.md`
+- Support matrix: `docs/SUPPORT_MATRIX.md`
+- Release checklist: `docs/RELEASE_CHECKLIST.md`
 - Roadmap: `docs/ROADMAP.md`
 - Contribution guide: `CONTRIBUTING.md`
 - Research notes: `docs/research/README.md`

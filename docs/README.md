@@ -7,6 +7,9 @@ Top-level documentation:
 Runtime and compatibility:
 - `docs/USAGE.md`
 - `docs/COMPATIBILITY.md`
+- `docs/COMPATIBILITY_SCORECARD.md`
+- `docs/SUPPORT_MATRIX.md`
+- `docs/RELEASE_CHECKLIST.md`
 - `docs/ROADMAP.md`
 
 Research and design notes:
