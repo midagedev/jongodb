@@ -45,6 +45,11 @@ try {
   );
   scenarioResults.push(await runScenario("mongoose.crud", () => mongooseCrud(uri)));
   scenarioResults.push(
+    await runScenario("mongoose.transaction.commit", () =>
+      mongooseTransactionCommit(uri)
+    )
+  );
+  scenarioResults.push(
     await runScenario("mongoose.transaction.rollback", () =>
       mongooseTransactionRollback(uri)
     )
@@ -201,6 +206,43 @@ async function mongooseTransactionRollback(uri) {
     const found = await Model.findById("mongoose-tx-1").lean().exec();
     if (found !== null) {
       throw new Error("Mongoose transaction rollback did not rollback.");
+    }
+  } finally {
+    await connection.close();
+  }
+}
+
+async function mongooseTransactionCommit(uri) {
+  const connection = await mongoose.createConnection(uri).asPromise();
+  try {
+    const schema = new mongoose.Schema(
+      {
+        _id: String,
+        value: String,
+      },
+      { versionKey: false }
+    );
+    const Model = connection.model(
+      "MongooseTxCommitSmoke",
+      schema,
+      "mongoose_tx_commit"
+    );
+    await Model.deleteMany({});
+
+    const session = await connection.startSession();
+    try {
+      session.startTransaction();
+      await Model.create([{ _id: "mongoose-tx-commit-1", value: "committed" }], {
+        session,
+      });
+      await session.commitTransaction();
+    } finally {
+      await session.endSession();
+    }
+
+    const found = await Model.findById("mongoose-tx-commit-1").lean().exec();
+    if (found?.value !== "committed") {
+      throw new Error("Mongoose transaction commit did not persist document.");
     }
   } finally {
     await connection.close();
