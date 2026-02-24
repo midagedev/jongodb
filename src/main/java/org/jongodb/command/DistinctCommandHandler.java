@@ -5,8 +5,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.bson.BsonArray;
+import org.bson.BsonBoolean;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
+import org.bson.BsonInt32;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
 import org.bson.BsonValue;
 
 public final class DistinctCommandHandler implements CommandHandler {
@@ -130,10 +134,52 @@ public final class DistinctCommandHandler implements CommandHandler {
     }
 
     private static String dedupeKey(final BsonValue value) {
+        final StringBuilder builder = new StringBuilder();
+        appendCanonicalValue(value, builder);
+        return builder.toString();
+    }
+
+    private static void appendCanonicalValue(final BsonValue value, final StringBuilder builder) {
         if (value == null) {
-            return "<null>";
+            builder.append("NULL:null");
+            return;
         }
-        return value.getBsonType().name() + ":" + value;
+        builder.append(value.getBsonType().name()).append(':');
+        switch (value.getBsonType()) {
+            case STRING -> builder.append(((BsonString) value).getValue());
+            case INT32 -> builder.append(((BsonInt32) value).getValue());
+            case INT64 -> builder.append(((BsonInt64) value).getValue());
+            case DOUBLE -> builder.append(Double.toString(((BsonDouble) value).getValue()));
+            case BOOLEAN -> builder.append(((BsonBoolean) value).getValue());
+            case DOCUMENT -> appendCanonicalDocument(value.asDocument(), builder);
+            case ARRAY -> appendCanonicalArray(value.asArray(), builder);
+            default -> builder.append(value);
+        }
+    }
+
+    private static void appendCanonicalDocument(final BsonDocument document, final StringBuilder builder) {
+        builder.append('{');
+        boolean first = true;
+        for (final String key : document.keySet()) {
+            if (!first) {
+                builder.append(',');
+            }
+            first = false;
+            builder.append(key).append('=');
+            appendCanonicalValue(document.get(key), builder);
+        }
+        builder.append('}');
+    }
+
+    private static void appendCanonicalArray(final BsonArray array, final StringBuilder builder) {
+        builder.append('[');
+        for (int index = 0; index < array.size(); index++) {
+            if (index > 0) {
+                builder.append(',');
+            }
+            appendCanonicalValue(array.get(index), builder);
+        }
+        builder.append(']');
     }
 
     private static String[] splitPath(final String key) {
