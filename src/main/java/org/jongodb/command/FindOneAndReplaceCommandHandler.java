@@ -63,6 +63,16 @@ public final class FindOneAndReplaceCommandHandler implements CommandHandler {
             sort = sortValue.asDocument();
         }
 
+        final BsonValue projectionValue = command.get("projection");
+        final BsonDocument projection;
+        if (projectionValue == null) {
+            projection = null;
+        } else if (!projectionValue.isDocument()) {
+            return CommandErrors.typeMismatch("projection must be a document");
+        } else {
+            projection = projectionValue.asDocument();
+        }
+
         final BsonValue upsertValue = command.get("upsert");
         final boolean upsert;
         if (upsertValue == null) {
@@ -88,6 +98,9 @@ public final class FindOneAndReplaceCommandHandler implements CommandHandler {
                 .append("upsert", BsonBoolean.valueOf(upsert));
         if (sort != null) {
             translatedFindAndModify.append("sort", sort);
+        }
+        if (projection != null) {
+            translatedFindAndModify.append("fields", projection);
         }
 
         appendIfPresent(command, translatedFindAndModify, "hint");

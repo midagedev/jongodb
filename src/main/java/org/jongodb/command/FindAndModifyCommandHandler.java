@@ -1,7 +1,9 @@
 package org.jongodb.command;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.bson.BsonBoolean;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
@@ -62,6 +64,22 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             sort = sortValue.asDocument();
         }
 
+        final BsonValue fieldsValue = command.containsKey("fields")
+                ? command.get("fields")
+                : command.get("projection");
+        final ProjectionSpec projectionSpec;
+        if (fieldsValue == null) {
+            projectionSpec = ProjectionSpec.none();
+        } else if (!fieldsValue.isDocument()) {
+            return CommandErrors.typeMismatch("fields must be a document");
+        } else {
+            try {
+                projectionSpec = parseProjectionSpec(fieldsValue.asDocument());
+            } catch (final IllegalArgumentException exception) {
+                return CommandErrors.badValue(exception.getMessage());
+            }
+        }
+
         final BsonValue updateValue = command.get("update");
         if (!remove && (updateValue == null || !updateValue.isDocument())) {
             return CommandErrors.typeMismatch("update must be a document");
@@ -79,9 +97,9 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
 
         try {
             if (remove) {
-                return handleRemove(database, collection, selected);
+                return handleRemove(database, collection, selected, projectionSpec);
             }
-            return handleUpdate(database, collection, query, update, selected, upsert, returnNew);
+            return handleUpdate(database, collection, query, update, selected, upsert, returnNew, projectionSpec);
         } catch (final DuplicateKeyException exception) {
             return CommandErrors.duplicateKey(exception.getMessage());
         } catch (final IllegalArgumentException exception) {
@@ -92,7 +110,8 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
     private BsonDocument handleRemove(
             final String database,
             final String collection,
-            final BsonDocument selected) {
+            final BsonDocument selected,
+            final ProjectionSpec projectionSpec) {
         if (selected == null) {
             return successResponse(0, false, null, null);
         }
@@ -101,7 +120,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
                 database,
                 collection,
                 List.of(new CommandStore.DeleteRequest(singleDocumentFilter(selected), 1)));
-        final BsonDocument value = deleted > 0 ? selected : null;
+        final BsonDocument value = deleted > 0 ? applyProjection(selected, projectionSpec) : null;
         return successResponse(deleted > 0 ? 1 : 0, false, null, value);
     }
 
@@ -112,14 +131,16 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             final BsonDocument update,
             final BsonDocument selected,
             final boolean upsert,
-            final boolean returnNew) {
+            final boolean returnNew,
+            final ProjectionSpec projectionSpec) {
         if (selected != null) {
             final BsonDocument oneFilter = singleDocumentFilter(selected);
             final CommandStore.UpdateResult result = store.update(
                     database,
                     collection,
                     List.of(new CommandStore.UpdateRequest(oneFilter, update, false, false)));
-            final BsonDocument value = returnNew ? firstMatch(database, collection, oneFilter) : selected;
+            final BsonDocument selectedValue = returnNew ? firstMatch(database, collection, oneFilter) : selected;
+            final BsonDocument value = applyProjection(selectedValue, projectionSpec);
             return successResponse(result.matchedCount() > 0 ? 1 : 0, result.matchedCount() > 0, null, value);
         }
 
@@ -141,6 +162,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             } else {
                 value = firstMatch(database, collection, query);
             }
+            value = applyProjection(value, projectionSpec);
         }
 
         return successResponse(upsertedId == null ? 0 : 1, false, upsertedId, value);
@@ -355,6 +377,159 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             return (long) doubleValue;
         }
         return null;
+    }
+
+    private static ProjectionSpec parseProjectionSpec(final BsonDocument projectionDocument) {
+        if (projectionDocument.isEmpty()) {
+            return ProjectionSpec.none();
+        }
+
+        final Set<String> includePaths = new LinkedHashSet<>();
+        final Set<String> excludePaths = new LinkedHashSet<>();
+        boolean includeId = true;
+
+        for (final String field : projectionDocument.keySet()) {
+            final ProjectionFlag flag = normalizeProjectionFlag(projectionDocument.get(field));
+            if ("_id".equals(field)) {
+                includeId = flag.include();
+                continue;
+            }
+            if (flag.include()) {
+                includePaths.add(field);
+            } else {
+                excludePaths.add(field);
+            }
+        }
+
+        if (!includePaths.isEmpty() && !excludePaths.isEmpty()) {
+            throw new IllegalArgumentException("projection cannot mix inclusion and exclusion except for _id");
+        }
+        if (!includePaths.isEmpty()) {
+            return ProjectionSpec.include(includePaths, includeId);
+        }
+        if (!excludePaths.isEmpty()) {
+            return ProjectionSpec.exclude(excludePaths, includeId);
+        }
+        return ProjectionSpec.none(includeId);
+    }
+
+    private static ProjectionFlag normalizeProjectionFlag(final BsonValue value) {
+        if (value == null) {
+            throw new IllegalArgumentException("projection values must be 0 or 1");
+        }
+        if (value.isBoolean()) {
+            return new ProjectionFlag(value.asBoolean().getValue());
+        }
+        final Long parsed = readIntegralLong(value);
+        if (parsed == null || (parsed != 0L && parsed != 1L)) {
+            throw new IllegalArgumentException("projection values must be 0 or 1");
+        }
+        return new ProjectionFlag(parsed == 1L);
+    }
+
+    private static BsonDocument applyProjection(final BsonDocument value, final ProjectionSpec projectionSpec) {
+        if (value == null) {
+            return null;
+        }
+        if (projectionSpec.noProjection()) {
+            return value;
+        }
+
+        if (projectionSpec.includeMode()) {
+            final BsonDocument projected = new BsonDocument();
+            if (projectionSpec.includeId()) {
+                final BsonValue id = value.get("_id");
+                if (id != null) {
+                    projected.put("_id", id);
+                }
+            }
+            for (final String includePath : projectionSpec.paths()) {
+                final BsonValue projectedValue = resolveProjectionPath(value, includePath);
+                if (projectedValue != null) {
+                    setProjectionPath(projected, includePath, projectedValue);
+                }
+            }
+            if (!projectionSpec.includeId()) {
+                projected.remove("_id");
+            }
+            return projected;
+        }
+
+        final BsonDocument projected = value.clone();
+        for (final String excludedPath : projectionSpec.paths()) {
+            removeProjectionPath(projected, excludedPath);
+        }
+        if (!projectionSpec.includeId()) {
+            projected.remove("_id");
+        }
+        return projected;
+    }
+
+    private static BsonValue resolveProjectionPath(final BsonDocument source, final String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        final String[] segments = path.split("\\.");
+        BsonValue current = source;
+        for (final String segment : segments) {
+            if (current == null || !current.isDocument()) {
+                return null;
+            }
+            current = current.asDocument().get(segment);
+        }
+        return current;
+    }
+
+    private static void setProjectionPath(final BsonDocument target, final String path, final BsonValue value) {
+        final String[] segments = path.split("\\.");
+        BsonDocument current = target;
+        for (int index = 0; index < segments.length - 1; index++) {
+            final String segment = segments[index];
+            final BsonValue existing = current.get(segment);
+            if (existing != null && !existing.isDocument()) {
+                return;
+            }
+            if (existing == null) {
+                final BsonDocument child = new BsonDocument();
+                current.put(segment, child);
+                current = child;
+            } else {
+                current = existing.asDocument();
+            }
+        }
+        current.put(segments[segments.length - 1], value);
+    }
+
+    private static void removeProjectionPath(final BsonDocument target, final String path) {
+        final String[] segments = path.split("\\.");
+        BsonDocument current = target;
+        for (int index = 0; index < segments.length - 1; index++) {
+            final BsonValue next = current.get(segments[index]);
+            if (next == null || !next.isDocument()) {
+                return;
+            }
+            current = next.asDocument();
+        }
+        current.remove(segments[segments.length - 1]);
+    }
+
+    private record ProjectionFlag(boolean include) {}
+    private record ProjectionSpec(Set<String> paths, boolean includeMode, boolean includeId, boolean noProjection) {
+        private static ProjectionSpec include(final Set<String> paths, final boolean includeId) {
+            return new ProjectionSpec(Set.copyOf(paths), true, includeId, false);
+        }
+
+        private static ProjectionSpec exclude(final Set<String> paths, final boolean includeId) {
+            return new ProjectionSpec(Set.copyOf(paths), false, includeId, false);
+        }
+
+        private static ProjectionSpec none() {
+            return none(true);
+        }
+
+        private static ProjectionSpec none(final boolean includeId) {
+            return new ProjectionSpec(Set.of(), false, includeId, true);
+        }
     }
 
     private record SortKey(String field, int direction) {}

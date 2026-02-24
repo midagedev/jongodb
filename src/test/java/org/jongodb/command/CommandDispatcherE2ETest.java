@@ -705,6 +705,34 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void findOneAndUpdateCommandSupportsProjectionWithNestedInclude() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"email\":\"a@example.com\",\"profile\":{\"city\":\"seoul\",\"zip\":\"123\"}}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"update\":{\"$set\":{\"name\":\"after\"}},\"returnDocument\":\"after\",\"projection\":{\"name\":1,\"profile.city\":1,\"_id\":0}}"));
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonDocument value = response.getDocument("value");
+        assertTrue(!value.containsKey("_id"));
+        assertEquals("after", value.getString("name").getValue());
+        assertTrue(!value.containsKey("email"));
+        assertEquals("seoul", value.getDocument("profile").getString("city").getValue());
+        assertTrue(!value.getDocument("profile").containsKey("zip"));
+    }
+
+    @Test
+    void findOneAndUpdateCommandRejectsMixedProjectionModes() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"email\":\"a@example.com\"}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndUpdate\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"update\":{\"$set\":{\"name\":\"after\"}},\"projection\":{\"name\":1,\"email\":0}}"));
+        assertCommandError(response, "BadValue");
+    }
+
+    @Test
     void findOneAndUpdateCommandRejectsInvalidPayloadShapes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
 
@@ -782,6 +810,23 @@ class CommandDispatcherE2ETest {
         assertEquals(
                 "created",
                 response.getDocument("value").getString("name").getValue());
+    }
+
+    @Test
+    void findOneAndReplaceCommandSupportsProjectionExcludePaths() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"before\",\"email\":\"a@example.com\",\"profile\":{\"city\":\"seoul\",\"zip\":\"123\"}}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findOneAndReplace\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1},\"replacement\":{\"name\":\"after\",\"email\":\"b@example.com\",\"profile\":{\"city\":\"busan\",\"zip\":\"999\"}},\"returnDocument\":\"after\",\"projection\":{\"email\":0,\"profile.zip\":0}}"));
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonDocument value = response.getDocument("value");
+        assertEquals(1, value.getInt32("_id").getValue());
+        assertEquals("after", value.getString("name").getValue());
+        assertTrue(!value.containsKey("email"));
+        assertEquals("busan", value.getDocument("profile").getString("city").getValue());
+        assertTrue(!value.getDocument("profile").containsKey("zip"));
     }
 
     @Test
