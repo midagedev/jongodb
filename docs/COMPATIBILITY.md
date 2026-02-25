@@ -1,12 +1,13 @@
 # Compatibility Matrix
 
-Status date: 2026-02-24
+Status date: 2026-02-25
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
 Certification context:
 - final scorecard: `docs/COMPATIBILITY_SCORECARD.md`
 - support boundary: `docs/SUPPORT_MATRIX.md`
+- complex-query certification: `docs/COMPLEX_QUERY_CERTIFICATION.md`
 - release sign-off checklist: `docs/RELEASE_CHECKLIST.md`
 
 ## Command-Level Compatibility
@@ -46,6 +47,7 @@ Implemented operators:
 - Regex: `$regex` + `$options`, pattern literals
 - Logical: `$and`, `$or`, `$nor`, top-level `$not`, field-level `$not`
 - Expression: top-level `$expr` subset
+- Positional dotted paths: array-index path resolution (for example `items.0.sku`, `$expr` path `metrics.0`)
 
 `$expr` subset currently includes:
 - comparison: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`

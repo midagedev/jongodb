@@ -255,6 +255,33 @@ tasks.register<JavaExec>("utfCorpusEvidence") {
     }
 }
 
+tasks.register<JavaExec>("complexQueryCertificationEvidence") {
+    group = "verification"
+    description = "Runs canonical complex-query certification pack and enforces gate policy."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.ComplexQueryCertificationRunner")
+
+    val outputDir = (findProperty("complexQueryOutputDir") as String?)
+        ?: "build/reports/complex-query-certification"
+    val seed = (findProperty("complexQuerySeed") as String?) ?: "complex-query-cert-v1"
+    val patternLimit = (findProperty("complexQueryPatternLimit") as String?)?.trim()
+    val mongoUri = (findProperty("complexQueryMongoUri") as String?)
+        ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
+    val failOnGate = (findProperty("complexQueryFailOnGate") as String?)?.toBoolean() ?: true
+
+    args(
+        "--output-dir=$outputDir",
+        "--seed=$seed",
+        if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
+    )
+    if (!patternLimit.isNullOrBlank()) {
+        args("--pattern-limit=$patternLimit")
+    }
+    if (mongoUri.isNotBlank()) {
+        args("--mongo-uri=$mongoUri")
+    }
+}
+
 tasks.register<JavaExec>("replayFailureBundle") {
     group = "verification"
     description = "Replays one deterministic failure bundle by failure-id."
