@@ -120,6 +120,25 @@ class InMemoryCollectionStoreTest {
     }
 
     @Test
+    void findDoesNotMutateCallerFilterDocument() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(Arrays.asList(
+                new Document("_id", 1).append("name", "Ada").append("role", "user"),
+                new Document("_id", 2).append("name", "Linus").append("role", "admin")));
+
+        Document filter = new Document("$or", List.of(
+                new Document("role", "user"),
+                new Document("name", "Missing")));
+        Document before = Document.parse(filter.toJson());
+
+        List<Document> filtered = store.find(filter);
+
+        assertEquals(1, filtered.size());
+        assertEquals(1, filtered.get(0).getInteger("_id"));
+        assertEquals(before, filter);
+    }
+
+    @Test
     void insertManyAppendsToExistingCollectionState() {
         CollectionStore store = new InMemoryCollectionStore();
 
