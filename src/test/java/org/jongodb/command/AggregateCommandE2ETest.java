@@ -158,6 +158,80 @@ class AggregateCommandE2ETest {
     }
 
     @Test
+    void aggregateCommandSupportsTerminalOutStageSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "alice", "active": true},
+                    {"_id": 2, "name": "bob", "active": false},
+                    {"_id": 3, "name": "carol", "active": true}
+                  ]
+                }
+                """));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "archive",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 100, "name": "legacy"}
+                  ]
+                }
+                """));
+
+        final BsonDocument aggregateResponse = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "aggregate": "users",
+                  "$db": "app",
+                  "pipeline": [
+                    {"$match": {"active": true}},
+                    {"$project": {"_id": 1, "name": 1}},
+                    {"$out": "archive"}
+                  ],
+                  "cursor": {}
+                }
+                """));
+        assertEquals(1.0, aggregateResponse.get("ok").asNumber().doubleValue());
+        assertEquals(0, aggregateResponse.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument archiveFindResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"archive\",\"$db\":\"app\",\"filter\":{},\"sort\":{\"_id\":1}}"));
+        assertEquals(1.0, archiveFindResponse.get("ok").asNumber().doubleValue());
+        final BsonArray archiveDocuments = archiveFindResponse.getDocument("cursor").getArray("firstBatch");
+        assertEquals(2, archiveDocuments.size());
+        assertEquals(1, archiveDocuments.get(0).asDocument().getInt32("_id").getValue());
+        assertEquals("alice", archiveDocuments.get(0).asDocument().getString("name").getValue());
+        assertEquals(3, archiveDocuments.get(1).asDocument().getInt32("_id").getValue());
+        assertEquals("carol", archiveDocuments.get(1).asDocument().getString("name").getValue());
+    }
+
+    @Test
+    void aggregateCommandRejectsNonTerminalOutStage() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alpha\"}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "aggregate": "users",
+                  "$db": "app",
+                  "pipeline": [
+                    {"$out": "archive"},
+                    {"$match": {"_id": 1}}
+                  ],
+                  "cursor": {}
+                }
+                """));
+        assertCommandError(response, 238, "NotImplemented");
+    }
+
+    @Test
     void aggregateCommandRejectsInvalidPayloadShapes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(

@@ -407,7 +407,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksKnownUnsupportedAggregationFeaturesAsUnsupported() throws IOException {
+    void importsOutStageButKeepsMergeAndBypassValidationUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-aggregation.json"),
                 """
@@ -456,8 +456,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(3, result.unsupportedCount());
+        assertEquals(1, result.importedCount());
+        assertEquals(2, result.unsupportedCount());
+        final Scenario outScenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, outScenario.commands().size());
+        assertEquals("aggregate", outScenario.commands().get(0).commandName());
         assertTrue(result.skippedCases().stream().allMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
     }

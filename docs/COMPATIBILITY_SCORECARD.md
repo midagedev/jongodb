@@ -79,6 +79,7 @@ Notes:
 - UTF importer now supports subset adapters for `runCommand` and `clientBulkWrite` (`#229`, `#231`).
 - `arrayFilters` subset and collation semantic subset landed (`#232`, `#235`); rerunning the ledger should reduce/update related unsupported buckets.
 - aggregation stage alias subset landed for `$set`/`$unset`/`$replaceWith` (`#265`, `#266`, `#267`); rerunning the ledger should narrow generic aggregate-stage unsupported buckets.
+- aggregation `$out` terminal subset landed (`#269`); rerunning the ledger should reduce aggregate-stage unsupported buckets tied to `$out` pipeline coverage.
 - The counts above are from the latest frozen snapshot; rerunning the ledger will shift those categories toward narrower unsupported reasons (for example unsupported command names/options).
 - Profile context matters: this snapshot is strict-profile (`failPoint` policy exclusion enabled). Compat-profile runs track failpoint categories separately.
 - Deployment profile context matters: standalone and single-node-replica-set runs may surface different compatibility deltas in handshake/read-preference/concern paths.
@@ -110,7 +111,8 @@ Notes:
 - `#265`: aggregate stage alias subset (`$set`/`$unset`) - completed.
 - `#266`: `$replaceWith` stage subset for root replacement - completed.
 - `#267`: aggregation stage subset regression + scorecard mapping update - completed.
-- `#104`: aggregate-stage unsupported reduction - remaining (advanced/non-alias stages).
+- `#269`: aggregation non-alias subset expansion (`$out` terminal subset) - completed.
+- `#104`: aggregate-stage unsupported reduction - remaining (`$merge`, `$listLocalSessions`, and advanced/non-alias stages).
 
 ## Reproduction
 
