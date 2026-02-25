@@ -345,6 +345,7 @@ final class ScenarioBsonCodec {
         appendIfPresent(source, translated, "upsert");
         appendIfPresent(source, translated, "hint");
         appendIfPresent(source, translated, "collation");
+        appendIfPresent(source, translated, "arrayFilters");
         copyFields(
                 source,
                 translated,

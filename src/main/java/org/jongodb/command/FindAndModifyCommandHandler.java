@@ -151,7 +151,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             final BsonDocument selected,
             final ProjectionSpec projectionSpec) {
         if (selected == null) {
-            return successResponse(0, false, null, null);
+            return removeSuccessResponse(0, null);
         }
 
         final int deleted = store.delete(
@@ -159,7 +159,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
                 collection,
                 List.of(new CommandStore.DeleteRequest(singleDocumentFilter(selected), 1)));
         final BsonDocument value = deleted > 0 ? applyProjection(selected, projectionSpec) : null;
-        return successResponse(deleted > 0 ? 1 : 0, false, null, value);
+        return removeSuccessResponse(deleted > 0 ? 1 : 0, value);
     }
 
     private BsonDocument handleUpdate(
@@ -368,6 +368,13 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
 
         return new BsonDocument()
                 .append("lastErrorObject", lastErrorObject)
+                .append("value", value == null ? BsonNull.VALUE : value)
+                .append("ok", new BsonDouble(1.0));
+    }
+
+    private static BsonDocument removeSuccessResponse(final int n, final BsonDocument value) {
+        return new BsonDocument()
+                .append("lastErrorObject", new BsonDocument("n", new BsonInt32(n)))
                 .append("value", value == null ? BsonNull.VALUE : value)
                 .append("ok", new BsonDouble(1.0));
     }

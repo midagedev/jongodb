@@ -133,6 +133,8 @@ class ScenarioBsonCodecTest {
                 Map.of("_id", 1),
                 "update",
                 Map.of("$set", Map.of("name", "after")),
+                "arrayFilters",
+                java.util.List.of(Map.of("elem.name", "before")),
                 "returnDocument",
                 "after"
             )
@@ -142,6 +144,12 @@ class ScenarioBsonCodecTest {
 
         assertEquals("users", commandDocument.getString("findAndModify").getValue());
         assertEquals(1, commandDocument.getDocument("query").getInt32("_id").getValue());
+        assertTrue(commandDocument.containsKey("arrayFilters"));
+        assertEquals("before", commandDocument.getArray("arrayFilters")
+                .get(0)
+                .asDocument()
+                .getString("elem.name")
+                .getValue());
         assertTrue(commandDocument.getBoolean("new").getValue());
     }
 }

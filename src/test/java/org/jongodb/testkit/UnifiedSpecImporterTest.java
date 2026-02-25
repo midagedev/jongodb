@@ -122,6 +122,71 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void skipsFileLevelRunOnRequirementsEntries() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-on-file-level.json"),
+                """
+                {
+                  "runOnRequirements": [{"minServerVersion": "8.0"}],
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "find gated by file-level runOn",
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        assertEquals(UnifiedSpecImporter.SkipKind.SKIPPED, result.skippedCases().get(0).kind());
+        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not evaluated"));
+    }
+
+    @Test
+    void evaluatesFileLevelRunOnRequirementsWhenRuntimeContextIsProvided() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-on-evaluated.json"),
+                """
+                {
+                  "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["replicaset"]}],
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "find gated by evaluated runOn",
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult matched = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.4", "replicaset", false, false));
+        assertEquals(1, matched.importedCount());
+        assertEquals(0, matched.skippedCount());
+
+        final UnifiedSpecImporter.ImportResult unmatched = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("6.0.14", "single", false, false));
+        assertEquals(0, unmatched.importedCount());
+        assertEquals(1, unmatched.skippedCount());
+        assertTrue(unmatched.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
     void importsBulkWriteOperationWhenOrderedIsSupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("bulk-write.json"),
@@ -304,6 +369,41 @@ class UnifiedSpecImporterTest {
         assertEquals(1, firstBatch.size());
         assertEquals("after", firstBatch.get(0).get("name"));
         assertTrue(!firstBatch.get(0).containsKey("legacy"));
+    }
+
+    @Test
+    void marksUnsupportedUpdatePipelineStagesAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("update-pipeline-unsupported.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "update pipeline uses unsupported stages",
+                      "operations": [
+                        {
+                          "name": "updateOne",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$project": {"x": 1}}, {"$addFields": {"foo": 1}}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF update pipeline form outside subset")));
     }
 
     @Test
