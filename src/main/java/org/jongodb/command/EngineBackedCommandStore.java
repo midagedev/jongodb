@@ -122,11 +122,11 @@ public final class EngineBackedCommandStore implements CommandStore {
             convertedPipeline.add(toDocument(Objects.requireNonNull(stage, "pipeline entries must not be null")));
         }
 
-        final List<Document> sourceDocuments = collectionStore.findAll();
+        final Iterable<Document> sourceDocuments = collectionStore.scanAll();
         final List<Document> aggregatedDocuments = AggregationPipeline.execute(
                 sourceDocuments,
                 List.copyOf(convertedPipeline),
-                foreignCollectionName -> engineStore.collection(database, foreignCollectionName).findAll(),
+                foreignCollectionName -> engineStore.collection(database, foreignCollectionName).scanAll(),
                 collation);
         final List<BsonDocument> converted = new ArrayList<>(aggregatedDocuments.size());
         for (final Document document : aggregatedDocuments) {

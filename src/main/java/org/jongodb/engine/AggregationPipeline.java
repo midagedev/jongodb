@@ -12,7 +12,7 @@ import org.bson.Document;
 public final class AggregationPipeline {
     @FunctionalInterface
     public interface CollectionResolver {
-        List<Document> resolve(String collectionName);
+        Iterable<Document> resolve(String collectionName);
     }
 
     private static final CollectionResolver UNSUPPORTED_COLLECTION_RESOLVER =
@@ -28,8 +28,19 @@ public final class AggregationPipeline {
         return execute(source, pipeline, UNSUPPORTED_COLLECTION_RESOLVER, CollationSupport.Config.simple());
     }
 
+    public static List<Document> execute(final Iterable<Document> source, final List<Document> pipeline) {
+        return execute(source, pipeline, UNSUPPORTED_COLLECTION_RESOLVER, CollationSupport.Config.simple());
+    }
+
     public static List<Document> execute(
             final List<Document> source,
+            final List<Document> pipeline,
+            final CollectionResolver collectionResolver) {
+        return execute(source, pipeline, collectionResolver, CollationSupport.Config.simple());
+    }
+
+    public static List<Document> execute(
+            final Iterable<Document> source,
             final List<Document> pipeline,
             final CollectionResolver collectionResolver) {
         return execute(source, pipeline, collectionResolver, CollationSupport.Config.simple());
@@ -40,18 +51,20 @@ public final class AggregationPipeline {
             final List<Document> pipeline,
             final CollectionResolver collectionResolver,
             final CollationSupport.Config collation) {
+        return execute((Iterable<Document>) source, pipeline, collectionResolver, collation);
+    }
+
+    public static List<Document> execute(
+            final Iterable<Document> source,
+            final List<Document> pipeline,
+            final CollectionResolver collectionResolver,
+            final CollationSupport.Config collation) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(pipeline, "pipeline");
         Objects.requireNonNull(collectionResolver, "collectionResolver");
         Objects.requireNonNull(collation, "collation");
 
-        List<Document> working = new ArrayList<>(source.size());
-        for (final Document document : source) {
-            if (document == null) {
-                throw new IllegalArgumentException("source documents must not contain null");
-            }
-            working.add(DocumentCopies.copy(document));
-        }
+        List<Document> working = copyDocuments(source, "source documents must not contain null");
 
         for (final Document stage : pipeline) {
             if (stage == null) {
@@ -992,9 +1005,11 @@ public final class AggregationPipeline {
         return List.copyOf(pipeline);
     }
 
-    private static List<Document> copyDocuments(final List<Document> source, final String nullMessage) {
+    private static List<Document> copyDocuments(final Iterable<Document> source, final String nullMessage) {
         Objects.requireNonNull(source, "source");
-        final List<Document> copied = new ArrayList<>(source.size());
+        final List<Document> copied = source instanceof List<?> listSource
+                ? new ArrayList<>(listSource.size())
+                : new ArrayList<>();
         for (final Document document : source) {
             if (document == null) {
                 throw new IllegalArgumentException(nullMessage);

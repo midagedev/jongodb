@@ -15,6 +15,14 @@ public interface CollectionStore {
 
     List<Document> findAll();
 
+    /**
+     * Streaming-style namespace scan hook for aggregate/read paths that should avoid eager full-copy materialization.
+     * Implementations may return a lazy iterable. Returned documents are expected to be safe for downstream mutation.
+     */
+    default Iterable<Document> scanAll() {
+        return findAll();
+    }
+
     List<Document> find(Document filter);
 
     default List<Document> find(final Document filter, final CollationSupport.Config collation) {
