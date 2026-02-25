@@ -8,6 +8,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -196,6 +197,27 @@ public final class InMemoryCollectionStore implements CollectionStore {
     @Override
     public synchronized List<Document> findAll() {
         return copyMatchingDocuments(new Document(), CollationSupport.Config.simple());
+    }
+
+    @Override
+    public synchronized Iterable<Document> scanAll() {
+        final List<Document> snapshot = List.copyOf(documents);
+        return () -> new Iterator<>() {
+            private int index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return index < snapshot.size();
+            }
+
+            @Override
+            public Document next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException("no more documents");
+                }
+                return DocumentCopies.copy(snapshot.get(index++));
+            }
+        };
     }
 
     @Override
