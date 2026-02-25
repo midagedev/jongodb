@@ -120,8 +120,48 @@ class AggregateCommandE2ETest {
     }
 
     @Test
+    void aggregateCommandSupportsSetUnsetAndReplaceWithStageSubsets() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "alice", "legacy": true, "profile": {"city": "Seoul", "zip": "00000"}},
+                    {"_id": 2, "name": "bob", "legacy": true, "profile": {"city": "Busan", "zip": "11111"}}
+                  ]
+                }
+                """));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "aggregate": "users",
+                  "$db": "app",
+                  "pipeline": [
+                    {"$set": {"profile.country": "KR"}},
+                    {"$unset": {"legacy": true}},
+                    {"$replaceWith": "$profile"},
+                    {"$sort": {"city": 1}}
+                  ],
+                  "cursor": {}
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray firstBatch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals(2, firstBatch.size());
+        assertEquals("Busan", firstBatch.get(0).asDocument().getString("city").getValue());
+        assertEquals("KR", firstBatch.get(0).asDocument().getString("country").getValue());
+        assertEquals("Seoul", firstBatch.get(1).asDocument().getString("city").getValue());
+    }
+
+    @Test
     void aggregateCommandRejectsInvalidPayloadShapes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alpha\"}]}"));
 
         final BsonDocument invalidPipelineType =
                 dispatcher.dispatch(BsonDocument.parse("{\"aggregate\":\"users\",\"pipeline\":{}}"));
@@ -138,6 +178,15 @@ class AggregateCommandE2ETest {
         final BsonDocument unsupportedStage = dispatcher.dispatch(
                 BsonDocument.parse("{\"aggregate\":\"users\",\"pipeline\":[{\"$foo\":{}}],\"cursor\":{}}"));
         assertCommandError(unsupportedStage, 238, "NotImplemented");
+
+        final BsonDocument invalidUnsetStage = dispatcher.dispatch(
+                BsonDocument.parse("{\"aggregate\":\"users\",\"$db\":\"app\",\"pipeline\":[{\"$unset\":1}],\"cursor\":{}}"));
+        assertCommandError(invalidUnsetStage, "BadValue");
+
+        final BsonDocument invalidReplaceWithStage = dispatcher.dispatch(
+                BsonDocument.parse(
+                        "{\"aggregate\":\"users\",\"$db\":\"app\",\"pipeline\":[{\"$replaceWith\":1}],\"cursor\":{}}"));
+        assertCommandError(invalidReplaceWithStage, "BadValue");
     }
 
     @Test
