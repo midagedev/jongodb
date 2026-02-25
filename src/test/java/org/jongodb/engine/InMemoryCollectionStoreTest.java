@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.bson.Document;
@@ -169,6 +170,27 @@ class InMemoryCollectionStoreTest {
         assertEquals("immutable", secondRead.get(0).getString("name"));
         assertEquals("Seoul", secondRead.get(0).get("nested", Document.class).getString("city"));
         assertNotSame(firstRead.get(0), secondRead.get(0));
+    }
+
+    @Test
+    void scanAllReturnsDefensiveCopiesOfStoredDocuments() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(
+                Arrays.asList(
+                        new Document("_id", 1)
+                                .append("name", "immutable")
+                                .append("nested", new Document("city", "Seoul"))));
+
+        List<Document> scanned = new ArrayList<>();
+        for (Document document : store.scanAll()) {
+            scanned.add(document);
+        }
+        scanned.get(0).put("name", "changed");
+        scanned.get(0).get("nested", Document.class).put("city", "Busan");
+
+        List<Document> secondRead = store.findAll();
+        assertEquals("immutable", secondRead.get(0).getString("name"));
+        assertEquals("Seoul", secondRead.get(0).get("nested", Document.class).getString("city"));
     }
 
     @Test
