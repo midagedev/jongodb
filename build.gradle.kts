@@ -255,6 +255,28 @@ tasks.register<JavaExec>("utfCorpusEvidence") {
     }
 }
 
+tasks.register<JavaExec>("fixtureManifestPlan") {
+    group = "verification"
+    description = "Validates fixture manifest and renders deterministic profile extraction plan."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureManifestTool")
+
+    val manifestPath = (findProperty("fixtureManifestPath") as String?)?.trim().orEmpty()
+    val profile = (findProperty("fixtureProfile") as String?)?.trim().orEmpty().ifBlank { "dev" }
+    val renderJson = (findProperty("fixturePlanJson") as String?)?.toBoolean() ?: false
+
+    doFirst {
+        if (manifestPath.isBlank()) {
+            throw GradleException("fixtureManifestPath property is required")
+        }
+    }
+
+    args("--manifest=$manifestPath", "--profile=$profile")
+    if (renderJson) {
+        args("--json")
+    }
+}
+
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {
     group = "verification"
     description = "Runs canonical complex-query certification pack and enforces gate policy."

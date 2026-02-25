@@ -8,8 +8,10 @@ All notable changes to this project are documented in this file.
 - Added declarative fixture manifest schema (`fixture-manifest.v1`) with standardized `dev`/`smoke`/`full` profile model.
 - Added fixture manifest loader/validator with path-aware aggregated validation errors.
 - Added deterministic fixture extraction planner + profile fingerprint generation.
+- Added fixture manifest CLI utility (`FixtureManifestTool`) and Gradle task (`fixtureManifestPlan`) for profile plan validation/output.
 - Added sample fixture manifest templates under `testkit/fixture/manifests`.
 - Added fixture manifest onboarding documentation (`docs/FIXTURE_MANIFEST.md`).
+- Added fixture usage/operations playbook (`docs/FIXTURE_PLAYBOOK.md`) for developer/reviewer/operator workflows.
 
 ## [0.1.3] - 2026-02-24
 
