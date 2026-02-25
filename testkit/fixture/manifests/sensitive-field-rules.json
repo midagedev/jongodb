@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "fixture-manifest.v1",
+  "source": {
+    "uriAlias": "prod-identity"
+  },
+  "profiles": {
+    "dev": {
+      "refreshMode": "full",
+      "fieldRules": {
+        "exclude": [
+          "pii.ssn",
+          "pii.passport",
+          "credentials.passwordHash",
+          "credentials.twoFactorSecret"
+        ]
+      },
+      "collections": [
+        {
+          "database": "identity",
+          "collection": "customer_profile",
+          "sort": {
+            "_id": 1
+          },
+          "limit": 3000,
+          "fieldRules": {
+            "include": [
+              "_id",
+              "tenantId",
+              "status",
+              "profile",
+              "pii.email",
+              "pii.phone"
+            ]
+          }
+        }
+      ]
+    },
+    "smoke": {
+      "refreshMode": "full",
+      "fieldRules": {
+        "exclude": [
+          "pii.ssn",
+          "pii.passport",
+          "credentials.passwordHash",
+          "credentials.twoFactorSecret"
+        ]
+      },
+      "collections": [
+        {
+          "database": "identity",
+          "collection": "customer_profile",
+          "sort": {
+            "_id": 1
+          },
+          "sample": {
+            "size": 100,
+            "seed": "identity-smoke-v1"
+          },
+          "fieldRules": {
+            "include": [
+              "_id",
+              "tenantId",
+              "status",
+              "profile",
+              "pii.email"
+            ]
+          }
+        }
+      ]
+    },
+    "full": {
+      "refreshMode": "incremental",
+      "fieldRules": {
+        "exclude": [
+          "pii.ssn",
+          "pii.passport",
+          "credentials.passwordHash",
+          "credentials.twoFactorSecret"
+        ]
+      },
+      "collections": [
+        {
+          "database": "identity",
+          "collection": "customer_profile",
+          "filter": {
+            "updatedAt": {
+              "$gte": "2025-01-01T00:00:00Z"
+            }
+          },
+          "sort": {
+            "updatedAt": 1,
+            "_id": 1
+          },
+          "fieldRules": {
+            "include": [
+              "_id",
+              "tenantId",
+              "status",
+              "profile",
+              "pii.email",
+              "pii.phone"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

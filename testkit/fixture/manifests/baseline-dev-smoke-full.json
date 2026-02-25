@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "fixture-manifest.v1",
+  "source": {
+    "uriAlias": "prod-main"
+  },
+  "profiles": {
+    "dev": {
+      "refreshMode": "full",
+      "fieldRules": {
+        "exclude": [
+          "auditTrail",
+          "debugMetadata"
+        ]
+      },
+      "collections": [
+        {
+          "database": "app",
+          "collection": "users",
+          "filter": {
+            "status": "ACTIVE"
+          },
+          "projection": {
+            "_id": 1,
+            "email": 1,
+            "profile": 1,
+            "updatedAt": 1
+          },
+          "sort": {
+            "_id": 1
+          },
+          "limit": 1000,
+          "fieldRules": {
+            "exclude": [
+              "passwordHash",
+              "tokenHistory"
+            ]
+          }
+        },
+        {
+          "database": "app",
+          "collection": "orders",
+          "filter": {
+            "state": {
+              "$in": [
+                "PAID",
+                "SHIPPED"
+              ]
+            }
+          },
+          "sort": {
+            "_id": 1
+          },
+          "limit": 1500
+        }
+      ]
+    },
+    "smoke": {
+      "refreshMode": "full",
+      "fieldRules": {
+        "exclude": [
+          "auditTrail",
+          "debugMetadata"
+        ]
+      },
+      "collections": [
+        {
+          "database": "app",
+          "collection": "users",
+          "projection": {
+            "_id": 1,
+            "email": 1,
+            "updatedAt": 1
+          },
+          "sort": {
+            "updatedAt": -1,
+            "_id": 1
+          },
+          "sample": {
+            "size": 50,
+            "seed": "users-smoke-v1"
+          },
+          "fieldRules": {
+            "exclude": [
+              "email"
+            ]
+          }
+        },
+        {
+          "database": "app",
+          "collection": "orders",
+          "sort": {
+            "updatedAt": -1,
+            "_id": 1
+          },
+          "sample": {
+            "size": 50,
+            "seed": "orders-smoke-v1"
+          }
+        }
+      ]
+    },
+    "full": {
+      "refreshMode": "incremental",
+      "collections": [
+        {
+          "database": "app",
+          "collection": "users",
+          "filter": {
+            "updatedAt": {
+              "$gte": "2025-01-01T00:00:00Z"
+            }
+          },
+          "projection": {
+            "_id": 1,
+            "email": 1,
+            "profile": 1,
+            "updatedAt": 1
+          },
+          "sort": {
+            "updatedAt": 1,
+            "_id": 1
+          }
+        },
+        {
+          "database": "app",
+          "collection": "orders",
+          "filter": {
+            "updatedAt": {
+              "$gte": "2025-01-01T00:00:00Z"
+            }
+          },
+          "sort": {
+            "updatedAt": 1,
+            "_id": 1
+          }
+        }
+      ]
+    }
+  }
+}

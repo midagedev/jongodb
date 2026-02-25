@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "fixture-manifest.v1",
+  "source": {
+    "uriAlias": "prod-events"
+  },
+  "profiles": {
+    "dev": {
+      "refreshMode": "incremental",
+      "collections": [
+        {
+          "database": "events",
+          "collection": "event_log",
+          "filter": {
+            "eventType": {
+              "$in": [
+                "ORDER_CREATED",
+                "ORDER_CANCELLED",
+                "PAYMENT_CAPTURED"
+              ]
+            }
+          },
+          "projection": {
+            "_id": 1,
+            "eventType": 1,
+            "aggregateId": 1,
+            "occurredAt": 1,
+            "payload": 1
+          },
+          "sort": {
+            "occurredAt": 1,
+            "_id": 1
+          },
+          "limit": 5000
+        }
+      ]
+    },
+    "smoke": {
+      "refreshMode": "incremental",
+      "collections": [
+        {
+          "database": "events",
+          "collection": "event_log",
+          "sort": {
+            "occurredAt": -1,
+            "_id": 1
+          },
+          "sample": {
+            "size": 100,
+            "seed": "event-log-smoke-v1"
+          }
+        }
+      ]
+    },
+    "full": {
+      "refreshMode": "incremental",
+      "collections": [
+        {
+          "database": "events",
+          "collection": "event_log",
+          "sort": {
+            "occurredAt": 1,
+            "_id": 1
+          }
+        },
+        {
+          "database": "events",
+          "collection": "dead_letter_queue",
+          "sort": {
+            "occurredAt": 1,
+            "_id": 1
+          }
+        }
+      ]
+    }
+  }
+}
