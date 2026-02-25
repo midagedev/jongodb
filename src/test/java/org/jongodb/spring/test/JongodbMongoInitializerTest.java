@@ -98,4 +98,41 @@ final class JongodbMongoInitializerTest {
         second.close();
         assertFalse(secondServer.isRunning());
     }
+
+    @Test
+    void resetSupportClearsDataWithoutRestartingServer() {
+        final AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        context.getEnvironment()
+                .getPropertySources()
+                .addFirst(new MapPropertySource("jongodbResetProps", java.util.Map.of("jongodb.test.database", "resetdb")));
+        new JongodbMongoInitializer().initialize(context);
+        context.refresh();
+
+        final TcpMongoServer server = context.getBean(JongodbMongoInitializer.SERVER_BEAN_NAME, TcpMongoServer.class);
+        final String uri = context.getEnvironment().getProperty("spring.data.mongodb.uri");
+        assertNotNull(uri);
+
+        try (MongoClient client = MongoClients.create(uri)) {
+            final BsonDocument insert = BsonDocument.parse(client.getDatabase("resetdb")
+                    .runCommand(BsonDocument.parse("{\"insert\":\"users\",\"documents\":[{\"_id\":1,\"name\":\"before\"}]}"))
+                    .toJson());
+            assertEquals(1.0, insert.getNumber("ok").doubleValue(), 0.0);
+
+            final BsonDocument beforeReset = BsonDocument.parse(client.getDatabase("resetdb")
+                    .runCommand(BsonDocument.parse("{\"find\":\"users\",\"filter\":{}}"))
+                    .toJson());
+            assertEquals(1, beforeReset.getDocument("cursor").getArray("firstBatch").size());
+
+            JongodbMongoResetSupport.reset(context);
+            assertTrue(server.isRunning());
+
+            final BsonDocument afterReset = BsonDocument.parse(client.getDatabase("resetdb")
+                    .runCommand(BsonDocument.parse("{\"find\":\"users\",\"filter\":{}}"))
+                    .toJson());
+            assertEquals(0, afterReset.getDocument("cursor").getArray("firstBatch").size());
+        }
+
+        context.close();
+        assertFalse(server.isRunning());
+    }
 }

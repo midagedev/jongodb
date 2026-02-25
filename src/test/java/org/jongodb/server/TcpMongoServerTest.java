@@ -142,6 +142,31 @@ final class TcpMongoServerTest {
         }
     }
 
+    @Test
+    void resetClearsDataWithoutRestartingServer() {
+        try (TcpMongoServer server = TcpMongoServer.inMemory()) {
+            server.start();
+            final int portBeforeReset = server.port();
+
+            try (MongoClient client = MongoClients.create(server.connectionString("app"))) {
+                client.getDatabase("app").runCommand(BsonDocument.parse(
+                        "{\"insert\":\"users\",\"documents\":[{\"_id\":1,\"name\":\"before\"}]}"));
+                final BsonDocument beforeReset = BsonDocument.parse(client.getDatabase("app")
+                        .runCommand(BsonDocument.parse("{\"find\":\"users\",\"filter\":{}}"))
+                        .toJson());
+                assertEquals(1, beforeReset.getDocument("cursor").getArray("firstBatch").size());
+
+                server.reset();
+                assertEquals(portBeforeReset, server.port());
+
+                final BsonDocument afterReset = BsonDocument.parse(client.getDatabase("app")
+                        .runCommand(BsonDocument.parse("{\"find\":\"users\",\"filter\":{}}"))
+                        .toJson());
+                assertEquals(0, afterReset.getDocument("cursor").getArray("firstBatch").size());
+            }
+        }
+    }
+
     private static byte[] encodeOpQueryCommand(final int requestId, final String namespace, final BsonDocument command) {
         final byte[] namespaceBytes = namespace.getBytes(StandardCharsets.UTF_8);
         final byte[] commandBytes = encodeBson(command);

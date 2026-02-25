@@ -73,6 +73,10 @@ Optional shared-server mode for multi-context suites:
 - when enabled, Spring contexts in the same JVM reuse one in-process TCP server.
 - use unique `jongodb.test.database` values per test class when sharing to avoid data bleed.
 
+Fast reset without restarting Spring context:
+- call `JongodbMongoResetSupport.reset(applicationContext)` from `@BeforeEach` or class-level hooks.
+- reset clears all databases in the backing in-memory server.
+
 ### Option C: `@DynamicPropertySource`
 
 Use `JongodbMongoDynamicPropertySupport` as a drop-in replacement pattern for many Testcontainers setups:
