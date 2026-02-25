@@ -20,12 +20,9 @@ Status date: 2026-02-25
 
 ## Current Release-Line Notes
 
-- `main` is ahead of `v0.1.4`.
+- Latest Java release tag: `v0.1.5` (run `22379241855`, commit `868bbc7`).
+- Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
 - Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
-- Current `main` rerun batch (`e222b99`) is in progress:
-  - Official Suite Sharded: run `22378205089`
-  - R3 Failure Ledger: run `22378205082`
-  - R3 External Canary: run `22378205088`
 
 ## Tagging Gate
 
@@ -60,6 +57,7 @@ Use this when publishing `@jongodb/memory-server`:
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |
 | --- | --- | --- | --- | --- |
+| `0.1.5` | `2026-02-25` | `868bbc7` | `io.github.midagedev:jongodb:0.1.5` | run `22379241855` |
 | `0.1.4` | `2026-02-24` | `e6f6bbf` | `io.github.midagedev:jongodb:0.1.4` | run `22355417610` |
 | `0.1.3` | `2026-02-24` | `61cfa03` | `io.github.midagedev:jongodb:0.1.3` | run `22341381717` |
 | `0.1.2` | `2026-02-24` | `2ace4a4` | `io.github.midagedev:jongodb:0.1.2` | run `22338690663` |

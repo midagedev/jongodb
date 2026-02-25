@@ -1,6 +1,6 @@
 {
   "name": "@jongodb/memory-server-bin-win32-x64",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Native launcher binary for @jongodb/memory-server (win32-x64).",
   "license": "Apache-2.0",
   "os": [

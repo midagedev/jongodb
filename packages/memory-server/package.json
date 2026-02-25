@@ -1,6 +1,6 @@
 {
   "name": "@jongodb/memory-server",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Node.js test runtime adapter for jongodb standalone launcher (MongoDB-compatible integration tests).",
   "keywords": [
     "mongodb",
@@ -90,9 +90,9 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "@jongodb/memory-server-bin-darwin-arm64": "0.1.0",
-    "@jongodb/memory-server-bin-linux-x64-gnu": "0.1.0",
-    "@jongodb/memory-server-bin-win32-x64": "0.1.0"
+    "@jongodb/memory-server-bin-darwin-arm64": "0.1.4",
+    "@jongodb/memory-server-bin-linux-x64-gnu": "0.1.4",
+    "@jongodb/memory-server-bin-win32-x64": "0.1.4"
   },
   "files": [
     "dist",

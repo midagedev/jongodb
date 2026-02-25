@@ -240,7 +240,7 @@ Manual fallback command:
 
 ```bash
 gradle \
-  -PpublishVersion=0.1.0 \
+  -PpublishVersion=0.1.5 \
   -PpublishGroup=io.github.midagedev \
   -PpublishArtifactId=jongodb \
   centralRelease

@@ -6,8 +6,8 @@ In-memory MongoDB-compatible backend for fast Spring integration tests.
 It supports both in-process test bootstrap and standalone TCP launcher mode.
 It is not a production MongoDB replacement.
 
-Latest release: `0.1.4`  
-Maven coordinate: `io.github.midagedev:jongodb:0.1.4`
+Latest release: `0.1.5`  
+Maven coordinate: `io.github.midagedev:jongodb:0.1.5`
 
 ## Why This Project Exists
 
@@ -60,7 +60,7 @@ Recommended strategy:
 
 ```kotlin
 dependencies {
-    testImplementation("io.github.midagedev:jongodb:0.1.4")
+    testImplementation("io.github.midagedev:jongodb:0.1.5")
 }
 ```
 
@@ -116,6 +116,7 @@ For detailed launcher usage (Java/binary runtime selection and framework example
 ## Node Adapter
 
 Node adapter package: `@jongodb/memory-server` (source under `packages/memory-server`).
+Latest npm release: `0.1.4`.
 
 Current state:
 - framework-agnostic runtime helper (`./runtime`)
