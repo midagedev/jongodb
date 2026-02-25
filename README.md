@@ -220,6 +220,7 @@ Unsupported branches are standardized progressively as:
 - Usage: `docs/USAGE.md`
 - Spring integration: `docs/SPRING_TESTING.md`
 - Fixture manifest: `docs/FIXTURE_MANIFEST.md`
+- Fixture playbook: `docs/FIXTURE_PLAYBOOK.md`
 - Compatibility boundary: `docs/COMPATIBILITY.md`
 - Complex-query certification: `docs/COMPLEX_QUERY_CERTIFICATION.md`
 - Support matrix: `docs/SUPPORT_MATRIX.md`

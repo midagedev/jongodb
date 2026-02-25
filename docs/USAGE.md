@@ -313,3 +313,9 @@ The certification gate requires:
 - at least 3 projects
 - all canaries pass
 - rollback rehearsal success for all projects
+
+## Related Docs
+
+- `docs/FIXTURE_MANIFEST.md`
+- `docs/FIXTURE_PLAYBOOK.md`
+- `docs/SPRING_TESTING.md`
