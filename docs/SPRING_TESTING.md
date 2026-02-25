@@ -73,6 +73,31 @@ Isolation caveat:
 - shared mode reuses process/port for speed, so prefer unique `jongodb.test.database` values per test class.
 - keep shared mode disabled (default) if your suite requires strict per-context process isolation.
 
+## Fast Reset API (No Context Restart)
+
+For initializer/single-hook style tests, use `JongodbMongoResetSupport` to clear in-memory state
+without rebuilding the Spring context:
+
+```java
+import org.jongodb.spring.test.JongodbMongoResetSupport;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
+
+class MyIntegrationTest {
+  @Autowired
+  ApplicationContext context;
+
+  @BeforeEach
+  void resetMongo() {
+    JongodbMongoResetSupport.reset(context);
+  }
+}
+```
+
+Reset caveats:
+- reset clears all databases in the backing in-memory server.
+- avoid concurrent tests calling reset against the same shared server unless you explicitly coordinate isolation.
+
 ## Migration from MongoDB Testcontainers
 
 ### Before (typical pattern)

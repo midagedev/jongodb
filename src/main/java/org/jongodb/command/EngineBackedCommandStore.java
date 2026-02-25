@@ -81,6 +81,14 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public void reset() {
+        if (!(engineStore instanceof InMemoryEngineStore inMemoryEngineStore)) {
+            throw new IllegalStateException("reset requires InMemoryEngineStore");
+        }
+        inMemoryEngineStore.replaceWith(new InMemoryEngineStore());
+    }
+
+    @Override
     public int insert(final String database, final String collection, final List<BsonDocument> documents) {
         Objects.requireNonNull(documents, "documents");
         final CollectionStore collectionStore = engineStore.collection(database, collection);

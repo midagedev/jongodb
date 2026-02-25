@@ -51,6 +51,13 @@ public interface CommandStore {
     default void publishTransactionSnapshot(CommandStore snapshot) {}
 
     /**
+     * Clears store state for test-only fast reset flows.
+     *
+     * <p>The default implementation is a no-op to preserve backward compatibility for lightweight test doubles.
+     */
+    default void reset() {}
+
+    /**
      * Default no-op for backward compatibility in tests/doubles that do not care about indexes.
      */
     default CreateIndexesResult createIndexes(String database, String collection, List<IndexRequest> indexes) {

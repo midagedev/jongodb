@@ -51,6 +51,7 @@ public final class TcpMongoServer implements AutoCloseable {
     private static final String DEFAULT_REPLICA_SET_NAME = "jongodb-rs0";
 
     private final CommandDispatcher dispatcher;
+    private final CommandStore commandStore;
     private final OpMsgCodec opMsgCodec = new OpMsgCodec();
     private final AtomicInteger responseRequestId = new AtomicInteger(1);
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -144,8 +145,9 @@ public final class TcpMongoServer implements AutoCloseable {
         this.serverSocket = Objects.requireNonNull(serverSocket, "serverSocket");
         this.topologyProfile = Objects.requireNonNull(topologyProfile, "topologyProfile");
         this.replicaSetName = normalizeReplicaSetName(replicaSetName);
+        this.commandStore = Objects.requireNonNull(commandStore, "commandStore");
         this.dispatcher = new CommandDispatcher(
-                Objects.requireNonNull(commandStore, "commandStore"),
+                this.commandStore,
                 this.topologyProfile,
                 this.host + ":" + this.serverSocket.getLocalPort(),
                 this.replicaSetName);
@@ -192,6 +194,13 @@ public final class TcpMongoServer implements AutoCloseable {
             return base + "?replicaSet=" + replicaSetName;
         }
         return base;
+    }
+
+    /**
+     * Test-only fast reset hook that clears in-memory command state without restarting the TCP server.
+     */
+    public void reset() {
+        commandStore.reset();
     }
 
     @Override
