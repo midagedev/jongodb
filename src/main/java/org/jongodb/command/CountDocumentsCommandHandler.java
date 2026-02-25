@@ -16,8 +16,8 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
 
     @Override
     public BsonDocument handle(final BsonDocument command) {
-        final String database = readDatabase(command);
-        final String collection = readCollection(command);
+        final String database = CommandCanonicalizer.readDatabase(command);
+        final String collection = CommandCanonicalizer.readCommandString(command, "countDocuments", "count");
         if (collection == null) {
             return CommandErrors.typeMismatch("countDocuments must be a string");
         }
@@ -91,44 +91,6 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
                 .append("n", new BsonInt64(count))
                 .append("count", new BsonInt64(count))
                 .append("ok", new BsonDouble(1.0));
-    }
-
-    private static String readDatabase(final BsonDocument command) {
-        final BsonValue value = command.get("$db");
-        if (value == null || !value.isString()) {
-            return "test";
-        }
-        return value.asString().getValue();
-    }
-
-    private static String readCollection(final BsonDocument command) {
-        final BsonValue canonical = command.get("countDocuments");
-        if (canonical != null) {
-            if (canonical.isString()) {
-                return canonical.asString().getValue();
-            }
-            return null;
-        }
-
-        final BsonValue countAlias = command.get("count");
-        if (countAlias != null) {
-            if (countAlias.isString()) {
-                return countAlias.asString().getValue();
-            }
-            return null;
-        }
-
-        for (final String key : command.keySet()) {
-            if (!"countdocuments".equalsIgnoreCase(key) && !"count".equalsIgnoreCase(key)) {
-                continue;
-            }
-            final BsonValue value = command.get(key);
-            if (value != null && value.isString()) {
-                return value.asString().getValue();
-            }
-            return null;
-        }
-        return null;
     }
 
     private static Long readIntegralLong(final BsonValue value) {

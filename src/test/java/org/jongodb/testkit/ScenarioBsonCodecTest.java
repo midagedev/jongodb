@@ -2,6 +2,7 @@ package org.jongodb.testkit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
@@ -151,5 +152,95 @@ class ScenarioBsonCodecTest {
                 .getString("elem.name")
                 .getValue());
         assertTrue(commandDocument.getBoolean("new").getValue());
+    }
+
+    @Test
+    void toRealMongodCommandDocumentRejectsInvalidReturnDocumentValue() {
+        ScenarioCommand command = new ScenarioCommand(
+            "findOneAndReplace",
+            Map.of(
+                "findOneAndReplace",
+                "users",
+                "filter",
+                Map.of("_id", 1),
+                "replacement",
+                Map.of("name", "neo"),
+                "returnDocument",
+                "later"
+            )
+        );
+
+        IllegalArgumentException error = assertThrows(
+            IllegalArgumentException.class,
+            () -> ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real")
+        );
+        assertEquals("returnDocument must be 'before' or 'after'", error.getMessage());
+    }
+
+    @Test
+    void toRealMongodCommandDocumentRejectsNonBooleanUpsertInReplaceOne() {
+        ScenarioCommand command = new ScenarioCommand(
+            "replaceOne",
+            Map.of(
+                "replaceOne",
+                "users",
+                "filter",
+                Map.of("_id", 1),
+                "replacement",
+                Map.of("name", "neo"),
+                "upsert",
+                "yes"
+            )
+        );
+
+        IllegalArgumentException error = assertThrows(
+            IllegalArgumentException.class,
+            () -> ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real")
+        );
+        assertEquals("upsert must be a boolean", error.getMessage());
+    }
+
+    @Test
+    void toRealMongodCommandDocumentRejectsNonDocumentProjectionInFindOneAndUpdate() {
+        ScenarioCommand command = new ScenarioCommand(
+            "findOneAndUpdate",
+            Map.of(
+                "findOneAndUpdate",
+                "users",
+                "filter",
+                Map.of("_id", 1),
+                "update",
+                Map.of("$set", Map.of("name", "after")),
+                "projection",
+                1
+            )
+        );
+
+        IllegalArgumentException error = assertThrows(
+            IllegalArgumentException.class,
+            () -> ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real")
+        );
+        assertEquals("projection must be a document", error.getMessage());
+    }
+
+    @Test
+    void toRealMongodCommandDocumentRejectsNonDocumentFilterInFindOneAndReplace() {
+        ScenarioCommand command = new ScenarioCommand(
+            "findOneAndReplace",
+            Map.of(
+                "findOneAndReplace",
+                "users",
+                "filter",
+                1,
+                "replacement",
+                Map.of("name", "neo")
+            )
+        );
+
+        IllegalArgumentException error = assertThrows(
+            IllegalArgumentException.class,
+            () -> ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real")
+        );
+        assertEquals("filter must be a document", error.getMessage());
     }
 }
