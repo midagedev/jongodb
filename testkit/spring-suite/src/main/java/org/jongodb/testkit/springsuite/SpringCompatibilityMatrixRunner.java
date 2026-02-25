@@ -1649,6 +1649,8 @@ public final class SpringCompatibilityMatrixRunner {
         private final List<SpringProfileTarget> targets;
         private final List<SpringScenario> scenarios;
         private final List<MatrixCellResult> results;
+        private final List<SpringScenario> complexScenarios;
+        private final List<MatrixCellResult> complexResults;
 
         MatrixReport(
             Instant generatedAt,
@@ -1662,6 +1664,8 @@ public final class SpringCompatibilityMatrixRunner {
             this.targets = copyTargets(targets);
             this.scenarios = copyScenarios(scenarios);
             this.results = copyResults(this.targets, this.scenarios, results);
+            this.complexScenarios = computeComplexScenarios(this.scenarios);
+            this.complexResults = computeComplexResults(this.complexScenarios, this.results);
         }
 
         public Instant generatedAt() {
@@ -1707,32 +1711,11 @@ public final class SpringCompatibilityMatrixRunner {
         }
 
         public List<SpringScenario> complexScenarios() {
-            List<SpringScenario> complex = new ArrayList<>();
-            for (SpringScenario scenario : scenarios) {
-                if (scenario.isComplexQueryScenario()) {
-                    complex.add(scenario);
-                }
-            }
-            return List.copyOf(complex);
+            return complexScenarios;
         }
 
         public List<MatrixCellResult> complexResults() {
-            Set<String> complexIds = new LinkedHashSet<>();
-            for (SpringScenario scenario : scenarios) {
-                if (scenario.isComplexQueryScenario()) {
-                    complexIds.add(scenario.id());
-                }
-            }
-            if (complexIds.isEmpty()) {
-                return List.of();
-            }
-            List<MatrixCellResult> complex = new ArrayList<>();
-            for (MatrixCellResult result : results) {
-                if (complexIds.contains(result.scenarioId())) {
-                    complex.add(result);
-                }
-            }
-            return List.copyOf(complex);
+            return complexResults;
         }
 
         public int complexTotalCells() {
@@ -1755,6 +1738,36 @@ public final class SpringCompatibilityMatrixRunner {
 
         public double complexPassRate() {
             return ratio(complexPassCount(), complexTotalCells());
+        }
+
+        private static List<SpringScenario> computeComplexScenarios(List<SpringScenario> scenarios) {
+            List<SpringScenario> complex = new ArrayList<>();
+            for (SpringScenario scenario : scenarios) {
+                if (scenario.isComplexQueryScenario()) {
+                    complex.add(scenario);
+                }
+            }
+            return List.copyOf(complex);
+        }
+
+        private static List<MatrixCellResult> computeComplexResults(
+            List<SpringScenario> complexScenarios,
+            List<MatrixCellResult> results
+        ) {
+            Set<String> complexIds = new LinkedHashSet<>();
+            for (SpringScenario scenario : complexScenarios) {
+                complexIds.add(scenario.id());
+            }
+            if (complexIds.isEmpty()) {
+                return List.of();
+            }
+            List<MatrixCellResult> complex = new ArrayList<>();
+            for (MatrixCellResult result : results) {
+                if (complexIds.contains(result.scenarioId())) {
+                    complex.add(result);
+                }
+            }
+            return List.copyOf(complex);
         }
 
         public List<TargetSummary> targetSummaries() {
