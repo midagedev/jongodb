@@ -1,16 +1,28 @@
 package org.jongodb.command;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import org.bson.BsonBoolean;
+import org.bson.BsonDateTime;
+import org.bson.BsonDecimal128;
 import org.bson.BsonDocument;
 import org.bson.BsonDocumentReader;
+import org.bson.BsonDouble;
+import org.bson.BsonInt32;
+import org.bson.BsonInt64;
+import org.bson.BsonNull;
+import org.bson.BsonObjectId;
+import org.bson.BsonString;
 import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.codecs.configuration.CodecRegistry;
+import org.bson.types.Decimal128;
+import org.bson.types.ObjectId;
 import org.jongodb.engine.AggregationPipeline;
 import org.jongodb.engine.CollectionStore;
 import org.jongodb.engine.CollationSupport;
@@ -25,6 +37,7 @@ import org.jongodb.engine.UpdateManyResult;
  */
 public final class EngineBackedCommandStore implements CommandStore {
     private static final DocumentCodec DOCUMENT_CODEC = new DocumentCodec();
+    private static final DecoderContext DECODER_CONTEXT = DecoderContext.builder().build();
     private static final CodecRegistry DOCUMENT_CODEC_REGISTRY = CodecRegistries.fromCodecs(DOCUMENT_CODEC);
 
     private final EngineStore engineStore;
@@ -93,10 +106,10 @@ public final class EngineBackedCommandStore implements CommandStore {
             final BsonDocument filter,
             final CollationSupport.Config collation) {
         final CollectionStore collectionStore = engineStore.collection(database, collection);
-        final Document convertedFilter = filter == null ? new Document() : toDocument(filter);
+        final Document convertedFilter = toDocumentOrEmpty(filter);
         final List<Document> foundDocuments = collectionStore.find(convertedFilter, collation);
 
-        final List<BsonDocument> converted = new ArrayList<>();
+        final List<BsonDocument> converted = new ArrayList<>(foundDocuments.size());
         for (final Document document : foundDocuments) {
             converted.add(toBsonDocument(document));
         }
@@ -219,7 +232,7 @@ public final class EngineBackedCommandStore implements CommandStore {
 
         int deletedCount = 0;
         for (final DeleteRequest deleteRequest : deletes) {
-            final Document query = toDocument(Objects.requireNonNull(deleteRequest.query(), "query"));
+            final Document query = toDocumentOrEmpty(Objects.requireNonNull(deleteRequest.query(), "query"));
             if (deleteRequest.limit() == 0) {
                 final DeleteManyResult result = collectionStore.deleteMany(query);
                 deletedCount += toBoundedInt(result.deletedCount());
@@ -237,11 +250,21 @@ public final class EngineBackedCommandStore implements CommandStore {
         return deletedCount;
     }
 
+    private static Document toDocumentOrEmpty(final BsonDocument source) {
+        return source == null || source.isEmpty() ? new Document() : toDocument(source);
+    }
+
     private static Document toDocument(final BsonDocument source) {
-        return DOCUMENT_CODEC.decode(new BsonDocumentReader(source), DecoderContext.builder().build());
+        if (source.isEmpty()) {
+            return new Document();
+        }
+        return DOCUMENT_CODEC.decode(new BsonDocumentReader(source), DECODER_CONTEXT);
     }
 
     private static BsonDocument toBsonDocument(final Document source) {
+        if (source.isEmpty()) {
+            return new BsonDocument();
+        }
         return source.toBsonDocument(BsonDocument.class, DOCUMENT_CODEC_REGISTRY);
     }
 
@@ -253,6 +276,36 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     private static BsonValue toBsonValue(final Object value) {
+        if (value == null) {
+            return BsonNull.VALUE;
+        }
+        if (value instanceof BsonValue bsonValue) {
+            return bsonValue;
+        }
+        if (value instanceof Integer intValue) {
+            return new BsonInt32(intValue);
+        }
+        if (value instanceof Long longValue) {
+            return new BsonInt64(longValue);
+        }
+        if (value instanceof Double doubleValue) {
+            return new BsonDouble(doubleValue);
+        }
+        if (value instanceof String stringValue) {
+            return new BsonString(stringValue);
+        }
+        if (value instanceof Boolean booleanValue) {
+            return BsonBoolean.valueOf(booleanValue);
+        }
+        if (value instanceof ObjectId objectIdValue) {
+            return new BsonObjectId(objectIdValue);
+        }
+        if (value instanceof Decimal128 decimal128Value) {
+            return new BsonDecimal128(decimal128Value);
+        }
+        if (value instanceof Date dateValue) {
+            return new BsonDateTime(dateValue.getTime());
+        }
         return toBsonDocument(new Document("value", value)).get("value");
     }
 

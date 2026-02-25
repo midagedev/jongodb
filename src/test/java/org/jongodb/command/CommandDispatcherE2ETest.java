@@ -907,6 +907,12 @@ class CommandDispatcherE2ETest {
                         .asDocument()
                         .getInt32("index")
                         .getValue());
+        assertTrue(upsertResponse
+                .getArray("upserted")
+                .get(0)
+                .asDocument()
+                .get("_id")
+                .isObjectId());
         assertEquals(
                 1,
                 upsertResponse
