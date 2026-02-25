@@ -1,6 +1,6 @@
 # Release Checklist
 
-Status date: 2026-02-24
+Status date: 2026-02-25
 
 ## R3 Certification Sign-Off
 
@@ -10,8 +10,9 @@ Status date: 2026-02-24
   - run id: `22332937657`
 - [x] External canary certification completed for 3 projects with rollback success.
   - run id: `22332937633`
-- [ ] Complex-query certification gate completed on `main` with no supported-subset regressions.
+- [x] Complex-query certification gate completed on `main` with no supported-subset regressions.
   - workflow: `.github/workflows/complex-query-certification.yml`
+  - run id: `22377660027`
 - [x] Support boundary documents are updated.
   - `docs/SUPPORT_MATRIX.md`
   - `docs/COMPATIBILITY_SCORECARD.md`
@@ -19,8 +20,12 @@ Status date: 2026-02-24
 
 ## Current Release-Line Notes
 
-- `main` is ahead of `v0.1.2`.
+- `main` is ahead of `v0.1.4`.
 - Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
+- Current `main` rerun batch (`e222b99`) is in progress:
+  - Official Suite Sharded: run `22378205089`
+  - R3 Failure Ledger: run `22378205082`
+  - R3 External Canary: run `22378205088`
 
 ## Tagging Gate
 
@@ -55,6 +60,8 @@ Use this when publishing `@jongodb/memory-server`:
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |
 | --- | --- | --- | --- | --- |
+| `0.1.4` | `2026-02-24` | `e6f6bbf` | `io.github.midagedev:jongodb:0.1.4` | run `22355417610` |
+| `0.1.3` | `2026-02-24` | `61cfa03` | `io.github.midagedev:jongodb:0.1.3` | run `22341381717` |
 | `0.1.2` | `2026-02-24` | `2ace4a4` | `io.github.midagedev:jongodb:0.1.2` | run `22338690663` |
 | `0.1.1` | `2026-02-24` | `f4a8bbb` | `io.github.midagedev:jongodb:0.1.1` | run `22335420545` |
 | `0.1.0` | `2026-02-24` | `df774da` | `io.github.midagedev:jongodb:0.1.0` | run `22334177236` |
