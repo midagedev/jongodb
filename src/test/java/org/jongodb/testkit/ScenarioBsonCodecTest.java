@@ -222,4 +222,25 @@ class ScenarioBsonCodecTest {
         );
         assertEquals("projection must be a document", error.getMessage());
     }
+
+    @Test
+    void toRealMongodCommandDocumentRejectsNonDocumentFilterInFindOneAndReplace() {
+        ScenarioCommand command = new ScenarioCommand(
+            "findOneAndReplace",
+            Map.of(
+                "findOneAndReplace",
+                "users",
+                "filter",
+                1,
+                "replacement",
+                Map.of("name", "neo")
+            )
+        );
+
+        IllegalArgumentException error = assertThrows(
+            IllegalArgumentException.class,
+            () -> ScenarioBsonCodec.toRealMongodCommandDocument(command, "testkit_real")
+        );
+        assertEquals("filter must be a document", error.getMessage());
+    }
 }
