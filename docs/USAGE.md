@@ -177,6 +177,10 @@ Run Spring compatibility matrix:
 gradle springCompatibilityMatrixEvidence
 ```
 
+Spring matrix artifacts include a dedicated `Complex Query Matrix` section aligned with
+`docs/COMPLEX_QUERY_CERTIFICATION.md` pattern IDs.
+CI workflow: `.github/workflows/spring-complex-query-matrix.yml`
+
 Run R2 compatibility scorecard + support manifest:
 
 ```bash

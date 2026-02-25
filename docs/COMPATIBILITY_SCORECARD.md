@@ -101,6 +101,8 @@ Notes:
 - `#239`: deterministic complex-query differential runner and replay artifacts - completed.
 - `#240`: nested predicate semantics expansion (array-index dotted path + `$expr` positional path resolution) - completed.
 - `#242`: CI quality gate for complex-query certification - completed.
+- `#241`: join-heavy pipeline parity for certification subset (`$lookup` + composed downstream with cursor contract) - completed.
+- `#243`: Spring complex-query matrix alignment with certification pack IDs and dedicated report section - completed.
 - `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction

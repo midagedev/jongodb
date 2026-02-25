@@ -237,6 +237,43 @@ public final class SpringCompatibilityMatrixRunner {
         }
         sb.append('\n');
 
+        sb.append("## Complex Query Matrix\n");
+        List<SpringScenario> complexScenarios = report.complexScenarios();
+        if (complexScenarios.isEmpty()) {
+            sb.append("- none\n\n");
+        } else {
+            sb.append("- scenarioCount: ").append(complexScenarios.size()).append('\n');
+            sb.append("- totalCells: ").append(report.complexTotalCells()).append('\n');
+            sb.append("- pass: ").append(report.complexPassCount()).append('\n');
+            sb.append("- fail: ").append(report.complexFailCount()).append('\n');
+            sb.append("- passRate: ").append(formatPercent(report.complexPassRate())).append("\n\n");
+
+            sb.append("| scenarioId | certPatternId |");
+            for (SpringProfileTarget target : report.targets()) {
+                sb.append(' ').append(target.id()).append(" |");
+            }
+            sb.append('\n');
+            sb.append("| --- | --- |");
+            for (int i = 0; i < report.targets().size(); i++) {
+                sb.append(" --- |");
+            }
+            sb.append('\n');
+
+            for (SpringScenario scenario : complexScenarios) {
+                sb.append("| ")
+                    .append(scenario.id())
+                    .append(" | ")
+                    .append(scenario.certificationPatternId() == null ? "-" : scenario.certificationPatternId())
+                    .append(" |");
+                for (SpringProfileTarget target : report.targets()) {
+                    MatrixCellResult cell = lookup.get(resultKey(target.id(), scenario.id()));
+                    sb.append(' ').append(cell.status()).append(" |");
+                }
+                sb.append('\n');
+            }
+            sb.append('\n');
+        }
+
         sb.append("## Target Summary\n");
         for (TargetSummary summary : report.targetSummaries()) {
             sb.append("- ")
@@ -321,10 +358,32 @@ public final class SpringCompatibilityMatrixRunner {
             item.put("scenarioId", scenario.id());
             item.put("surface", scenario.surface().name());
             item.put("description", scenario.description());
+            item.put("certificationPatternId", scenario.certificationPatternId());
+            item.put("complexQueryScenario", scenario.isComplexQueryScenario());
             item.put("commandCount", scenario.scenario().commands().size());
             scenarios.add(item);
         }
         root.put("scenarios", scenarios);
+
+        Map<String, Object> complexQuerySummary = new LinkedHashMap<>();
+        complexQuerySummary.put("scenarioCount", report.complexScenarios().size());
+        complexQuerySummary.put("totalCells", report.complexTotalCells());
+        complexQuerySummary.put("pass", report.complexPassCount());
+        complexQuerySummary.put("fail", report.complexFailCount());
+        complexQuerySummary.put("passRate", report.complexPassRate());
+        root.put("complexQuerySummary", complexQuerySummary);
+
+        List<Map<String, Object>> complexQueryScenarios = new ArrayList<>();
+        for (SpringScenario scenario : report.complexScenarios()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("scenarioId", scenario.id());
+            item.put("surface", scenario.surface().name());
+            item.put("description", scenario.description());
+            item.put("certificationPatternId", scenario.certificationPatternId());
+            item.put("commandCount", scenario.scenario().commands().size());
+            complexQueryScenarios.add(item);
+        }
+        root.put("complexQueryScenarios", complexQueryScenarios);
 
         List<Map<String, Object>> results = new ArrayList<>();
         for (MatrixCellResult result : report.results()) {
@@ -339,6 +398,20 @@ public final class SpringCompatibilityMatrixRunner {
             results.add(item);
         }
         root.put("results", results);
+
+        List<Map<String, Object>> complexQueryResults = new ArrayList<>();
+        for (MatrixCellResult result : report.complexResults()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("targetId", result.targetId());
+            item.put("scenarioId", result.scenarioId());
+            item.put("surface", result.surface().name());
+            item.put("status", result.status().name());
+            item.put("errorMessage", result.errorMessage());
+            item.put("durationMillis", result.durationMillis());
+            item.put("commandCount", result.commandCount());
+            complexQueryResults.add(item);
+        }
+        root.put("complexQueryResults", complexQueryResults);
 
         List<Map<String, Object>> targetSummary = new ArrayList<>();
         for (TargetSummary item : report.targetSummaries()) {
@@ -663,6 +736,7 @@ public final class SpringCompatibilityMatrixRunner {
                 "spring.repository.aggregation-lookup",
                 SpringSurface.REPOSITORY,
                 "Repository aggregation with $lookup join",
+                "cq.lookup.local-foreign-unwind",
                 scenario(
                     "spring.repository.aggregation-lookup",
                     "insert + lookup + aggregate",
@@ -711,6 +785,251 @@ public final class SpringCompatibilityMatrixRunner {
                                     )
                                 ),
                                 payload("$match", payload("user.name", "kim"))
+                            ),
+                            "cursor",
+                            payload()
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.complex.query.nested-criteria",
+                SpringSurface.REPOSITORY,
+                "Nested criteria query aligned with certification pack",
+                "cq.nested.logic.and-or-dotted",
+                scenario(
+                    "spring.complex.query.nested-criteria",
+                    "insert + nested and/or criteria query",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_nested_users",
+                            "documents",
+                            List.of(
+                                payload(
+                                    "_id",
+                                    1,
+                                    "profile",
+                                    payload("city", "Seoul", "tier", "gold"),
+                                    "active",
+                                    true,
+                                    "tags",
+                                    List.of("core", "java")
+                                ),
+                                payload(
+                                    "_id",
+                                    2,
+                                    "profile",
+                                    payload("city", "Busan", "tier", "silver"),
+                                    "active",
+                                    true,
+                                    "tags",
+                                    List.of("ops")
+                                ),
+                                payload(
+                                    "_id",
+                                    3,
+                                    "profile",
+                                    payload("city", "Seoul", "tier", "bronze"),
+                                    "active",
+                                    false,
+                                    "tags",
+                                    List.of("ops")
+                                )
+                            )
+                        )
+                    ),
+                    command(
+                        "find",
+                        payload(
+                            "collection",
+                            "spring_complex_nested_users",
+                            "filter",
+                            payload(
+                                "$and",
+                                List.of(
+                                    payload("profile.city", "Seoul"),
+                                    payload(
+                                        "$or",
+                                        List.of(
+                                            payload("active", true),
+                                            payload("tags", "ops")
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.complex.aggregation.projection-sort",
+                SpringSurface.MONGO_TEMPLATE,
+                "Projection and sort aggregation composition aligned with certification pack",
+                "cq.aggregate.sortbycount-after-project",
+                scenario(
+                    "spring.complex.aggregation.projection-sort",
+                    "insert + aggregate project/sort",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_projection_sort",
+                            "documents",
+                            List.of(
+                                payload("_id", 1, "name", "kim", "profile", payload("city", "Seoul")),
+                                payload("_id", 2, "name", "park", "profile", payload("city", "Busan")),
+                                payload("_id", 3, "name", "lee", "profile", payload("city", "Seoul"))
+                            )
+                        )
+                    ),
+                    command(
+                        "aggregate",
+                        payload(
+                            "collection",
+                            "spring_complex_projection_sort",
+                            "pipeline",
+                            List.of(
+                                payload("$project", payload("_id", 1, "name", 1, "city", "$profile.city")),
+                                payload("$sort", payload("city", 1, "name", 1))
+                            ),
+                            "cursor",
+                            payload()
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.complex.aggregation.lookup-unwind-group",
+                SpringSurface.REPOSITORY,
+                "Lookup + unwind + group composition aligned with certification pack",
+                "cq.lookup.local-foreign-unwind",
+                scenario(
+                    "spring.complex.aggregation.lookup-unwind-group",
+                    "insert + lookup + unwind + group",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_lookup_orders",
+                            "documents",
+                            List.of(
+                                payload("_id", 1, "customerId", 11, "amount", 120),
+                                payload("_id", 2, "customerId", 11, "amount", 30),
+                                payload("_id", 3, "customerId", 12, "amount", 80)
+                            )
+                        )
+                    ),
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_lookup_customers",
+                            "documents",
+                            List.of(
+                                payload("_id", 11, "customerId", 11, "tier", "gold"),
+                                payload("_id", 12, "customerId", 12, "tier", "silver")
+                            )
+                        )
+                    ),
+                    command(
+                        "aggregate",
+                        payload(
+                            "collection",
+                            "spring_complex_lookup_orders",
+                            "pipeline",
+                            List.of(
+                                payload(
+                                    "$lookup",
+                                    payload(
+                                        "from",
+                                        "spring_complex_lookup_customers",
+                                        "localField",
+                                        "customerId",
+                                        "foreignField",
+                                        "customerId",
+                                        "as",
+                                        "customer"
+                                    )
+                                ),
+                                payload("$unwind", "$customer"),
+                                payload("$match", payload("customer.tier", "gold")),
+                                payload(
+                                    "$group",
+                                    payload("_id", "$customer.tier", "totalAmount", payload("$sum", "$amount"))
+                                ),
+                                payload("$sort", payload("_id", 1))
+                            ),
+                            "cursor",
+                            payload()
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.complex.aggregation.lookup-pipeline-let",
+                SpringSurface.REPOSITORY,
+                "Lookup pipeline + let composition aligned with certification pack",
+                "cq.lookup.pipeline-let-match",
+                scenario(
+                    "spring.complex.aggregation.lookup-pipeline-let",
+                    "insert + lookup pipeline with let",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_lookup_pipeline_orders",
+                            "documents",
+                            List.of(
+                                payload("_id", 1, "orderId", "O-1"),
+                                payload("_id", 2, "orderId", "O-2")
+                            )
+                        )
+                    ),
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_lookup_pipeline_items",
+                            "documents",
+                            List.of(
+                                payload("_id", 11, "orderId", "O-1", "sku", "A", "qty", 3),
+                                payload("_id", 12, "orderId", "O-1", "sku", "B", "qty", 1),
+                                payload("_id", 13, "orderId", "O-2", "sku", "A", "qty", 1)
+                            )
+                        )
+                    ),
+                    command(
+                        "aggregate",
+                        payload(
+                            "collection",
+                            "spring_complex_lookup_pipeline_orders",
+                            "pipeline",
+                            List.of(
+                                payload(
+                                    "$lookup",
+                                    payload(
+                                        "from",
+                                        "spring_complex_lookup_pipeline_items",
+                                        "let",
+                                        payload("orderIdVar", "$orderId"),
+                                        "pipeline",
+                                        List.of(
+                                            payload(
+                                                "$match",
+                                                payload(
+                                                    "$expr",
+                                                    payload("$eq", List.of("$orderId", "$$orderIdVar"))
+                                                )
+                                            ),
+                                            payload("$match", payload("qty", payload("$gte", 2)))
+                                        ),
+                                        "as",
+                                        "items"
+                                    )
+                                ),
+                                payload("$match", payload("items", payload("$elemMatch", payload("sku", "A"))))
                             ),
                             "cursor",
                             payload()
@@ -1112,12 +1431,24 @@ public final class SpringCompatibilityMatrixRunner {
         private final String id;
         private final SpringSurface surface;
         private final String description;
+        private final String certificationPatternId;
         private final Scenario scenario;
 
         public SpringScenario(String id, SpringSurface surface, String description, Scenario scenario) {
+            this(id, surface, description, null, scenario);
+        }
+
+        public SpringScenario(
+            String id,
+            SpringSurface surface,
+            String description,
+            String certificationPatternId,
+            Scenario scenario
+        ) {
             this.id = requireText(id, "id");
             this.surface = Objects.requireNonNull(surface, "surface");
             this.description = requireText(description, "description");
+            this.certificationPatternId = normalizeText(certificationPatternId);
             this.scenario = Objects.requireNonNull(scenario, "scenario");
         }
 
@@ -1131,6 +1462,14 @@ public final class SpringCompatibilityMatrixRunner {
 
         public String description() {
             return description;
+        }
+
+        public String certificationPatternId() {
+            return certificationPatternId;
+        }
+
+        public boolean isComplexQueryScenario() {
+            return certificationPatternId != null || id.startsWith("spring.complex.");
         }
 
         public Scenario scenario() {
@@ -1365,6 +1704,57 @@ public final class SpringCompatibilityMatrixRunner {
 
         public double passRate() {
             return ratio(passCount(), totalCells());
+        }
+
+        public List<SpringScenario> complexScenarios() {
+            List<SpringScenario> complex = new ArrayList<>();
+            for (SpringScenario scenario : scenarios) {
+                if (scenario.isComplexQueryScenario()) {
+                    complex.add(scenario);
+                }
+            }
+            return List.copyOf(complex);
+        }
+
+        public List<MatrixCellResult> complexResults() {
+            Set<String> complexIds = new LinkedHashSet<>();
+            for (SpringScenario scenario : scenarios) {
+                if (scenario.isComplexQueryScenario()) {
+                    complexIds.add(scenario.id());
+                }
+            }
+            if (complexIds.isEmpty()) {
+                return List.of();
+            }
+            List<MatrixCellResult> complex = new ArrayList<>();
+            for (MatrixCellResult result : results) {
+                if (complexIds.contains(result.scenarioId())) {
+                    complex.add(result);
+                }
+            }
+            return List.copyOf(complex);
+        }
+
+        public int complexTotalCells() {
+            return complexResults().size();
+        }
+
+        public int complexPassCount() {
+            int pass = 0;
+            for (MatrixCellResult result : complexResults()) {
+                if (result.passed()) {
+                    pass++;
+                }
+            }
+            return pass;
+        }
+
+        public int complexFailCount() {
+            return complexTotalCells() - complexPassCount();
+        }
+
+        public double complexPassRate() {
+            return ratio(complexPassCount(), complexTotalCells());
         }
 
         public List<TargetSummary> targetSummaries() {
