@@ -77,13 +77,14 @@ Implemented stages:
 - `$facet`
 - `$lookup` (local/foreign and pipeline+let subset)
 - `$unionWith`
+- `$out` (terminal string-target subset: replaces target collection contents and returns empty result set)
 
 Not implemented or partial:
 - unsupported stages return deterministic fail-fast
 - many advanced expression operators are still missing
 - `$group` accumulators other than `$sum` are not available
 - `$unwind.includeArrayIndex` is not available
-- `$out`, `$merge`, `$listLocalSessions` stages are excluded from current differential corpus
+- `$merge`, `$listLocalSessions` stages are excluded from current differential corpus
 - `bypassDocumentValidation` for aggregate is excluded from current differential corpus
 
 ## Update Semantics

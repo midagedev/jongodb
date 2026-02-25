@@ -17,6 +17,7 @@ import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.DeleteManyResult;
 import org.jongodb.engine.EngineStore;
 import org.jongodb.engine.InMemoryEngineStore;
+import org.jongodb.engine.UnsupportedFeatureException;
 import org.jongodb.engine.UpdateManyResult;
 
 /**
@@ -121,13 +122,20 @@ public final class EngineBackedCommandStore implements CommandStore {
         for (final BsonDocument stage : pipeline) {
             convertedPipeline.add(toDocument(Objects.requireNonNull(stage, "pipeline entries must not be null")));
         }
+        final OutStagePlan outStagePlan = resolveOutStagePlan(List.copyOf(convertedPipeline));
 
         final Iterable<Document> sourceDocuments = collectionStore.scanAll();
         final List<Document> aggregatedDocuments = AggregationPipeline.execute(
                 sourceDocuments,
-                List.copyOf(convertedPipeline),
+                outStagePlan.pipelineWithoutOut(),
                 foreignCollectionName -> engineStore.collection(database, foreignCollectionName).scanAll(),
                 collation);
+        if (outStagePlan.outputCollection() != null) {
+            final CollectionStore outputCollection = engineStore.collection(database, outStagePlan.outputCollection());
+            outputCollection.deleteMany(new Document());
+            outputCollection.insertMany(aggregatedDocuments);
+            return List.of();
+        }
         final List<BsonDocument> converted = new ArrayList<>(aggregatedDocuments.size());
         for (final Document document : aggregatedDocuments) {
             converted.add(toBsonDocument(document));
@@ -262,5 +270,40 @@ public final class EngineBackedCommandStore implements CommandStore {
         }
         return toDocument(toBsonDocument(document));
     }
+
+    private static OutStagePlan resolveOutStagePlan(final List<Document> pipeline) {
+        String outputCollection = null;
+        List<Document> pipelineWithoutOut = pipeline;
+        for (int index = 0; index < pipeline.size(); index++) {
+            final Document stage = pipeline.get(index);
+            if (!stage.containsKey("$out")) {
+                continue;
+            }
+            if (stage.size() != 1) {
+                throw new IllegalArgumentException("each pipeline stage must contain exactly one field");
+            }
+            if (index != pipeline.size() - 1) {
+                throw new UnsupportedFeatureException(
+                        "aggregation.stage.$out.position",
+                        "$out stage must be the final pipeline stage");
+            }
+            if (outputCollection != null) {
+                throw new UnsupportedFeatureException(
+                        "aggregation.stage.$out.multiple",
+                        "multiple $out stages are not supported");
+            }
+            final Object outDefinition = stage.get("$out");
+            if (!(outDefinition instanceof String outCollectionName) || outCollectionName.isBlank()) {
+                throw new UnsupportedFeatureException(
+                        "aggregation.stage.$out.form",
+                        "$out stage currently supports string collection targets only");
+            }
+            outputCollection = outCollectionName.trim();
+            pipelineWithoutOut = List.copyOf(pipeline.subList(0, index));
+        }
+        return new OutStagePlan(pipelineWithoutOut, outputCollection);
+    }
+
+    private record OutStagePlan(List<Document> pipelineWithoutOut, String outputCollection) {}
 
 }

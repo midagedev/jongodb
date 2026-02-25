@@ -396,7 +396,7 @@ public final class UnifiedSpecImporter {
     }
 
     private static boolean containsUnsupportedAggregateStage(final Map<String, Object> stage) {
-        if (stage.containsKey("$out") || stage.containsKey("$merge") || stage.containsKey("$listLocalSessions")) {
+        if (stage.containsKey("$merge") || stage.containsKey("$listLocalSessions")) {
             return true;
         }
         for (final Object value : stage.values()) {
@@ -411,7 +411,7 @@ public final class UnifiedSpecImporter {
         if (value instanceof Map<?, ?> mapValue) {
             for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
                 final String key = String.valueOf(entry.getKey());
-                if ("$out".equals(key) || "$merge".equals(key) || "$listLocalSessions".equals(key)) {
+                if ("$merge".equals(key) || "$listLocalSessions".equals(key)) {
                     return true;
                 }
                 if (containsUnsupportedAggregateStageValue(entry.getValue())) {
