@@ -46,7 +46,12 @@ public final class UnifiedSpecImporter {
     }
 
     public ImportResult importCorpus(final Path specRoot) throws IOException {
+        return importCorpus(specRoot, RunOnContext.unevaluated());
+    }
+
+    public ImportResult importCorpus(final Path specRoot, final RunOnContext runOnContext) throws IOException {
         Objects.requireNonNull(specRoot, "specRoot");
+        Objects.requireNonNull(runOnContext, "runOnContext");
         if (!Files.exists(specRoot)) {
             throw new IllegalArgumentException("specRoot does not exist: " + specRoot);
         }
@@ -80,6 +85,7 @@ public final class UnifiedSpecImporter {
                     defaultCollection,
                     spec,
                     profile);
+            final String fileRunOnSkipReason = runOnSkipReason(spec, runOnContext, true);
             final Object testsValue = spec.get("tests");
             if (!(testsValue instanceof List<?> testsRaw)) {
                 skipped.add(new SkippedCase(
@@ -105,6 +111,15 @@ public final class UnifiedSpecImporter {
                 final String description = trimToEmpty(testDefinition.get("description"));
                 final String caseId = buildCaseId(sourcePath, index + 1, description);
 
+                if (fileRunOnSkipReason != null) {
+                    skipped.add(new SkippedCase(
+                            caseId,
+                            sourcePath,
+                            SkipKind.SKIPPED,
+                            fileRunOnSkipReason));
+                    continue;
+                }
+
                 final String explicitSkipReason = readSkipReason(testDefinition);
                 if (explicitSkipReason != null) {
                     skipped.add(new SkippedCase(
@@ -115,7 +130,7 @@ public final class UnifiedSpecImporter {
                     continue;
                 }
 
-                final String runOnSkipReason = runOnSkipReason(testDefinition);
+                final String runOnSkipReason = runOnSkipReason(testDefinition, runOnContext, false);
                 if (runOnSkipReason != null) {
                     skipped.add(new SkippedCase(
                             caseId,
@@ -426,6 +441,7 @@ public final class UnifiedSpecImporter {
         if (rawUpdate == null) {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
+        validateSupportedUpdatePipeline(rawUpdate);
         if (multi && isReplacementDocument(rawUpdate)) {
             throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
         }
@@ -519,6 +535,7 @@ public final class UnifiedSpecImporter {
         if (updateValue == null) {
             throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
         }
+        validateSupportedUpdatePipeline(updateValue);
         final Map<String, Object> payload = commandEnvelope("findOneAndUpdate", database, collection);
         payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
         payload.put("update", deepCopyValue(updateValue));
@@ -630,9 +647,79 @@ public final class UnifiedSpecImporter {
         if (updateValue == null) {
             throw new IllegalArgumentException("bulkWrite update operation requires update argument");
         }
+        validateSupportedUpdatePipeline(updateValue);
         if (multi && isReplacementDocument(updateValue)) {
             throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
         }
+    }
+
+    private static void validateSupportedUpdatePipeline(final Object updateValue) {
+        if (!(updateValue instanceof List<?> pipeline)) {
+            return;
+        }
+
+        for (final Object stageValue : pipeline) {
+            final Map<String, Object> stage = asStringObjectMap(stageValue, "update pipeline stage");
+            if (stage.size() != 1) {
+                throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
+            }
+
+            final String stageName = stage.keySet().iterator().next();
+            final Object stageArgument = stage.get(stageName);
+            if ("$set".equals(stageName)) {
+                final Map<String, Object> setStage = asStringObjectMap(stageArgument, "$set stage");
+                for (final Object value : setStage.values()) {
+                    if (containsUnsupportedPipelineExpression(value)) {
+                        throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
+                    }
+                }
+                continue;
+            }
+            if ("$unset".equals(stageName)) {
+                if (stageArgument instanceof String) {
+                    continue;
+                }
+                if (stageArgument instanceof List<?> listValue) {
+                    for (final Object item : listValue) {
+                        if (!(item instanceof String)) {
+                            throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
+                        }
+                    }
+                    continue;
+                }
+                if (stageArgument instanceof Map<?, ?>) {
+                    continue;
+                }
+            }
+            throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
+        }
+    }
+
+    private static boolean containsUnsupportedPipelineExpression(final Object value) {
+        if (value instanceof String stringValue) {
+            return stringValue.startsWith("$");
+        }
+        if (value instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (containsUnsupportedPipelineExpression(item)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof Map<?, ?> mapValue) {
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                final String key = String.valueOf(entry.getKey());
+                if (key.startsWith("$")) {
+                    return true;
+                }
+                if (containsUnsupportedPipelineExpression(entry.getValue())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return false;
     }
 
     private static ScenarioCommand createIndex(
@@ -847,15 +934,179 @@ public final class UnifiedSpecImporter {
         return null;
     }
 
-    private static String runOnSkipReason(final Map<String, Object> testDefinition) {
-        if (!testDefinition.containsKey("runOnRequirements")) {
+    private static String runOnSkipReason(
+            final Map<String, Object> definition,
+            final RunOnContext runOnContext,
+            final boolean evaluateRequirements) {
+        if (!definition.containsKey("runOnRequirements")) {
             return null;
         }
-        final List<Object> requirements = asList(testDefinition.get("runOnRequirements"), "runOnRequirements");
+        final List<Object> requirements = asList(definition.get("runOnRequirements"), "runOnRequirements");
         if (requirements.isEmpty()) {
             return null;
         }
-        return "runOnRequirements not evaluated by importer";
+        if (!evaluateRequirements || !runOnContext.evaluated()) {
+            return "runOnRequirements not evaluated by importer";
+        }
+        if (matchesAnyRunOnRequirement(requirements, runOnContext)) {
+            return null;
+        }
+        return "runOnRequirements not satisfied for " + runOnContext.summary();
+    }
+
+    private static boolean matchesAnyRunOnRequirement(
+            final List<Object> requirements,
+            final RunOnContext runOnContext) {
+        for (final Object requirementValue : requirements) {
+            if (matchesRunOnRequirement(requirementValue, runOnContext)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesRunOnRequirement(
+            final Object requirementValue,
+            final RunOnContext runOnContext) {
+        final Map<String, Object> requirement = asStringObjectMap(requirementValue, "runOnRequirements entry");
+        if (!matchesVersionRange(requirement, runOnContext.serverVersion())) {
+            return false;
+        }
+        if (!matchesTopologies(requirement.get("topologies"), runOnContext.topology())) {
+            return false;
+        }
+        if (!matchesServerless(requirement.get("serverless"), runOnContext.serverless())) {
+            return false;
+        }
+        return matchesAuthEnabled(requirement.get("authEnabled"), runOnContext.authEnabled());
+    }
+
+    private static boolean matchesVersionRange(
+            final Map<String, Object> requirement,
+            final String serverVersion) {
+        if (requirement.containsKey("minServerVersion")) {
+            final String minVersion = requireText(requirement.get("minServerVersion"), "minServerVersion");
+            if (compareVersions(serverVersion, minVersion) < 0) {
+                return false;
+            }
+        }
+        if (requirement.containsKey("maxServerVersion")) {
+            final String maxVersion = requireText(requirement.get("maxServerVersion"), "maxServerVersion");
+            if (compareVersions(serverVersion, maxVersion) > 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean matchesTopologies(final Object topologiesValue, final String runtimeTopology) {
+        if (topologiesValue == null) {
+            return true;
+        }
+
+        final List<String> requiredTopologies = new ArrayList<>();
+        if (topologiesValue instanceof List<?> topologies) {
+            for (final Object topologyValue : topologies) {
+                final String normalized = normalizeTopology(topologyValue);
+                if (!normalized.isEmpty()) {
+                    requiredTopologies.add(normalized);
+                }
+            }
+        } else {
+            final String normalized = normalizeTopology(topologiesValue);
+            if (!normalized.isEmpty()) {
+                requiredTopologies.add(normalized);
+            }
+        }
+
+        if (requiredTopologies.isEmpty()) {
+            return true;
+        }
+
+        final String normalizedRuntimeTopology = normalizeTopology(runtimeTopology);
+        for (final String requiredTopology : requiredTopologies) {
+            if (requiredTopology.equals(normalizedRuntimeTopology)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeTopology(final Object topologyValue) {
+        final String normalized = trimToEmpty(topologyValue).toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "replica_set", "replicaset" -> "replicaset";
+            case "single", "standalone" -> "single";
+            case "sharded", "sharded_replicaset", "sharded-replicaset" -> "sharded";
+            case "load_balanced", "load-balanced", "loadbalanced" -> "load-balanced";
+            default -> normalized;
+        };
+    }
+
+    private static boolean matchesServerless(final Object serverlessValue, final boolean runtimeServerless) {
+        if (serverlessValue == null) {
+            return true;
+        }
+        if (serverlessValue instanceof Boolean serverlessBoolean) {
+            return serverlessBoolean == runtimeServerless;
+        }
+        final String normalized = trimToEmpty(serverlessValue).toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "allow", "" -> true;
+            case "forbid", "false" -> !runtimeServerless;
+            case "require", "true" -> runtimeServerless;
+            default -> true;
+        };
+    }
+
+    private static boolean matchesAuthEnabled(final Object authEnabledValue, final boolean runtimeAuthEnabled) {
+        if (authEnabledValue == null) {
+            return true;
+        }
+        if (authEnabledValue instanceof Boolean authEnabledBoolean) {
+            return authEnabledBoolean == runtimeAuthEnabled;
+        }
+        final String normalized = trimToEmpty(authEnabledValue).toLowerCase(Locale.ROOT);
+        if ("true".equals(normalized)) {
+            return runtimeAuthEnabled;
+        }
+        if ("false".equals(normalized)) {
+            return !runtimeAuthEnabled;
+        }
+        return true;
+    }
+
+    private static int compareVersions(final String leftVersion, final String rightVersion) {
+        final List<Integer> leftParts = parseVersionParts(leftVersion);
+        final List<Integer> rightParts = parseVersionParts(rightVersion);
+        final int maxParts = Math.max(leftParts.size(), rightParts.size());
+        for (int index = 0; index < maxParts; index++) {
+            final int leftPart = index < leftParts.size() ? leftParts.get(index) : 0;
+            final int rightPart = index < rightParts.size() ? rightParts.get(index) : 0;
+            if (leftPart != rightPart) {
+                return Integer.compare(leftPart, rightPart);
+            }
+        }
+        return 0;
+    }
+
+    private static List<Integer> parseVersionParts(final String versionText) {
+        final String[] fragments = trimToEmpty(versionText).split("[^0-9]+");
+        final List<Integer> parts = new ArrayList<>();
+        for (final String fragment : fragments) {
+            if (fragment.isEmpty()) {
+                continue;
+            }
+            try {
+                parts.add(Integer.parseInt(fragment));
+            } catch (final NumberFormatException ignored) {
+                // Ignore malformed fragments to keep runOn evaluation deterministic.
+            }
+        }
+        if (parts.isEmpty()) {
+            return List.of(0);
+        }
+        return List.copyOf(parts);
     }
 
     private static String fallbackText(
@@ -969,6 +1220,41 @@ public final class UnifiedSpecImporter {
 
     private static Map<String, Object> immutableMap(final Map<String, Object> source) {
         return Collections.unmodifiableMap(new LinkedHashMap<>(source));
+    }
+
+    public record RunOnContext(
+            boolean evaluated,
+            String serverVersion,
+            String topology,
+            boolean serverless,
+            boolean authEnabled) {
+        public static RunOnContext unevaluated() {
+            return new RunOnContext(false, "", "", false, false);
+        }
+
+        public static RunOnContext evaluated(
+                final String serverVersion,
+                final String topology,
+                final boolean serverless,
+                final boolean authEnabled) {
+            return new RunOnContext(
+                    true,
+                    trimToEmpty(serverVersion),
+                    normalizeTopology(topology),
+                    serverless,
+                    authEnabled);
+        }
+
+        public String summary() {
+            return "serverVersion="
+                    + (serverVersion == null || serverVersion.isBlank() ? "unknown" : serverVersion)
+                    + ", topology="
+                    + (topology == null || topology.isBlank() ? "unknown" : topology)
+                    + ", serverless="
+                    + serverless
+                    + ", authEnabled="
+                    + authEnabled;
+        }
     }
 
     public enum ImportProfile {

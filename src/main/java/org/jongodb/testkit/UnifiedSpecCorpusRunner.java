@@ -1,5 +1,8 @@
 package org.jongodb.testkit;
 
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -107,7 +110,9 @@ public final class UnifiedSpecCorpusRunner {
 
     public RunResult run(final RunConfig config) throws IOException {
         Objects.requireNonNull(config, "config");
-        final UnifiedSpecImporter.ImportResult importResult = importer.importCorpus(config.specRoot());
+        final UnifiedSpecImporter.RunOnContext runOnContext = detectRunOnContext(config.mongoUri());
+        final UnifiedSpecImporter.ImportResult importResult =
+                importer.importCorpus(config.specRoot(), runOnContext);
         final long numericSeed = RealMongodCorpusRunner.deterministicSeed(config.seed());
 
         final List<UnifiedSpecImporter.ImportedScenario> orderedImported =
@@ -138,6 +143,55 @@ public final class UnifiedSpecCorpusRunner {
                 report,
                 failureReplays,
                 replayBundles);
+    }
+
+    private static UnifiedSpecImporter.RunOnContext detectRunOnContext(final String mongoUri) {
+        Objects.requireNonNull(mongoUri, "mongoUri");
+        try (MongoClient client = MongoClients.create(mongoUri)) {
+            final MongoDatabase admin = client.getDatabase("admin");
+            final Document buildInfo = admin.runCommand(new Document("buildInfo", 1));
+            final Document hello = admin.runCommand(new Document("hello", 1));
+            final String serverVersion = readServerVersion(buildInfo);
+            final String topology = detectTopology(hello);
+            final boolean serverless = readBoolean(hello, "isServerless");
+            return UnifiedSpecImporter.RunOnContext.evaluated(
+                    serverVersion,
+                    topology,
+                    serverless,
+                    false);
+        } catch (final RuntimeException ignored) {
+            return UnifiedSpecImporter.RunOnContext.unevaluated();
+        }
+    }
+
+    private static String readServerVersion(final Document buildInfo) {
+        final Object versionValue = buildInfo.get("version");
+        if (versionValue == null) {
+            return "";
+        }
+        return String.valueOf(versionValue).trim();
+    }
+
+    private static String detectTopology(final Document hello) {
+        if (hello.containsKey("setName")) {
+            return "replicaset";
+        }
+        final Object message = hello.get("msg");
+        if (message != null && "isdbgrid".equalsIgnoreCase(String.valueOf(message))) {
+            return "sharded";
+        }
+        if (readBoolean(hello, "loadBalanced")) {
+            return "load-balanced";
+        }
+        return "single";
+    }
+
+    private static boolean readBoolean(final Document document, final String key) {
+        final Object rawValue = document.get(key);
+        if (rawValue instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        return false;
     }
 
     public static ArtifactPaths artifactPaths(final Path outputDir) {

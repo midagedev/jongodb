@@ -1,6 +1,7 @@
 package org.jongodb.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.bson.BsonDocument;
 import org.jongodb.engine.InMemoryEngineStore;
@@ -44,6 +45,7 @@ class FindAndModifyCommandE2ETest {
 
         assertEquals(1.0, removeResponse.get("ok").asNumber().doubleValue());
         assertEquals(1, removeResponse.getDocument("lastErrorObject").getInt32("n").getValue());
+        assertFalse(removeResponse.getDocument("lastErrorObject").containsKey("updatedExisting"));
         assertEquals("alpha", removeResponse.get("value").asDocument().getString("name").getValue());
 
         final BsonDocument countAfter = dispatcher.dispatch(BsonDocument.parse(
