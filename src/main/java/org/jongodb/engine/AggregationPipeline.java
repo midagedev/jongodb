@@ -64,7 +64,7 @@ public final class AggregationPipeline {
         Objects.requireNonNull(collectionResolver, "collectionResolver");
         Objects.requireNonNull(collation, "collation");
 
-        List<Document> working = copyDocuments(source, "source documents must not contain null");
+        List<Document> working = materializeDocuments(source, "source documents must not contain null");
 
         for (final Document stage : pipeline) {
             if (stage == null) {
@@ -830,7 +830,7 @@ public final class AggregationPipeline {
 
         final List<Document> output = new ArrayList<>(input.size());
         for (final Document source : input) {
-            final List<Document> foreignSource = copyDocuments(
+            final List<Document> foreignSource = materializeDocuments(
                     collectionResolver.resolve(from),
                     "$lookup resolver returned null documents");
             List<Document> joined = foreignSource;
@@ -881,8 +881,8 @@ public final class AggregationPipeline {
             }
         }
 
-        final List<Document> combined = copyDocuments(input, "input must not contain null");
-        List<Document> unionSource = copyDocuments(
+        final List<Document> combined = materializeDocuments(input, "input must not contain null");
+        List<Document> unionSource = materializeDocuments(
                 collectionResolver.resolve(collectionName),
                 "$unionWith resolver returned null documents");
         if (!unionPipeline.isEmpty()) {
@@ -1005,18 +1005,18 @@ public final class AggregationPipeline {
         return List.copyOf(pipeline);
     }
 
-    private static List<Document> copyDocuments(final Iterable<Document> source, final String nullMessage) {
+    private static List<Document> materializeDocuments(final Iterable<Document> source, final String nullMessage) {
         Objects.requireNonNull(source, "source");
-        final List<Document> copied = source instanceof List<?> listSource
+        final List<Document> materialized = source instanceof List<?> listSource
                 ? new ArrayList<>(listSource.size())
                 : new ArrayList<>();
         for (final Document document : source) {
             if (document == null) {
                 throw new IllegalArgumentException(nullMessage);
             }
-            copied.add(DocumentCopies.copy(document));
+            materialized.add(document);
         }
-        return copied;
+        return materialized;
     }
 
     private static boolean lookupValueMatches(final Object localValue, final Object foreignValue) {

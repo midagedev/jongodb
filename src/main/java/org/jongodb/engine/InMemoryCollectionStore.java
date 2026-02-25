@@ -227,7 +227,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     @Override
     public synchronized List<Document> find(final Document filter, final CollationSupport.Config collation) {
-        Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
+        final Document effectiveFilter = filter == null ? new Document() : filter;
         final CollationSupport.Config effectiveCollation =
                 collation == null ? CollationSupport.Config.simple() : collation;
         return copyMatchingDocuments(effectiveFilter, effectiveCollation);
