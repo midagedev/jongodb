@@ -17,6 +17,9 @@ import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
 
 final class QueryMatcher {
+    private static final ThreadLocal<CollationSupport.Config> ACTIVE_COLLATION =
+            ThreadLocal.withInitial(CollationSupport.Config::simple);
+
     private QueryMatcher() {}
 
     static boolean matches(Document document, Document filter) {
@@ -40,6 +43,17 @@ final class QueryMatcher {
             }
         }
         return true;
+    }
+
+    static boolean matches(
+            final Document document, final Document filter, final CollationSupport.Config collation) {
+        final CollationSupport.Config previous = ACTIVE_COLLATION.get();
+        ACTIVE_COLLATION.set(collation == null ? CollationSupport.Config.simple() : collation);
+        try {
+            return matches(document, filter);
+        } finally {
+            ACTIVE_COLLATION.set(previous);
+        }
     }
 
     private static boolean isTopLevelOperator(String key) {
@@ -520,7 +534,7 @@ final class QueryMatcher {
             return compareNumbers(leftNumber, rightNumber);
         }
         if (left instanceof String leftString && right instanceof String rightString) {
-            return leftString.compareTo(rightString);
+            return currentCollation().compareStrings(leftString, rightString);
         }
         if (left.getClass().equals(right.getClass()) && left instanceof Comparable<?> comparableLeft) {
             @SuppressWarnings("unchecked")
@@ -969,7 +983,12 @@ final class QueryMatcher {
     }
 
     private static boolean valueEquals(Object left, Object right) {
-        return Objects.deepEquals(left, right);
+        return currentCollation().valuesEqual(left, right);
+    }
+
+    private static CollationSupport.Config currentCollation() {
+        final CollationSupport.Config config = ACTIVE_COLLATION.get();
+        return config == null ? CollationSupport.Config.simple() : config;
     }
 
     private enum ComparisonOperator {

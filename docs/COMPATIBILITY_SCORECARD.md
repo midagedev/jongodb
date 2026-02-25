@@ -66,7 +66,7 @@ Current ledger gate status:
 | `unsupported-by-policy UTF operation: failPoint` | 136 |
 | `unsupported UTF operation: clientBulkWrite` | 92 |
 | `unsupported UTF operation: targetedFailPoint` | 58 |
-| `unsupported UTF update option: arrayFilters` | 32 |
+| `unsupported UTF update option: arrayFilters` | 32 *(historical snapshot; subset implemented in #232)* |
 | `unsupported UTF aggregate stage in pipeline` | 28 |
 | `unsupported UTF operation: findOneAndDelete` | 26 |
 | `unsupported UTF operation: distinct` | 26 |
@@ -77,6 +77,7 @@ Current ledger gate status:
 Notes:
 
 - UTF importer now supports subset adapters for `runCommand` and `clientBulkWrite` (`#229`, `#231`).
+- `arrayFilters` subset and collation semantic subset landed (`#232`, `#235`); rerunning the ledger should reduce/update related unsupported buckets.
 - The counts above are from the latest frozen snapshot; rerunning the ledger will shift those categories toward narrower unsupported reasons (for example unsupported command names/options).
 - Profile context matters: this snapshot is strict-profile (`failPoint` policy exclusion enabled). Compat-profile runs track failpoint categories separately.
 - Deployment profile context matters: standalone and single-node-replica-set runs may surface different compatibility deltas in handshake/read-preference/concern paths.
@@ -103,6 +104,8 @@ Notes:
 - `#242`: CI quality gate for complex-query certification - completed.
 - `#241`: join-heavy pipeline parity for certification subset (`$lookup` + composed downstream with cursor contract) - completed.
 - `#243`: Spring complex-query matrix alignment with certification pack IDs and dedicated report section - completed.
+- `#232`: `arrayFilters` subset end-to-end (`$set`/`$unset` + `$[identifier]` binding) - completed.
+- `#235`: collation semantic subset (`locale`/`strength`/`caseLevel`) for query/sort/distinct/index interactions - completed.
 - `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction

@@ -5,6 +5,7 @@ import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt64;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 
 public final class CountDocumentsCommandHandler implements CommandHandler {
     private final CommandStore store;
@@ -33,6 +34,7 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
         if (optionError != null) {
             return optionError;
         }
+        final CollationSupport.Config collation = CrudCommandOptionValidator.collationOrSimple(command, "collation");
 
         final BsonValue filterValue = command.containsKey("filter") ? command.get("filter") : command.get("query");
         final BsonDocument filter;
@@ -76,7 +78,7 @@ public final class CountDocumentsCommandHandler implements CommandHandler {
 
         final List<BsonDocument> matches;
         try {
-            matches = store.find(database, collection, filter);
+            matches = store.find(database, collection, filter, collation);
         } catch (final IllegalArgumentException exception) {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }

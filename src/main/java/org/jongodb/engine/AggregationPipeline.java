@@ -25,16 +25,25 @@ public final class AggregationPipeline {
     private AggregationPipeline() {}
 
     public static List<Document> execute(final List<Document> source, final List<Document> pipeline) {
-        return execute(source, pipeline, UNSUPPORTED_COLLECTION_RESOLVER);
+        return execute(source, pipeline, UNSUPPORTED_COLLECTION_RESOLVER, CollationSupport.Config.simple());
     }
 
     public static List<Document> execute(
             final List<Document> source,
             final List<Document> pipeline,
             final CollectionResolver collectionResolver) {
+        return execute(source, pipeline, collectionResolver, CollationSupport.Config.simple());
+    }
+
+    public static List<Document> execute(
+            final List<Document> source,
+            final List<Document> pipeline,
+            final CollectionResolver collectionResolver,
+            final CollationSupport.Config collation) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(pipeline, "pipeline");
         Objects.requireNonNull(collectionResolver, "collectionResolver");
+        Objects.requireNonNull(collation, "collation");
 
         List<Document> working = new ArrayList<>(source.size());
         for (final Document document : source) {
@@ -55,20 +64,20 @@ public final class AggregationPipeline {
             final String stageName = stage.keySet().iterator().next();
             final Object stageDefinition = stage.get(stageName);
             working = switch (stageName) {
-                case "$match" -> applyMatch(working, stageDefinition);
+                case "$match" -> applyMatch(working, stageDefinition, collation);
                 case "$project" -> applyProject(working, stageDefinition);
                 case "$group" -> applyGroup(working, stageDefinition);
-                case "$sort" -> applySort(working, stageDefinition);
+                case "$sort" -> applySort(working, stageDefinition, collation);
                 case "$limit" -> applyLimit(working, stageDefinition);
                 case "$skip" -> applySkip(working, stageDefinition);
                 case "$unwind" -> applyUnwind(working, stageDefinition);
                 case "$count" -> applyCount(working, stageDefinition);
                 case "$addFields" -> applyAddFields(working, stageDefinition);
-                case "$sortByCount" -> applySortByCount(working, stageDefinition);
+                case "$sortByCount" -> applySortByCount(working, stageDefinition, collation);
                 case "$replaceRoot" -> applyReplaceRoot(working, stageDefinition);
-                case "$facet" -> applyFacet(working, stageDefinition, collectionResolver);
-                case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver);
-                case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver);
+                case "$facet" -> applyFacet(working, stageDefinition, collectionResolver, collation);
+                case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver, collation);
+                case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver, collation);
                 default -> throw new UnsupportedFeatureException(
                         "aggregation.stage." + stageName,
                         "unsupported aggregation stage: " + stageName);
@@ -82,11 +91,14 @@ public final class AggregationPipeline {
         return List.copyOf(output);
     }
 
-    private static List<Document> applyMatch(final List<Document> input, final Object stageDefinition) {
+    private static List<Document> applyMatch(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollationSupport.Config collation) {
         final Document filter = requireDocument(stageDefinition, "$match stage requires a document");
         final List<Document> output = new ArrayList<>();
         for (final Document document : input) {
-            if (QueryMatcher.matches(document, filter)) {
+            if (QueryMatcher.matches(document, filter, collation)) {
                 output.add(DocumentCopies.copy(document));
             }
         }
@@ -373,7 +385,10 @@ public final class AggregationPipeline {
         return value;
     }
 
-    private static List<Document> applySort(final List<Document> input, final Object stageDefinition) {
+    private static List<Document> applySort(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollationSupport.Config collation) {
         final Document sortDefinition = requireDocument(stageDefinition, "$sort stage requires a document");
         if (sortDefinition.isEmpty()) {
             throw new IllegalArgumentException("$sort stage must not be empty");
@@ -389,7 +404,7 @@ public final class AggregationPipeline {
         }
 
         final List<Document> sorted = new ArrayList<>(input);
-        sorted.sort((left, right) -> compareSortDocuments(left, right, sortKeys));
+        sorted.sort((left, right) -> compareSortDocuments(left, right, sortKeys, collation));
         return sorted;
     }
 
@@ -408,11 +423,14 @@ public final class AggregationPipeline {
     }
 
     private static int compareSortDocuments(
-            final Document left, final Document right, final List<SortKey> sortKeys) {
+            final Document left,
+            final Document right,
+            final List<SortKey> sortKeys,
+            final CollationSupport.Config collation) {
         for (final SortKey sortKey : sortKeys) {
             final Object leftValue = resolvePath(left, sortKey.field()).valueOrNull();
             final Object rightValue = resolvePath(right, sortKey.field()).valueOrNull();
-            final int compared = compareSortValues(leftValue, rightValue);
+            final int compared = compareSortValues(leftValue, rightValue, collation);
             if (compared != 0) {
                 return sortKey.direction() == 1 ? compared : -compared;
             }
@@ -421,7 +439,8 @@ public final class AggregationPipeline {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private static int compareSortValues(final Object left, final Object right) {
+    private static int compareSortValues(
+            final Object left, final Object right, final CollationSupport.Config collation) {
         if (left == right) {
             return 0;
         }
@@ -435,7 +454,7 @@ public final class AggregationPipeline {
             return Double.compare(leftNumber.doubleValue(), rightNumber.doubleValue());
         }
         if (left instanceof String leftString && right instanceof String rightString) {
-            return leftString.compareTo(rightString);
+            return collation.compareStrings(leftString, rightString);
         }
         if (left instanceof Boolean leftBoolean && right instanceof Boolean rightBoolean) {
             return Boolean.compare(leftBoolean, rightBoolean);
@@ -619,7 +638,10 @@ public final class AggregationPipeline {
         return List.copyOf(output);
     }
 
-    private static List<Document> applySortByCount(final List<Document> input, final Object stageDefinition) {
+    private static List<Document> applySortByCount(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollationSupport.Config collation) {
         final Map<GroupKey, CountBucket> buckets = new LinkedHashMap<>();
         for (final Document source : input) {
             final Object bucketValue = evaluateExpression(source, stageDefinition);
@@ -638,11 +660,11 @@ public final class AggregationPipeline {
         }
 
         output.sort((left, right) -> {
-            final int countCompared = compareSortValues(right.get("count"), left.get("count"));
+            final int countCompared = compareSortValues(right.get("count"), left.get("count"), collation);
             if (countCompared != 0) {
                 return countCompared;
             }
-            return compareSortValues(left.get("_id"), right.get("_id"));
+            return compareSortValues(left.get("_id"), right.get("_id"), collation);
         });
         return List.copyOf(output);
     }
@@ -674,7 +696,8 @@ public final class AggregationPipeline {
     private static List<Document> applyFacet(
             final List<Document> input,
             final Object stageDefinition,
-            final CollectionResolver collectionResolver) {
+            final CollectionResolver collectionResolver,
+            final CollationSupport.Config collation) {
         final Document facetDefinition = requireDocument(stageDefinition, "$facet stage requires a document");
         if (facetDefinition.isEmpty()) {
             throw new IllegalArgumentException("$facet stage must not be empty");
@@ -685,7 +708,7 @@ public final class AggregationPipeline {
             final String facetName = requireText(entry.getKey(), "$facet key");
             final List<Document> facetPipeline = toPipelineList(entry.getValue(), "$facet pipeline must be an array");
             final List<Document> facetOutput =
-                    execute(input, facetPipeline, collectionResolver);
+                    execute(input, facetPipeline, collectionResolver, collation);
             facetResult.put(facetName, facetOutput);
         }
         return List.of(facetResult);
@@ -694,7 +717,8 @@ public final class AggregationPipeline {
     private static List<Document> applyLookup(
             final List<Document> input,
             final Object stageDefinition,
-            final CollectionResolver collectionResolver) {
+            final CollectionResolver collectionResolver,
+            final CollationSupport.Config collation) {
         final Document lookupDefinition = requireDocument(stageDefinition, "$lookup stage requires a document");
         final String from = requireStringField(lookupDefinition, "from", "$lookup.from must be a string");
         final String as = requireStringField(lookupDefinition, "as", "$lookup.as must be a string");
@@ -740,7 +764,7 @@ public final class AggregationPipeline {
             if (!lookupPipeline.isEmpty()) {
                 final Map<String, Object> variables = evaluateLookupVariables(source, letDefinition);
                 final List<Document> substitutedPipeline = substitutePipelineVariables(lookupPipeline, variables);
-                joined = execute(joined, substitutedPipeline, collectionResolver);
+                joined = execute(joined, substitutedPipeline, collectionResolver, collation);
             }
 
             final Document expanded = DocumentCopies.copy(source);
@@ -753,7 +777,8 @@ public final class AggregationPipeline {
     private static List<Document> applyUnionWith(
             final List<Document> input,
             final Object stageDefinition,
-            final CollectionResolver collectionResolver) {
+            final CollectionResolver collectionResolver,
+            final CollationSupport.Config collation) {
         final String collectionName;
         final List<Document> unionPipeline;
         if (stageDefinition instanceof String collectionValue) {
@@ -775,7 +800,7 @@ public final class AggregationPipeline {
                 collectionResolver.resolve(collectionName),
                 "$unionWith resolver returned null documents");
         if (!unionPipeline.isEmpty()) {
-            unionSource = execute(unionSource, unionPipeline, collectionResolver);
+            unionSource = execute(unionSource, unionPipeline, collectionResolver, collation);
         }
         for (final Document document : unionSource) {
             combined.add(DocumentCopies.copy(document));

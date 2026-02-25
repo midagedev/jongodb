@@ -13,6 +13,7 @@ import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.jongodb.engine.AggregationPipeline;
 import org.jongodb.engine.CollectionStore;
+import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.DeleteManyResult;
 import org.jongodb.engine.EngineStore;
 import org.jongodb.engine.InMemoryEngineStore;
@@ -81,9 +82,18 @@ public final class EngineBackedCommandStore implements CommandStore {
 
     @Override
     public List<BsonDocument> find(final String database, final String collection, final BsonDocument filter) {
+        return find(database, collection, filter, CollationSupport.Config.simple());
+    }
+
+    @Override
+    public List<BsonDocument> find(
+            final String database,
+            final String collection,
+            final BsonDocument filter,
+            final CollationSupport.Config collation) {
         final CollectionStore collectionStore = engineStore.collection(database, collection);
         final Document convertedFilter = filter == null ? new Document() : toDocument(filter);
-        final List<Document> foundDocuments = collectionStore.find(convertedFilter);
+        final List<Document> foundDocuments = collectionStore.find(convertedFilter, collation);
 
         final List<BsonDocument> converted = new ArrayList<>();
         for (final Document document : foundDocuments) {
@@ -95,6 +105,15 @@ public final class EngineBackedCommandStore implements CommandStore {
     @Override
     public List<BsonDocument> aggregate(
             final String database, final String collection, final List<BsonDocument> pipeline) {
+        return aggregate(database, collection, pipeline, CollationSupport.Config.simple());
+    }
+
+    @Override
+    public List<BsonDocument> aggregate(
+            final String database,
+            final String collection,
+            final List<BsonDocument> pipeline,
+            final CollationSupport.Config collation) {
         Objects.requireNonNull(pipeline, "pipeline");
         final CollectionStore collectionStore = engineStore.collection(database, collection);
 
@@ -107,7 +126,8 @@ public final class EngineBackedCommandStore implements CommandStore {
         final List<Document> aggregatedDocuments = AggregationPipeline.execute(
                 sourceDocuments,
                 List.copyOf(convertedPipeline),
-                foreignCollectionName -> engineStore.collection(database, foreignCollectionName).findAll());
+                foreignCollectionName -> engineStore.collection(database, foreignCollectionName).findAll(),
+                collation);
         final List<BsonDocument> converted = new ArrayList<>(aggregatedDocuments.size());
         for (final Document document : aggregatedDocuments) {
             converted.add(toBsonDocument(document));
@@ -168,9 +188,13 @@ public final class EngineBackedCommandStore implements CommandStore {
             final UpdateRequest updateRequest = updates.get(index);
             final Document query = toDocument(Objects.requireNonNull(updateRequest.query(), "query"));
             final Document update = toDocument(Objects.requireNonNull(updateRequest.update(), "update"));
+            final List<Document> arrayFilters = new ArrayList<>(updateRequest.arrayFilters().size());
+            for (final BsonDocument arrayFilter : updateRequest.arrayFilters()) {
+                arrayFilters.add(toDocument(Objects.requireNonNull(arrayFilter, "arrayFilters entries must not be null")));
+            }
 
-            final UpdateManyResult result =
-                    collectionStore.update(query, update, updateRequest.multi(), updateRequest.upsert());
+            final UpdateManyResult result = collectionStore.update(
+                    query, update, updateRequest.multi(), updateRequest.upsert(), List.copyOf(arrayFilters));
             matchedCount += toBoundedInt(result.matchedCount());
             modifiedCount += toBoundedInt(result.modifiedCount());
             if (result.upserted()) {

@@ -3,17 +3,34 @@ package org.jongodb.command;
 import java.util.List;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 
 public interface CommandStore {
     int insert(String database, String collection, List<BsonDocument> documents);
 
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
 
+    default List<BsonDocument> find(
+            final String database,
+            final String collection,
+            final BsonDocument filter,
+            final CollationSupport.Config collation) {
+        return find(database, collection, filter);
+    }
+
     /**
      * Default fallback for test doubles that do not yet model aggregation pipelines.
      */
     default List<BsonDocument> aggregate(String database, String collection, List<BsonDocument> pipeline) {
         return find(database, collection, new BsonDocument());
+    }
+
+    default List<BsonDocument> aggregate(
+            final String database,
+            final String collection,
+            final List<BsonDocument> pipeline,
+            final CollationSupport.Config collation) {
+        return aggregate(database, collection, pipeline);
     }
 
     /**
@@ -105,7 +122,30 @@ public interface CommandStore {
         }
     }
 
-    record UpdateRequest(BsonDocument query, BsonDocument update, boolean multi, boolean upsert) {}
+    record UpdateRequest(
+            BsonDocument query, BsonDocument update, boolean multi, boolean upsert, List<BsonDocument> arrayFilters) {
+        public UpdateRequest(final BsonDocument query, final BsonDocument update, final boolean multi, final boolean upsert) {
+            this(query, update, multi, upsert, List.of());
+        }
+
+        public UpdateRequest {
+            arrayFilters = copyArrayFilters(arrayFilters);
+        }
+
+        private static List<BsonDocument> copyArrayFilters(final List<BsonDocument> source) {
+            if (source == null || source.isEmpty()) {
+                return List.of();
+            }
+            final List<BsonDocument> copied = new java.util.ArrayList<>(source.size());
+            for (final BsonDocument filter : source) {
+                if (filter == null) {
+                    throw new IllegalArgumentException("arrayFilters entries must not be null");
+                }
+                copied.add(filter.clone());
+            }
+            return List.copyOf(copied);
+        }
+    }
 
     record DeleteRequest(BsonDocument query, int limit) {}
 

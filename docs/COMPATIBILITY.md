@@ -19,8 +19,8 @@ Certification context:
 | `buildInfo` | Partial | Stable subset of fields |
 | `getParameter` | Partial | Only selected parameters |
 | `insert` | Partial | Single/batch insert supported; unsupported bulk modes are skipped in differential corpus |
-| `find` | Partial | Core filter support; not full query language |
-| `aggregate` | Partial | Tier-1/Tier-2 subset |
+| `find` | Partial | Core filter support; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
+| `aggregate` | Partial | Tier-1/Tier-2 subset; collation subset applied to `$match`/`$sort`/`$sortByCount` |
 | `getMore` | Supported | Cursor paging |
 | `killCursors` | Supported | Cursor cancellation |
 | `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
@@ -30,10 +30,10 @@ Certification context:
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
 | `count` | Partial | Alias path routed through `countDocuments` semantics in the test-backend profile |
-| `countDocuments` | Partial | Filter + skip/limit + hint/collation/readConcern shape validation |
+| `countDocuments` | Partial | Filter + skip/limit + hint/readConcern; collation subset applied to filter comparison |
 | `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `count`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
-| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator updates plus update-pipeline subset (`$set`/`$unset`, no expression evaluation); projection include/exclude subset (including `_id` override) |
+| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator updates plus update-pipeline subset (`$set`/`$unset`, no expression evaluation), `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
 
@@ -56,7 +56,7 @@ Implemented operators:
 
 Not implemented:
 - full expression operator set
-- full BSON collation-aware comparison behavior
+- advanced collation features beyond `locale`/`strength`/`caseLevel`
 
 ## Aggregation Stages
 
@@ -86,14 +86,15 @@ Not implemented or partial:
 
 Supported:
 - operator updates: `$set`, `$inc`, `$unset`
+- `arrayFilters` subset for `$set`/`$unset` paths using `$[identifier]` bindings
 - update pipeline subset: `$set`/`$unset` stages with literal values
 - replacement updates (with `multi=false`)
 - upsert for operator and replacement forms
 - same update constraints apply to `bulkWrite` update/replace operations
 
 Not supported:
-- `arrayFilters`
-- positional updates (`$`, `$[]`, `$[<id>]`)
+- advanced `arrayFilters` forms (unsupported operators, missing bindings, unsupported path/operator combinations)
+- positional updates (`$`, `$[]`)
 - update operators outside the supported set
 - update pipeline stages outside `$set`/`$unset`
 - update pipeline expressions (field references/operator expressions inside stage values)
@@ -109,7 +110,7 @@ differential parity counts:
 - `clientBulkWrite` with mixed namespaces, `ordered=false`, or `verboseResults=true`
 - documents containing dot or dollar-prefixed field paths in insert payloads
 - `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `count`)
-- update operations using `arrayFilters`
+- update operations using unsupported `arrayFilters` forms (outside `$set`/`$unset` subset)
 - update pipeline forms outside the supported subset (`$set`/`$unset` stages with literal values)
 - replacement updates requested with `multi=true`
 
@@ -133,7 +134,7 @@ Supported metadata paths:
 - `expireAfterSeconds` metadata
 
 Current limitations:
-- collation runtime semantics are not fully implemented
+- collation runtime semantics are subset-only (`locale`/`strength`/`caseLevel`)
 - TTL expiration loop/clock behavior is not fully implemented
 
 ## Transactions

@@ -17,11 +17,27 @@ public interface CollectionStore {
 
     List<Document> find(Document filter);
 
+    default List<Document> find(final Document filter, final CollationSupport.Config collation) {
+        return find(filter);
+    }
+
     default List<Document> aggregate(final List<Document> pipeline) {
         throw new UnsupportedOperationException("aggregate is not supported");
     }
 
     UpdateManyResult update(Document filter, Document update, boolean multi, boolean upsert);
+
+    default UpdateManyResult update(
+            final Document filter,
+            final Document update,
+            final boolean multi,
+            final boolean upsert,
+            final List<Document> arrayFilters) {
+        if (arrayFilters != null && !arrayFilters.isEmpty()) {
+            throw new IllegalArgumentException("arrayFilters is not supported yet");
+        }
+        return update(filter, update, multi, upsert);
+    }
 
     default UpdateManyResult updateMany(final Document filter, final Document update) {
         return update(filter, update, true, false);

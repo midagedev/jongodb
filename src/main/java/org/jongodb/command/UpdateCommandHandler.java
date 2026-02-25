@@ -108,20 +108,20 @@ public final class UpdateCommandHandler implements CommandHandler {
                 upsert = upsertValue.asBoolean().getValue();
             }
 
-            final BsonValue arrayFiltersValue = updateSpec.get("arrayFilters");
-            if (arrayFiltersValue != null) {
-                if (!arrayFiltersValue.isArray()) {
-                    return CommandErrors.typeMismatch("arrayFilters must be an array");
-                }
-                return CommandErrors.badValue("arrayFilters is not supported yet");
+            final UpdateArrayFiltersSubset.ParseResult parsedArrayFilters =
+                    UpdateArrayFiltersSubset.parse(updateSpec.get("arrayFilters"));
+            if (parsedArrayFilters.error() != null) {
+                return parsedArrayFilters.error();
             }
 
-            final BsonDocument updateValidationError = validateUpdateDocument(updateDocument, multi);
+            final BsonDocument updateValidationError =
+                    validateUpdateDocument(updateDocument, multi, parsedArrayFilters.parsed());
             if (updateValidationError != null) {
                 return updateValidationError;
             }
 
-            updates.add(new CommandStore.UpdateRequest(query, updateDocument, multi, upsert));
+            updates.add(new CommandStore.UpdateRequest(
+                    query, updateDocument, multi, upsert, parsedArrayFilters.parsed().filters()));
         }
 
         final CommandStore.UpdateResult result;
@@ -150,7 +150,10 @@ public final class UpdateCommandHandler implements CommandHandler {
         return response.append("ok", new BsonDouble(1.0));
     }
 
-    private static BsonDocument validateUpdateDocument(final BsonDocument updateDocument, final boolean multi) {
+    private static BsonDocument validateUpdateDocument(
+            final BsonDocument updateDocument,
+            final boolean multi,
+            final UpdateArrayFiltersSubset.ParsedArrayFilters parsedArrayFilters) {
         if (updateDocument.isEmpty()) {
             return CommandErrors.badValue("u must not be empty");
         }
@@ -164,6 +167,9 @@ public final class UpdateCommandHandler implements CommandHandler {
         }
 
         if (!operatorStyle) {
+            if (!parsedArrayFilters.isEmpty()) {
+                return CommandErrors.badValue("arrayFilters is only supported for operator updates");
+            }
             if (multi) {
                 return CommandErrors.badValue("replacement update requires multi=false");
             }
@@ -180,75 +186,28 @@ public final class UpdateCommandHandler implements CommandHandler {
         if (setValue != null && !setValue.isDocument()) {
             return CommandErrors.typeMismatch("$set must be a document");
         }
-        BsonDocument pathValidationError = validateUnsupportedPositionalPaths(setValue);
-        if (pathValidationError != null) {
-            return pathValidationError;
-        }
 
         final BsonValue setOnInsertValue = updateDocument.get("$setOnInsert");
         if (setOnInsertValue != null && !setOnInsertValue.isDocument()) {
             return CommandErrors.typeMismatch("$setOnInsert must be a document");
-        }
-        pathValidationError = validateUnsupportedPositionalPaths(setOnInsertValue);
-        if (pathValidationError != null) {
-            return pathValidationError;
         }
 
         final BsonValue incValue = updateDocument.get("$inc");
         if (incValue != null && !incValue.isDocument()) {
             return CommandErrors.typeMismatch("$inc must be a document");
         }
-        pathValidationError = validateUnsupportedPositionalPaths(incValue);
-        if (pathValidationError != null) {
-            return pathValidationError;
-        }
 
         final BsonValue unsetValue = updateDocument.get("$unset");
         if (unsetValue != null && !unsetValue.isDocument()) {
             return CommandErrors.typeMismatch("$unset must be a document");
-        }
-        pathValidationError = validateUnsupportedPositionalPaths(unsetValue);
-        if (pathValidationError != null) {
-            return pathValidationError;
         }
 
         final BsonValue addToSetValue = updateDocument.get("$addToSet");
         if (addToSetValue != null && !addToSetValue.isDocument()) {
             return CommandErrors.typeMismatch("$addToSet must be a document");
         }
-        pathValidationError = validateUnsupportedPositionalPaths(addToSetValue);
-        if (pathValidationError != null) {
-            return pathValidationError;
-        }
 
-        return null;
-    }
-
-    private static BsonDocument validateUnsupportedPositionalPaths(final BsonValue operatorDefinition) {
-        if (operatorDefinition == null) {
-            return null;
-        }
-
-        for (final String path : operatorDefinition.asDocument().keySet()) {
-            if (isUnsupportedPositionalPath(path)) {
-                return CommandErrors.badValue(
-                        "positional and array filter updates are not supported for path '" + path + "'");
-            }
-        }
-        return null;
-    }
-
-    private static boolean isUnsupportedPositionalPath(final String path) {
-        final String[] segments = path.split("\\.");
-        for (final String segment : segments) {
-            if ("$".equals(segment) || "$[]".equals(segment)) {
-                return true;
-            }
-            if (segment.startsWith("$[") && segment.endsWith("]")) {
-                return true;
-            }
-        }
-        return false;
+        return UpdateArrayFiltersSubset.validateUpdatePaths(updateDocument, parsedArrayFilters);
     }
 
     private static String readDatabase(final BsonDocument command) {

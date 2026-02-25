@@ -382,6 +382,20 @@ class QueryMatcherTest {
     }
 
     @Test
+    void supportsCollationSubsetForStringEqualityAndComparison() {
+        final Document document = new Document("name", "Alpha").append("city", "ä");
+        final Document uppercaseDocument = new Document("name", "ALPHA");
+        final CollationSupport.Config collation =
+                CollationSupport.Config.fromDocument(new Document("locale", "en").append("strength", 1));
+
+        assertTrue(QueryMatcher.matches(document, new Document("name", "alpha"), collation));
+        assertTrue(QueryMatcher.matches(document, new Document("name", new Document("$gte", "a")), collation));
+        assertTrue(QueryMatcher.matches(uppercaseDocument, new Document("name", new Document("$gte", "a")), collation));
+        assertTrue(QueryMatcher.matches(document, new Document("city", new Document("$lt", "z")), collation));
+        assertFalse(QueryMatcher.matches(document, new Document("name", "beta"), collation));
+    }
+
+    @Test
     void rejectsUnsupportedOperatorsOrInvalidOperands() {
         Document document = new Document("score", 10);
 

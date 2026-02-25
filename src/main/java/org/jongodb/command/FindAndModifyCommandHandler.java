@@ -12,6 +12,7 @@ import org.bson.BsonNull;
 import org.bson.BsonString;
 import org.bson.BsonType;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.DuplicateKeyException;
 
 public final class FindAndModifyCommandHandler implements CommandHandler {
@@ -28,6 +29,11 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         if (collection == null) {
             return CommandErrors.typeMismatch("findAndModify must be a string");
         }
+        BsonDocument optionError = CrudCommandOptionValidator.validateCollation(command, "collation");
+        if (optionError != null) {
+            return optionError;
+        }
+        final CollationSupport.Config collation = CrudCommandOptionValidator.collationOrSimple(command, "collation");
 
         final BsonDocument query;
         final BsonValue queryValue = command.get("query");
@@ -99,21 +105,39 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             return CommandErrors.typeMismatch("update must be a document");
         }
         final BsonDocument update = updateValue != null && updateValue.isDocument() ? updateValue.asDocument() : null;
+        final UpdateArrayFiltersSubset.ParseResult parsedArrayFilters =
+                UpdateArrayFiltersSubset.parse(command.get("arrayFilters"));
+        if (parsedArrayFilters.error() != null) {
+            return parsedArrayFilters.error();
+        }
+        if (remove && !parsedArrayFilters.parsed().isEmpty()) {
+            return CommandErrors.badValue("arrayFilters is not allowed when remove=true");
+        }
 
         final List<BsonDocument> matches;
         try {
-            matches = store.find(database, collection, query);
+            matches = store.find(database, collection, query, collation);
         } catch (final IllegalArgumentException exception) {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }
 
-        final BsonDocument selected = firstMatched(matches, sort);
+        final BsonDocument selected = firstMatched(matches, sort, collation);
 
         try {
             if (remove) {
                 return handleRemove(database, collection, selected, projectionSpec);
             }
-            return handleUpdate(database, collection, query, update, selected, upsert, returnNew, projectionSpec);
+            return handleUpdate(
+                    database,
+                    collection,
+                    query,
+                    update,
+                    selected,
+                    upsert,
+                    returnNew,
+                    projectionSpec,
+                    collation,
+                    parsedArrayFilters.parsed().filters());
         } catch (final DuplicateKeyException exception) {
             return CommandErrors.duplicateKey(exception.getMessage());
         } catch (final IllegalArgumentException exception) {
@@ -146,14 +170,16 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             final BsonDocument selected,
             final boolean upsert,
             final boolean returnNew,
-            final ProjectionSpec projectionSpec) {
+            final ProjectionSpec projectionSpec,
+            final CollationSupport.Config collation,
+            final List<BsonDocument> arrayFilters) {
         if (selected != null) {
             final BsonDocument oneFilter = singleDocumentFilter(selected);
             final CommandStore.UpdateResult result = store.update(
                     database,
                     collection,
-                    List.of(new CommandStore.UpdateRequest(oneFilter, update, false, false)));
-            final BsonDocument selectedValue = returnNew ? firstMatch(database, collection, oneFilter) : selected;
+                    List.of(new CommandStore.UpdateRequest(oneFilter, update, false, false, arrayFilters)));
+            final BsonDocument selectedValue = returnNew ? firstMatch(database, collection, oneFilter, collation) : selected;
             final BsonDocument value = applyProjection(selectedValue, projectionSpec);
             return successResponse(result.matchedCount() > 0 ? 1 : 0, result.matchedCount() > 0, null, value);
         }
@@ -165,16 +191,16 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         final CommandStore.UpdateResult result = store.update(
                 database,
                 collection,
-                List.of(new CommandStore.UpdateRequest(query, update, false, true)));
+                List.of(new CommandStore.UpdateRequest(query, update, false, true, arrayFilters)));
         final BsonValue upsertedId =
                 result.upserted().isEmpty() ? null : result.upserted().get(0).id();
 
         BsonDocument value = null;
         if (returnNew) {
             if (upsertedId != null) {
-                value = firstMatch(database, collection, new BsonDocument("_id", upsertedId));
+                value = firstMatch(database, collection, new BsonDocument("_id", upsertedId), collation);
             } else {
-                value = firstMatch(database, collection, query);
+                value = firstMatch(database, collection, query, collation);
             }
             value = applyProjection(value, projectionSpec);
         }
@@ -182,7 +208,8 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         return successResponse(upsertedId == null ? 0 : 1, false, upsertedId, value);
     }
 
-    private BsonDocument firstMatched(final List<BsonDocument> matches, final BsonDocument sort) {
+    private BsonDocument firstMatched(
+            final List<BsonDocument> matches, final BsonDocument sort, final CollationSupport.Config collation) {
         if (matches.isEmpty()) {
             return null;
         }
@@ -192,7 +219,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
 
         final List<SortKey> sortKeys = readSortKeys(sort);
         final List<BsonDocument> sorted = new ArrayList<>(matches);
-        sorted.sort((left, right) -> compareBySort(left, right, sortKeys));
+        sorted.sort((left, right) -> compareBySort(left, right, sortKeys, collation));
         return sorted.get(0);
     }
 
@@ -209,9 +236,13 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
     }
 
     private static int compareBySort(
-            final BsonDocument left, final BsonDocument right, final List<SortKey> sortKeys) {
+            final BsonDocument left,
+            final BsonDocument right,
+            final List<SortKey> sortKeys,
+            final CollationSupport.Config collation) {
         for (final SortKey sortKey : sortKeys) {
-            final int compared = compareSortValues(resolvePath(left, sortKey.field()), resolvePath(right, sortKey.field()));
+            final int compared =
+                    compareSortValues(resolvePath(left, sortKey.field()), resolvePath(right, sortKey.field()), collation);
             if (compared != 0) {
                 return sortKey.direction() == 1 ? compared : -compared;
             }
@@ -250,7 +281,8 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         return current;
     }
 
-    private static int compareSortValues(final BsonValue left, final BsonValue right) {
+    private static int compareSortValues(
+            final BsonValue left, final BsonValue right, final CollationSupport.Config collation) {
         if (left == right) {
             return 0;
         }
@@ -264,7 +296,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             return Double.compare(left.asNumber().doubleValue(), right.asNumber().doubleValue());
         }
         if (left.isString() && right.isString()) {
-            return left.asString().getValue().compareTo(right.asString().getValue());
+            return collation.compareStrings(left.asString().getValue(), right.asString().getValue());
         }
         if (left.isBoolean() && right.isBoolean()) {
             return Boolean.compare(left.asBoolean().getValue(), right.asBoolean().getValue());
@@ -305,8 +337,12 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         };
     }
 
-    private BsonDocument firstMatch(final String database, final String collection, final BsonDocument filter) {
-        final List<BsonDocument> matched = store.find(database, collection, filter);
+    private BsonDocument firstMatch(
+            final String database,
+            final String collection,
+            final BsonDocument filter,
+            final CollationSupport.Config collation) {
+        final List<BsonDocument> matched = store.find(database, collection, filter, collation);
         if (matched.isEmpty()) {
             return null;
         }

@@ -87,6 +87,42 @@ class BulkWriteCommandE2ETest {
     }
 
     @Test
+    void bulkWriteCommandSupportsArrayFiltersSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "bulkWrite": "users",
+                  "$db": "app",
+                  "ordered": true,
+                  "operations": [
+                    {"insertOne": {"document": {"_id": 1, "items": [{"sku": "A", "qty": 1}, {"sku": "B", "qty": 5}]}}},
+                    {"updateMany": {
+                      "filter": {"_id": 1},
+                      "update": {"$set": {"items.$[hot].flag": true}},
+                      "arrayFilters": [{"hot.qty": {"$gte": 3}}]
+                    }}
+                  ]
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, response.getInt32("nInserted").getValue());
+        assertEquals(1, response.getInt32("nMatched").getValue());
+        assertEquals(1, response.getInt32("nModified").getValue());
+        assertEquals(0, response.getInt32("nDeleted").getValue());
+        assertEquals(0, response.getInt32("nUpserted").getValue());
+
+        final BsonDocument finalState =
+                dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument document =
+                finalState.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertTrue(!document.getArray("items").get(0).asDocument().containsKey("flag"));
+        assertEquals(true, document.getArray("items").get(1).asDocument().getBoolean("flag").getValue());
+    }
+
+    @Test
     void bulkWriteCommandStopsAtFirstWriteErrorWhenOrdered() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 

@@ -54,9 +54,9 @@ Primary measures:
 
 ## Planned Next
 
-- Expand collation semantics beyond metadata round-trip.
+- Expand collation semantics beyond current subset (`locale`/`strength`/`caseLevel`).
 - Implement TTL runtime behavior beyond index metadata registration.
-- Expand update/operator coverage (`arrayFilters`, positional updates, pipeline updates).
+- Expand update/operator coverage beyond current `arrayFilters` subset (advanced positional/pipeline expressions).
 - Expand supported transaction operations in unified suites while preserving deterministic behavior.
 
 ## Out of Scope (Current Phase)

@@ -426,9 +426,6 @@ public final class UnifiedSpecImporter {
         if (rawUpdate == null) {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
-        if (arguments.containsKey("arrayFilters")) {
-            throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
-        }
         if (multi && isReplacementDocument(rawUpdate)) {
             throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
         }
@@ -522,10 +519,6 @@ public final class UnifiedSpecImporter {
         if (updateValue == null) {
             throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
         }
-        if (arguments.containsKey("arrayFilters")) {
-            throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
-        }
-
         final Map<String, Object> payload = commandEnvelope("findOneAndUpdate", database, collection);
         payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
         payload.put("update", deepCopyValue(updateValue));
@@ -535,6 +528,7 @@ public final class UnifiedSpecImporter {
         copyNormalizedReturnDocumentIfPresent(arguments, payload);
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
+        copyIfPresent(arguments, payload, "arrayFilters");
         return new ScenarioCommand("findOneAndUpdate", immutableMap(payload));
     }
 
@@ -635,9 +629,6 @@ public final class UnifiedSpecImporter {
         final Object updateValue = operationArguments.get("update");
         if (updateValue == null) {
             throw new IllegalArgumentException("bulkWrite update operation requires update argument");
-        }
-        if (operationArguments.containsKey("arrayFilters")) {
-            throw new UnsupportedOperationException("unsupported UTF update option: arrayFilters");
         }
         if (multi && isReplacementDocument(updateValue)) {
             throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");

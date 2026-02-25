@@ -82,6 +82,44 @@ class AggregateCommandE2ETest {
     }
 
     @Test
+    void aggregateCommandAppliesCollationForMatchAndSortSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "z"},
+                    {"_id": 2, "name": "ä"},
+                    {"_id": 3, "name": "ALPHA"}
+                  ]
+                }
+                """));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "aggregate": "users",
+                  "$db": "app",
+                  "pipeline": [
+                    {"$match": {"name": {"$gte": "a"}}},
+                    {"$sort": {"name": 1}}
+                  ],
+                  "collation": {"locale": "en", "strength": 1},
+                  "cursor": {}
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray firstBatch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals(3, firstBatch.size());
+        assertEquals("ä", firstBatch.get(0).asDocument().getString("name").getValue());
+        assertEquals("ALPHA", firstBatch.get(1).asDocument().getString("name").getValue());
+        assertEquals("z", firstBatch.get(2).asDocument().getString("name").getValue());
+    }
+
+    @Test
     void aggregateCommandRejectsInvalidPayloadShapes() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 

@@ -10,8 +10,8 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 | Status | Count |
 | --- | --- |
 | Supported | 7 |
-| Partial | 5 |
-| Unsupported | 1 |
+| Partial | 6 |
+| Unsupported | 0 |
 
 ## Feature-Level Matrix
 
@@ -25,7 +25,7 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 | `aggregation.expression-operators` | aggregation | Partial | Limited expression coverage |
 | `index.unique-sparse-partial` | index | Supported | Unique/sparse/partial |
 | `index.collation-metadata` | index | Supported | Collation metadata round-trip |
-| `index.collation-semantic` | index | Unsupported | Locale-aware comparison semantics |
+| `index.collation-semantic` | index | Partial | Subset: locale/strength/caseLevel on query-sort-distinct and unique index checks |
 | `transactions-single-session` | transaction | Supported | Session + txn flow with namespace-aware commit merge and deterministic same-`_id` resolution |
 | `transactions-retryable-advanced` | transaction | Partial | Deterministic retry contract for commit/abort replay and transaction error-label semantics (`TransientTransactionError`, `UnknownTransactionCommitResult`) within single-process scope |
 | `deployment.single-node-replicaset-profile` | deployment | Partial | Optional single-node replica-set semantic profile (replica-set URI/hello shape, primary-only readPreference contract, constrained concern levels) |

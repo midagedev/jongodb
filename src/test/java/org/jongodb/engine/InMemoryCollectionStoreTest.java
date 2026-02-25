@@ -72,6 +72,21 @@ class InMemoryCollectionStoreTest {
     }
 
     @Test
+    void findSupportsCaseInsensitiveCollationSubset() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(
+                List.of(
+                        new Document("_id", 1).append("name", "Alpha"),
+                        new Document("_id", 2).append("name", "beta")));
+
+        List<Document> filtered = store.find(
+                new Document("name", "alpha"),
+                CollationSupport.Config.fromDocument(new Document("locale", "en").append("strength", 1)));
+        assertEquals(1, filtered.size());
+        assertEquals(1, filtered.get(0).getInteger("_id"));
+    }
+
+    @Test
     void findSupportsOperatorFiltersForNestedArrayDocuments() {
         CollectionStore store = new InMemoryCollectionStore();
 
@@ -397,6 +412,24 @@ class InMemoryCollectionStoreTest {
         assertEquals(1, all.size());
         assertEquals(1, all.get(0).getInteger("_id"));
         assertEquals("ada@example.com", all.get(0).getString("email"));
+    }
+
+    @Test
+    void uniqueIndexWithCollationRejectsCaseInsensitiveDuplicates() {
+        CollectionStore store = new InMemoryCollectionStore();
+        store.createIndexes(List.of(new CollectionStore.IndexDefinition(
+                "email_1",
+                new Document("email", 1),
+                true,
+                false,
+                null,
+                new Document("locale", "en").append("strength", 1),
+                null)));
+
+        store.insertMany(List.of(new Document("_id", 1).append("email", "Alpha@example.com")));
+        assertThrows(
+                DuplicateKeyException.class,
+                () -> store.insertMany(List.of(new Document("_id", 2).append("email", "alpha@example.com"))));
     }
 
     @Test

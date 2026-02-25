@@ -2,6 +2,7 @@ package org.jongodb.command;
 
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 
 final class CrudCommandOptionValidator {
     private CrudCommandOptionValidator() {}
@@ -101,11 +102,47 @@ final class CrudCommandOptionValidator {
             return CommandErrors.typeMismatch(fieldName + " must be a document");
         }
 
-        final BsonValue localeValue = collationValue.asDocument().get("locale");
+        final BsonDocument collationDocument = collationValue.asDocument();
+        for (final String option : collationDocument.keySet()) {
+            if (CollationSupport.isSupportedOption(option)) {
+                continue;
+            }
+            return CommandErrors.notImplemented("collation option '" + option + "' is not supported");
+        }
+
+        final BsonValue localeValue = collationDocument.get("locale");
         if (localeValue != null && !localeValue.isString()) {
             return CommandErrors.typeMismatch(fieldName + ".locale must be a string");
         }
+        final BsonValue strengthValue = collationDocument.get("strength");
+        if (strengthValue != null) {
+            final Long parsedStrength = readIntegralLong(strengthValue);
+            if (parsedStrength == null) {
+                return CommandErrors.typeMismatch(fieldName + ".strength must be an integer");
+            }
+            if (parsedStrength < 1 || parsedStrength > 4) {
+                return CommandErrors.badValue(fieldName + ".strength must be between 1 and 4");
+            }
+        }
+        final BsonValue caseLevelValue = collationDocument.get("caseLevel");
+        if (caseLevelValue != null && !caseLevelValue.isBoolean()) {
+            return CommandErrors.typeMismatch(fieldName + ".caseLevel must be a boolean");
+        }
+
+        try {
+            CollationSupport.Config.fromBsonDocument(collationDocument);
+        } catch (final IllegalArgumentException exception) {
+            return CommandErrors.badValue(exception.getMessage());
+        }
         return null;
+    }
+
+    static CollationSupport.Config collationOrSimple(final BsonDocument command, final String fieldName) {
+        final BsonValue collationValue = command.get(fieldName);
+        if (collationValue == null || !collationValue.isDocument()) {
+            return CollationSupport.Config.simple();
+        }
+        return CollationSupport.Config.fromBsonDocument(collationValue.asDocument());
     }
 
     private static Long readIntegralLong(final BsonValue value) {
