@@ -5,7 +5,7 @@ import process from "node:process";
 
 import { MongoClient } from "mongodb";
 import mongoose from "mongoose";
-import { startJongodbMemoryServer } from "../../../packages/memory-server/dist/index.js";
+import { startJongodbMemoryServer } from "../../../packages/memory-server/dist/esm/index.js";
 
 const DEFAULT_REPORT_PATH = path.resolve(
   process.cwd(),
