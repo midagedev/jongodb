@@ -10,6 +10,8 @@ Status date: 2026-02-24
   - run id: `22332937657`
 - [x] External canary certification completed for 3 projects with rollback success.
   - run id: `22332937633`
+- [ ] Complex-query certification gate completed on `main` with no supported-subset regressions.
+  - workflow: `.github/workflows/complex-query-certification.yml`
 - [x] Support boundary documents are updated.
   - `docs/SUPPORT_MATRIX.md`
   - `docs/COMPATIBILITY_SCORECARD.md`
@@ -25,7 +27,7 @@ Status date: 2026-02-24
 Before creating a release tag:
 
 1. Confirm `CI Test Suite` is green on the release candidate commit.
-2. Re-run the three certification workflows above on the release candidate commit.
+2. Re-run certification workflows (Official Suite Sharded, R3 Failure Ledger, R3 External Canary, Complex Query Certification) on the release candidate commit.
 3. Confirm that `docs/COMPATIBILITY_SCORECARD.md` metrics still match artifacts.
 4. Confirm no open P1/P2 compatibility regressions remain.
 5. Push the release tag (`git tag -a vX.Y.Z <commit> -m "jongodb X.Y.Z"` then `git push origin vX.Y.Z`).

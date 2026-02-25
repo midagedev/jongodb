@@ -235,10 +235,22 @@ final class QueryMatcher {
         final String[] segments = path.split("\\.");
         Object current = document;
         for (final String segment : segments) {
-            if (!(current instanceof Map<?, ?> mapValue) || !mapValue.containsKey(segment)) {
-                return null;
+            if (current instanceof Map<?, ?> mapValue) {
+                if (!mapValue.containsKey(segment)) {
+                    return null;
+                }
+                current = mapValue.get(segment);
+                continue;
             }
-            current = mapValue.get(segment);
+            if (current instanceof List<?> listValue) {
+                final Integer index = parseArrayIndexSegment(segment);
+                if (index == null || index < 0 || index >= listValue.size()) {
+                    return null;
+                }
+                current = listValue.get(index);
+                continue;
+            }
+            return null;
         }
         return current;
     }
@@ -392,9 +404,32 @@ final class QueryMatcher {
         }
 
         if (current instanceof List<?> list) {
+            final Integer index = parseArrayIndexSegment(segments[segmentIndex]);
+            if (index != null) {
+                if (index >= 0 && index < list.size()) {
+                    collectPathValues(list.get(index), segments, segmentIndex + 1, values);
+                }
+                return;
+            }
             for (Object item : list) {
                 collectPathValues(item, segments, segmentIndex, values);
             }
+        }
+    }
+
+    private static Integer parseArrayIndexSegment(final String segment) {
+        if (segment == null || segment.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < segment.length(); i++) {
+            if (!Character.isDigit(segment.charAt(i))) {
+                return null;
+            }
+        }
+        try {
+            return Integer.parseInt(segment);
+        } catch (NumberFormatException exception) {
+            return null;
         }
     }
 

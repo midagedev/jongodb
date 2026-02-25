@@ -1,6 +1,6 @@
 # Compatibility Scorecard
 
-Status date: 2026-02-24
+Status date: 2026-02-25
 
 This scorecard tracks integration-test compatibility against MongoDB official specs.
 It is not a production MongoDB parity claim.
@@ -17,6 +17,7 @@ It is not a production MongoDB parity claim.
 | Official UTF sharded differential (historical baseline) | GitHub Actions `Official Suite Sharded` run `22339640229` | PASS |
 | R3 failure ledger (current) | `build/reports/r3-failure-ledger-local/r3-failure-ledger.json` | PASS (`failureCount=0`) |
 | UTF differential (current, suite-level) | `build/reports/unified-spec-*-local/utf-differential-report.json` | PASS (`mismatch=0`, `error=0`) |
+| Complex-query certification (canonical pack) | `build/reports/complex-query-certification/complex-query-certification.json` | Track via `supportedPassRate`, `mismatchCount`, `errorCount`, `unsupportedDeltaCount` |
 
 ## Baseline vs Current
 
@@ -96,6 +97,10 @@ Notes:
 - `#234`: profile-based failpoint handling (`strict` vs `compat`) - completed.
 - `#236`: advanced retryable transaction semantics subset (deterministic retry labels and replay behavior) - completed.
 - `#245`: single-node replica-set semantic profile (URI/handshake/primary-only read-preference contract) - completed.
+- `#238`: canonical complex-query pattern pack (24 scenarios with metadata/versioning) - completed.
+- `#239`: deterministic complex-query differential runner and replay artifacts - completed.
+- `#240`: nested predicate semantics expansion (array-index dotted path + `$expr` positional path resolution) - completed.
+- `#242`: CI quality gate for complex-query certification - completed.
 - `#104`: aggregate-stage unsupported reduction - remaining.
 
 ## Reproduction
@@ -108,4 +113,13 @@ Run the same ledger locally:
   -Pr3FailureLedgerMongoUri="<replica-set-uri>" \
   -Pr3FailureLedgerFailOnFailures=true \
   r3FailureLedger
+```
+
+Run complex-query certification locally:
+
+```bash
+./.tooling/gradle-8.10.2/bin/gradle --no-daemon \
+  -PcomplexQueryMongoUri="<replica-set-uri>" \
+  -PcomplexQueryFailOnGate=true \
+  complexQueryCertificationEvidence
 ```

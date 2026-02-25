@@ -320,6 +320,20 @@ class QueryMatcherTest {
     }
 
     @Test
+    void supportsArrayIndexPathMatching() {
+        final Document document =
+                new Document(
+                        "routes",
+                        List.of(
+                                new Document("region", "apac").append("weight", 5),
+                                new Document("region", "emea").append("weight", 2)));
+
+        assertTrue(QueryMatcher.matches(document, new Document("routes.0.region", "apac")));
+        assertTrue(QueryMatcher.matches(document, new Document("routes.1.weight", new Document("$lt", 3))));
+        assertFalse(QueryMatcher.matches(document, new Document("routes.2.region", "apac")));
+    }
+
+    @Test
     void supportsExprTopLevelOperator() {
         final Document document =
                 new Document("price", 120)
@@ -345,6 +359,26 @@ class QueryMatcherTest {
                                         List.of(
                                                 new Document("$eq", List.of("$qty", 3)),
                                                 new Document("$eq", List.of("$active", true)))))));
+    }
+
+    @Test
+    void supportsExprPathResolutionWithArrayIndexes() {
+        final Document document =
+                new Document("metrics", List.of(5, 2, 1))
+                        .append("series", List.of(new Document("value", 9), new Document("value", 4)));
+
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document("$expr", new Document("$eq", List.of("$metrics.0", 5)))));
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document("$expr", new Document("$gt", List.of("$series.0.value", "$series.1.value")))));
+        assertFalse(
+                QueryMatcher.matches(
+                        document,
+                        new Document("$expr", new Document("$eq", List.of("$metrics.3", 9)))));
     }
 
     @Test

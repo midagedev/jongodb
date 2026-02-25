@@ -141,6 +141,19 @@ gradle utfCorpusEvidence \
   -PutfMongoUri="mongodb://localhost:27017"
 ```
 
+Run complex-query certification evidence and gate:
+
+```bash
+gradle complexQueryCertificationEvidence \
+  -PcomplexQueryMongoUri="mongodb://localhost:27017/?replicaSet=rs0" \
+  -PcomplexQueryFailOnGate=true
+```
+
+Optional local triage overrides:
+- `-PcomplexQuerySeed=<text>`
+- `-PcomplexQueryPatternLimit=<n>`
+- `-PcomplexQueryOutputDir=<path>`
+
 Replay a single failure bundle from UTF artifacts:
 
 ```bash
@@ -239,6 +252,10 @@ gradle \
   - `build/reports/r3-failure-ledger/r3-failure-ledger.json`
   - `build/reports/r3-failure-ledger/r3-failure-ledger.md`
   - `build/reports/r3-failure-ledger/r3-failure-ledger-trend.md`
+- Complex-query certification:
+  - `build/reports/complex-query-certification/complex-query-certification.json`
+  - `build/reports/complex-query-certification/complex-query-certification.md`
+  - `build/reports/complex-query-certification/failure-replay-bundles/manifest.json`
 - Spring matrix:
   - `build/reports/spring-matrix/spring-compatibility-matrix.json`
   - `build/reports/spring-matrix/spring-compatibility-matrix.md`

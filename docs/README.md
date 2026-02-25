@@ -8,6 +8,7 @@ Runtime and compatibility:
 - `docs/USAGE.md`
 - `docs/SPRING_TESTING.md`
 - `docs/COMPATIBILITY.md`
+- `docs/COMPLEX_QUERY_CERTIFICATION.md`
 - `docs/COMPATIBILITY_SCORECARD.md`
 - `docs/NODE_COMPAT_SMOKE.md`
 - `docs/SUPPORT_MATRIX.md`
