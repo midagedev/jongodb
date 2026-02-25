@@ -62,6 +62,17 @@ Optional test database name:
 - `jongodb.test.database=<dbName>` (initializer style)
 - `JongodbMongoDynamicPropertySupport.register(registry, "<dbName>")` (dynamic style)
 
+Optional shared-server mode for initializer/single-hook style:
+- `@TestPropertySource(properties = "jongodb.test.sharedServer=true")`
+- `jongodb.test.sharedServer=true`
+
+When enabled, multiple Spring contexts in the same JVM reuse one in-process TCP server.
+The shared server closes automatically after the last shared context closes.
+
+Isolation caveat:
+- shared mode reuses process/port for speed, so prefer unique `jongodb.test.database` values per test class.
+- keep shared mode disabled (default) if your suite requires strict per-context process isolation.
+
 ## Migration from MongoDB Testcontainers
 
 ### Before (typical pattern)
