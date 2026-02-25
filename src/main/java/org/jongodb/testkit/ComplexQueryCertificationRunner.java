@@ -565,6 +565,10 @@ public final class ComplexQueryCertificationRunner {
                     .append(patternResult.expectedOutcome().name().toLowerCase(Locale.ROOT))
                     .append(", expectationSatisfied=")
                     .append(patternResult.expectationSatisfied())
+                    .append(", rationale=")
+                    .append(patternResult.rationale())
+                    .append(", useCase=")
+                    .append(patternResult.sampleUseCase())
                     .append(" -> ")
                     .append(patternResult.message())
                     .append('\n');

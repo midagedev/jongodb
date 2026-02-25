@@ -110,6 +110,7 @@ class ComplexQueryCertificationRunnerTest {
         assertTrue(markdown.contains("gate: FAIL"));
         assertTrue(markdown.contains("cq.test.mismatch"));
         assertTrue(markdown.contains("cq.test.unsupported"));
+        assertTrue(markdown.contains("rationale=rationale"));
     }
 
     @Test
