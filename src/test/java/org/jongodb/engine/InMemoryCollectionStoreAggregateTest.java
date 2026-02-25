@@ -133,6 +133,52 @@ class InMemoryCollectionStoreAggregateTest {
     }
 
     @Test
+    void aggregateSupportsSetAndUnsetStageAliases() {
+        final CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(List.of(new Document("_id", 1)
+                .append("name", "alpha")
+                .append("legacy", true)
+                .append("profile", new Document("city", "Seoul").append("zip", "00000"))));
+
+        final List<Document> aggregated = store.aggregate(List.of(
+                new Document("$set", new Document("city", "$profile.city").append("marker", 1)),
+                new Document("$unset", "legacy"),
+                new Document("$unset", List.of("profile.zip")),
+                new Document("$unset", new Document("marker", true))));
+
+        assertEquals(1, aggregated.size());
+        final Document first = aggregated.get(0);
+        assertEquals("alpha", first.getString("name"));
+        assertEquals("Seoul", first.getString("city"));
+        assertFalse(first.containsKey("legacy"));
+        assertFalse(first.containsKey("marker"));
+        assertEquals("Seoul", first.get("profile", Document.class).getString("city"));
+        assertFalse(first.get("profile", Document.class).containsKey("zip"));
+    }
+
+    @Test
+    void aggregateSupportsReplaceWithStageSubset() {
+        final CollectionStore store = new InMemoryCollectionStore();
+        store.insertMany(Arrays.asList(
+                new Document("_id", 1).append("profile", new Document("city", "Seoul")),
+                new Document("_id", 2).append("profile", new Document("city", "Busan"))));
+
+        final List<Document> replacedWithPath = store.aggregate(List.of(
+                new Document("$replaceWith", "$profile"),
+                new Document("$sort", new Document("city", 1))));
+        assertEquals(2, replacedWithPath.size());
+        assertEquals("Busan", replacedWithPath.get(0).getString("city"));
+        assertEquals("Seoul", replacedWithPath.get(1).getString("city"));
+        assertFalse(replacedWithPath.get(0).containsKey("_id"));
+
+        final List<Document> replacedWithLiteral = store.aggregate(List.of(
+                new Document("$replaceWith", new Document("kind", "summary")),
+                new Document("$limit", 1)));
+        assertEquals(1, replacedWithLiteral.size());
+        assertEquals("summary", replacedWithLiteral.get(0).getString("kind"));
+    }
+
+    @Test
     void aggregateSupportsFacetWithIndependentPipelines() {
         final CollectionStore store = new InMemoryCollectionStore();
         store.insertMany(Arrays.asList(

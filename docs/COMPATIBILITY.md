@@ -63,13 +63,17 @@ Not implemented:
 Implemented stages:
 - `$match`
 - `$project`
-- `$group` (currently `$sum` accumulator only)
+- `$group` (subset: `$sum`, `$first`, `$addToSet`)
 - `$sort`
 - `$limit`, `$skip`
 - `$unwind` (without `includeArrayIndex`)
 - `$count`
 - `$addFields`
+- `$set` (alias subset of `$addFields`)
+- `$unset` (field removal subset: string / array / document-key form)
 - `$sortByCount`
+- `$replaceRoot`
+- `$replaceWith` (alias-style root replacement subset)
 - `$facet`
 - `$lookup` (local/foreign and pipeline+let subset)
 - `$unionWith`

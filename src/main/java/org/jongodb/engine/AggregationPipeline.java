@@ -73,8 +73,11 @@ public final class AggregationPipeline {
                 case "$unwind" -> applyUnwind(working, stageDefinition);
                 case "$count" -> applyCount(working, stageDefinition);
                 case "$addFields" -> applyAddFields(working, stageDefinition);
+                case "$set" -> applySet(working, stageDefinition);
+                case "$unset" -> applyUnset(working, stageDefinition);
                 case "$sortByCount" -> applySortByCount(working, stageDefinition, collation);
                 case "$replaceRoot" -> applyReplaceRoot(working, stageDefinition);
+                case "$replaceWith" -> applyReplaceWith(working, stageDefinition);
                 case "$facet" -> applyFacet(working, stageDefinition, collectionResolver, collation);
                 case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver, collation);
                 case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver, collation);
@@ -621,21 +624,81 @@ public final class AggregationPipeline {
     }
 
     private static List<Document> applyAddFields(final List<Document> input, final Object stageDefinition) {
-        final Document addFields = requireDocument(stageDefinition, "$addFields stage requires a document");
-        if (addFields.isEmpty()) {
-            throw new IllegalArgumentException("$addFields stage must not be empty");
+        return applyFieldAssignmentStage(input, stageDefinition, "$addFields");
+    }
+
+    private static List<Document> applySet(final List<Document> input, final Object stageDefinition) {
+        return applyFieldAssignmentStage(input, stageDefinition, "$set");
+    }
+
+    private static List<Document> applyFieldAssignmentStage(
+            final List<Document> input,
+            final Object stageDefinition,
+            final String stageName) {
+        final Document assignments = requireDocument(stageDefinition, stageName + " stage requires a document");
+        if (assignments.isEmpty()) {
+            throw new IllegalArgumentException(stageName + " stage must not be empty");
         }
 
         final List<Document> output = new ArrayList<>(input.size());
         for (final Document source : input) {
             final Document expanded = DocumentCopies.copy(source);
-            for (final Map.Entry<String, Object> entry : addFields.entrySet()) {
-                final String fieldName = requireText(entry.getKey(), "$addFields field");
+            for (final Map.Entry<String, Object> entry : assignments.entrySet()) {
+                final String fieldName = requireText(entry.getKey(), stageName + " field");
                 setPath(expanded, fieldName, evaluateExpression(source, entry.getValue()));
             }
             output.add(expanded);
         }
         return List.copyOf(output);
+    }
+
+    private static List<Document> applyUnset(final List<Document> input, final Object stageDefinition) {
+        final List<String> fieldPaths = parseUnsetFields(stageDefinition);
+        final List<Document> output = new ArrayList<>(input.size());
+        for (final Document source : input) {
+            final Document reduced = DocumentCopies.copy(source);
+            for (final String fieldPath : fieldPaths) {
+                removePath(reduced, fieldPath);
+            }
+            output.add(reduced);
+        }
+        return List.copyOf(output);
+    }
+
+    private static List<String> parseUnsetFields(final Object stageDefinition) {
+        if (stageDefinition instanceof String fieldPath) {
+            return List.of(requireText(fieldPath, "$unset field"));
+        }
+
+        if (stageDefinition instanceof List<?> rawFields) {
+            if (rawFields.isEmpty()) {
+                throw new IllegalArgumentException("$unset stage array must not be empty");
+            }
+            final List<String> fieldPaths = new ArrayList<>(rawFields.size());
+            for (final Object rawField : rawFields) {
+                if (!(rawField instanceof String fieldPath)) {
+                    throw new IllegalArgumentException("$unset stage array entries must be strings");
+                }
+                fieldPaths.add(requireText(fieldPath, "$unset field"));
+            }
+            return List.copyOf(fieldPaths);
+        }
+
+        if (stageDefinition instanceof Map<?, ?> rawMap) {
+            if (rawMap.isEmpty()) {
+                throw new IllegalArgumentException("$unset stage document must not be empty");
+            }
+            final List<String> fieldPaths = new ArrayList<>(rawMap.size());
+            for (final Object rawKey : rawMap.keySet()) {
+                if (!(rawKey instanceof String fieldPath)) {
+                    throw new IllegalArgumentException("$unset stage document keys must be strings");
+                }
+                fieldPaths.add(requireText(fieldPath, "$unset field"));
+            }
+            return List.copyOf(fieldPaths);
+        }
+
+        throw new IllegalArgumentException("$unset stage requires a string, array, or document");
     }
 
     private static List<Document> applySortByCount(
@@ -681,12 +744,22 @@ public final class AggregationPipeline {
             }
             expression = replaceDefinition.get("newRoot");
         }
+        return applyReplaceRootExpression(input, expression, "$replaceRoot newRoot must evaluate to a document");
+    }
 
+    private static List<Document> applyReplaceWith(final List<Document> input, final Object stageDefinition) {
+        return applyReplaceRootExpression(input, stageDefinition, "$replaceWith expression must evaluate to a document");
+    }
+
+    private static List<Document> applyReplaceRootExpression(
+            final List<Document> input,
+            final Object expression,
+            final String nonDocumentMessage) {
         final List<Document> output = new ArrayList<>(input.size());
         for (final Document source : input) {
             final Object evaluated = evaluateExpression(source, expression);
             if (!(evaluated instanceof Map<?, ?> mapValue)) {
-                throw new IllegalArgumentException("$replaceRoot newRoot must evaluate to a document");
+                throw new IllegalArgumentException(nonDocumentMessage);
             }
             output.add(copyMapToDocument(mapValue));
         }
