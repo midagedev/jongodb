@@ -16,6 +16,7 @@ import org.bson.BsonInt64;
 import org.bson.BsonNull;
 import org.bson.BsonString;
 import org.bson.BsonValue;
+import org.jongodb.command.CommandCanonicalizer;
 
 /**
  * Shared command/request/response BSON conversions for scenario execution backends.
@@ -296,19 +297,35 @@ final class ScenarioBsonCodec {
             final ScenarioCommand command,
             final String defaultDatabase) {
         final BsonDocument source = toCommandDocument(command, defaultDatabase);
-        final BsonValue collection = source.get("replaceOne");
-        if (!(collection instanceof BsonString collectionName)) {
+        final String collectionName = CommandCanonicalizer.readCommandString(source, "replaceOne");
+        if (collectionName == null) {
             return source;
         }
+        final BsonDocument filter = CommandCanonicalizer.requireDocument(source, "filter", "filter must be a document");
+        final BsonDocument replacement = CommandCanonicalizer.requireDocument(
+                source,
+                "replacement",
+                "replacement must be a document");
+        if (replacement.isEmpty()) {
+            throw new CommandCanonicalizer.ValidationException(
+                    CommandCanonicalizer.ErrorKind.BAD_VALUE,
+                    "replacement must not be empty");
+        }
+        if (CommandCanonicalizer.containsTopLevelOperator(replacement)) {
+            throw new CommandCanonicalizer.ValidationException(
+                    CommandCanonicalizer.ErrorKind.BAD_VALUE,
+                    "replacement document must not contain update operators");
+        }
+        final boolean upsert = CommandCanonicalizer.optionalBoolean(source, "upsert", false, "upsert must be a boolean");
 
-        final BsonDocument translated = new BsonDocument("update", new BsonString(collectionName.getValue()));
+        final BsonDocument translated = new BsonDocument("update", new BsonString(collectionName));
         final BsonDocument updateEntry = new BsonDocument()
-                .append("q", asDocumentOrEmpty(source.get("filter")))
-                .append("u", source.get("replacement", new BsonDocument()))
+                .append("q", filter)
+                .append("u", replacement)
                 .append("multi", BsonBoolean.FALSE)
-                .append("upsert", BsonBoolean.valueOf(readBoolean(source.get("upsert"), false)));
-        appendIfPresent(source, updateEntry, "hint");
-        appendIfPresent(source, updateEntry, "collation");
+                .append("upsert", BsonBoolean.valueOf(upsert));
+        CommandCanonicalizer.appendIfPresent(source, updateEntry, "hint");
+        CommandCanonicalizer.appendIfPresent(source, updateEntry, "collation");
         translated.put("updates", new BsonArray(List.of(updateEntry)));
         copyFields(
                 source,
@@ -327,25 +344,41 @@ final class ScenarioBsonCodec {
             final ScenarioCommand command,
             final String defaultDatabase) {
         final BsonDocument source = toCommandDocument(command, defaultDatabase);
-        final BsonValue collection = source.get("findOneAndUpdate");
-        if (!(collection instanceof BsonString collectionName)) {
+        final String collectionName = CommandCanonicalizer.readCommandString(source, "findOneAndUpdate");
+        if (collectionName == null) {
             return source;
         }
+        final BsonDocument filter = CommandCanonicalizer.requireDocument(source, "filter", "filter must be a document");
+        final BsonValue update = source.get("update");
+        if (update == null || (!update.isDocument() && !update.isArray())) {
+            throw new CommandCanonicalizer.ValidationException(
+                    CommandCanonicalizer.ErrorKind.TYPE_MISMATCH,
+                    "update must be a document or array");
+        }
+        final BsonDocument sort = CommandCanonicalizer.optionalDocument(source, "sort", "sort must be a document");
+        final BsonDocument projection = CommandCanonicalizer.optionalDocument(
+                source,
+                "projection",
+                "projection must be a document");
+        final boolean upsert = CommandCanonicalizer.optionalBoolean(source, "upsert", false, "upsert must be a boolean");
+        final boolean returnNew = CommandCanonicalizer.parseReturnDocumentAsAfter(source);
 
         final BsonDocument translated = new BsonDocument()
-                .append("findAndModify", new BsonString(collectionName.getValue()))
-                .append("query", asDocumentOrEmpty(source.get("filter")))
-                .append("update", source.get("update", new BsonDocument()))
+                .append("findAndModify", new BsonString(collectionName))
+                .append("query", filter)
+                .append("update", update)
                 .append("remove", BsonBoolean.FALSE)
-                .append("new", BsonBoolean.valueOf(readReturnDocumentAsAfter(source)));
-        appendIfPresent(source, translated, "sort");
-        if (source.containsKey("projection")) {
-            translated.put("fields", source.get("projection"));
+                .append("new", BsonBoolean.valueOf(returnNew))
+                .append("upsert", BsonBoolean.valueOf(upsert));
+        if (sort != null) {
+            translated.put("sort", sort);
         }
-        appendIfPresent(source, translated, "upsert");
-        appendIfPresent(source, translated, "hint");
-        appendIfPresent(source, translated, "collation");
-        appendIfPresent(source, translated, "arrayFilters");
+        if (projection != null) {
+            translated.put("fields", projection);
+        }
+        CommandCanonicalizer.appendIfPresent(source, translated, "hint");
+        CommandCanonicalizer.appendIfPresent(source, translated, "collation");
+        CommandCanonicalizer.appendIfPresent(source, translated, "arrayFilters");
         copyFields(
                 source,
                 translated,
@@ -363,24 +396,48 @@ final class ScenarioBsonCodec {
             final ScenarioCommand command,
             final String defaultDatabase) {
         final BsonDocument source = toCommandDocument(command, defaultDatabase);
-        final BsonValue collection = source.get("findOneAndReplace");
-        if (!(collection instanceof BsonString collectionName)) {
+        final String collectionName = CommandCanonicalizer.readCommandString(source, "findOneAndReplace");
+        if (collectionName == null) {
             return source;
         }
+        final BsonDocument filter = CommandCanonicalizer.requireDocument(source, "filter", "filter must be a document");
+        final BsonDocument replacement = CommandCanonicalizer.requireDocument(
+                source,
+                "replacement",
+                "replacement must be a document");
+        if (replacement.isEmpty()) {
+            throw new CommandCanonicalizer.ValidationException(
+                    CommandCanonicalizer.ErrorKind.BAD_VALUE,
+                    "replacement must not be empty");
+        }
+        if (CommandCanonicalizer.containsTopLevelOperator(replacement)) {
+            throw new CommandCanonicalizer.ValidationException(
+                    CommandCanonicalizer.ErrorKind.BAD_VALUE,
+                    "replacement document must not contain update operators");
+        }
+        final BsonDocument sort = CommandCanonicalizer.optionalDocument(source, "sort", "sort must be a document");
+        final BsonDocument projection = CommandCanonicalizer.optionalDocument(
+                source,
+                "projection",
+                "projection must be a document");
+        final boolean upsert = CommandCanonicalizer.optionalBoolean(source, "upsert", false, "upsert must be a boolean");
+        final boolean returnNew = CommandCanonicalizer.parseReturnDocumentAsAfter(source);
 
         final BsonDocument translated = new BsonDocument()
-                .append("findAndModify", new BsonString(collectionName.getValue()))
-                .append("query", asDocumentOrEmpty(source.get("filter")))
-                .append("update", source.get("replacement", new BsonDocument()))
+                .append("findAndModify", new BsonString(collectionName))
+                .append("query", filter)
+                .append("update", replacement)
                 .append("remove", BsonBoolean.FALSE)
-                .append("new", BsonBoolean.valueOf(readReturnDocumentAsAfter(source)));
-        appendIfPresent(source, translated, "sort");
-        if (source.containsKey("projection")) {
-            translated.put("fields", source.get("projection"));
+                .append("new", BsonBoolean.valueOf(returnNew))
+                .append("upsert", BsonBoolean.valueOf(upsert));
+        if (sort != null) {
+            translated.put("sort", sort);
         }
-        appendIfPresent(source, translated, "upsert");
-        appendIfPresent(source, translated, "hint");
-        appendIfPresent(source, translated, "collation");
+        if (projection != null) {
+            translated.put("fields", projection);
+        }
+        CommandCanonicalizer.appendIfPresent(source, translated, "hint");
+        CommandCanonicalizer.appendIfPresent(source, translated, "collation");
         copyFields(
                 source,
                 translated,
@@ -407,10 +464,7 @@ final class ScenarioBsonCodec {
             final BsonDocument source,
             final BsonDocument target,
             final String key) {
-        if (!source.containsKey(key)) {
-            return;
-        }
-        target.put(key, source.get(key));
+        CommandCanonicalizer.appendIfPresent(source, target, key);
     }
 
     private static BsonDocument asDocumentOrEmpty(final BsonValue value) {
@@ -418,23 +472,6 @@ final class ScenarioBsonCodec {
             return value.asDocument();
         }
         return new BsonDocument();
-    }
-
-    private static boolean readBoolean(final BsonValue value, final boolean defaultValue) {
-        if (value == null || !value.isBoolean()) {
-            return defaultValue;
-        }
-        return value.asBoolean().getValue();
-    }
-
-    private static boolean readReturnDocumentAsAfter(final BsonDocument source) {
-        final BsonValue returnDocument = source.get("returnDocument");
-        if (returnDocument != null && returnDocument.isString()) {
-            final String value = returnDocument.asString().getValue();
-            return "after".equalsIgnoreCase(value);
-        }
-        final BsonValue newValue = source.get("new");
-        return readBoolean(newValue, false);
     }
 
     private static Object toJavaValue(BsonValue value) {
