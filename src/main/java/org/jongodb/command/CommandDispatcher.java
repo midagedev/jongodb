@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 import org.bson.BsonDocument;
+import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.WriteConflictException;
 import org.jongodb.txn.SessionTransactionPool;
 import org.jongodb.txn.SessionTransactionPool.TerminalState;
@@ -181,9 +182,27 @@ public final class CommandDispatcher {
         }
 
         @Override
+        public java.util.List<BsonDocument> find(
+                final String database,
+                final String collection,
+                final BsonDocument filter,
+                final CollationSupport.Config collation) {
+            return delegate().find(database, collection, filter, collation);
+        }
+
+        @Override
         public java.util.List<BsonDocument> aggregate(
                 final String database, final String collection, final java.util.List<BsonDocument> pipeline) {
             return delegate().aggregate(database, collection, pipeline);
+        }
+
+        @Override
+        public java.util.List<BsonDocument> aggregate(
+                final String database,
+                final String collection,
+                final java.util.List<BsonDocument> pipeline,
+                final CollationSupport.Config collation) {
+            return delegate().aggregate(database, collection, pipeline, collation);
         }
 
         @Override

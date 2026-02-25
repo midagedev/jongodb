@@ -1,9 +1,7 @@
 package org.jongodb.command;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import org.bson.BsonArray;
 import org.bson.BsonBoolean;
 import org.bson.BsonDocument;
@@ -11,7 +9,9 @@ import org.bson.BsonDouble;
 import org.bson.BsonInt32;
 import org.bson.BsonInt64;
 import org.bson.BsonString;
+import org.bson.BsonType;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 
 public final class DistinctCommandHandler implements CommandHandler {
     private final CommandStore store;
@@ -40,9 +40,7 @@ public final class DistinctCommandHandler implements CommandHandler {
         if (optionError != null) {
             return optionError;
         }
-        if (command.containsKey("collation")) {
-            return CommandErrors.notImplemented("collation is not supported for distinct yet");
-        }
+        final CollationSupport.Config collation = CrudCommandOptionValidator.collationOrSimple(command, "collation");
 
         final BsonValue keyValue = command.get("key");
         if (keyValue == null || !keyValue.isString()) {
@@ -67,29 +65,31 @@ public final class DistinctCommandHandler implements CommandHandler {
 
         final List<BsonDocument> matches;
         try {
-            matches = store.find(database, collection, query);
+            matches = store.find(database, collection, query, collation);
         } catch (final IllegalArgumentException exception) {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }
 
-        final BsonArray values = distinctValues(matches, path);
+        final BsonArray values = distinctValues(matches, path, collation);
         return new BsonDocument()
                 .append("values", values)
                 .append("ok", new BsonDouble(1.0));
     }
 
-    private static BsonArray distinctValues(final List<BsonDocument> matches, final String[] path) {
-        final Set<String> seen = new LinkedHashSet<>();
+    private static BsonArray distinctValues(
+            final List<BsonDocument> matches, final String[] path, final CollationSupport.Config collation) {
+        final List<BsonValue> seen = new ArrayList<>();
         final BsonArray values = new BsonArray();
 
         for (final BsonDocument match : matches) {
             final List<BsonValue> extracted = new ArrayList<>();
             collectPathValues(match, path, 0, extracted);
             for (final BsonValue value : extracted) {
-                final String key = dedupeKey(value);
-                if (seen.add(key)) {
-                    values.add(value);
+                if (containsByCollation(seen, value, collation)) {
+                    continue;
                 }
+                seen.add(value);
+                values.add(value);
             }
         }
         return values;
@@ -133,53 +133,57 @@ public final class DistinctCommandHandler implements CommandHandler {
         out.add(value);
     }
 
-    private static String dedupeKey(final BsonValue value) {
-        final StringBuilder builder = new StringBuilder();
-        appendCanonicalValue(value, builder);
-        return builder.toString();
-    }
-
-    private static void appendCanonicalValue(final BsonValue value, final StringBuilder builder) {
-        if (value == null) {
-            builder.append("NULL:null");
-            return;
-        }
-        builder.append(value.getBsonType().name()).append(':');
-        switch (value.getBsonType()) {
-            case STRING -> builder.append(((BsonString) value).getValue());
-            case INT32 -> builder.append(((BsonInt32) value).getValue());
-            case INT64 -> builder.append(((BsonInt64) value).getValue());
-            case DOUBLE -> builder.append(Double.toString(((BsonDouble) value).getValue()));
-            case BOOLEAN -> builder.append(((BsonBoolean) value).getValue());
-            case DOCUMENT -> appendCanonicalDocument(value.asDocument(), builder);
-            case ARRAY -> appendCanonicalArray(value.asArray(), builder);
-            default -> builder.append(value);
-        }
-    }
-
-    private static void appendCanonicalDocument(final BsonDocument document, final StringBuilder builder) {
-        builder.append('{');
-        boolean first = true;
-        for (final String key : document.keySet()) {
-            if (!first) {
-                builder.append(',');
+    private static boolean containsByCollation(
+            final List<BsonValue> seen, final BsonValue candidate, final CollationSupport.Config collation) {
+        for (final BsonValue existing : seen) {
+            if (bsonValueEquals(existing, candidate, collation)) {
+                return true;
             }
-            first = false;
-            builder.append(key).append('=');
-            appendCanonicalValue(document.get(key), builder);
         }
-        builder.append('}');
+        return false;
     }
 
-    private static void appendCanonicalArray(final BsonArray array, final StringBuilder builder) {
-        builder.append('[');
-        for (int index = 0; index < array.size(); index++) {
-            if (index > 0) {
-                builder.append(',');
-            }
-            appendCanonicalValue(array.get(index), builder);
+    private static boolean bsonValueEquals(
+            final BsonValue left, final BsonValue right, final CollationSupport.Config collation) {
+        if (left == right) {
+            return true;
         }
-        builder.append(']');
+        if (left == null || right == null) {
+            return false;
+        }
+        if (left.getBsonType() != right.getBsonType()) {
+            return false;
+        }
+
+        if (left.getBsonType() == BsonType.STRING) {
+            return collation.compareStrings(left.asString().getValue(), right.asString().getValue()) == 0;
+        }
+        if (left.getBsonType() == BsonType.DOCUMENT) {
+            if (left.asDocument().size() != right.asDocument().size()) {
+                return false;
+            }
+            for (final String key : left.asDocument().keySet()) {
+                if (!right.asDocument().containsKey(key)) {
+                    return false;
+                }
+                if (!bsonValueEquals(left.asDocument().get(key), right.asDocument().get(key), collation)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (left.getBsonType() == BsonType.ARRAY) {
+            if (left.asArray().size() != right.asArray().size()) {
+                return false;
+            }
+            for (int i = 0; i < left.asArray().size(); i++) {
+                if (!bsonValueEquals(left.asArray().get(i), right.asArray().get(i), collation)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return left.equals(right);
     }
 
     private static String[] splitPath(final String key) {

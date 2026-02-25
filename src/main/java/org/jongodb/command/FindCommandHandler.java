@@ -9,6 +9,7 @@ import org.bson.BsonInt64;
 import org.bson.BsonString;
 import org.bson.BsonType;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 
 public final class FindCommandHandler implements CommandHandler {
     private final CommandStore store;
@@ -39,6 +40,7 @@ public final class FindCommandHandler implements CommandHandler {
         if (optionError != null) {
             return optionError;
         }
+        final CollationSupport.Config collation = CrudCommandOptionValidator.collationOrSimple(command, "collation");
 
         final BsonValue filterValue = command.get("filter");
         final BsonDocument filter;
@@ -76,12 +78,12 @@ public final class FindCommandHandler implements CommandHandler {
 
         final List<BsonDocument> foundDocuments;
         try {
-            foundDocuments = store.find(database, collection, filter);
+            foundDocuments = store.find(database, collection, filter, collation);
         } catch (final IllegalArgumentException exception) {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }
 
-        final List<BsonDocument> selectedDocuments = applySortSkipLimit(foundDocuments, sortKeys, skip, limit);
+        final List<BsonDocument> selectedDocuments = applySortSkipLimit(foundDocuments, sortKeys, skip, limit, collation);
 
         final BsonValue batchSizeValue = command.get("batchSize");
         int batchSize = selectedDocuments.size();
@@ -195,10 +197,14 @@ public final class FindCommandHandler implements CommandHandler {
     }
 
     private static List<BsonDocument> applySortSkipLimit(
-            final List<BsonDocument> source, final List<SortKey> sortKeys, final int skip, final Integer limit) {
+            final List<BsonDocument> source,
+            final List<SortKey> sortKeys,
+            final int skip,
+            final Integer limit,
+            final CollationSupport.Config collation) {
         final List<BsonDocument> working = new ArrayList<>(source);
         if (!sortKeys.isEmpty()) {
-            working.sort((left, right) -> compareBySortKeys(left, right, sortKeys));
+            working.sort((left, right) -> compareBySortKeys(left, right, sortKeys, collation));
         }
 
         final int from = Math.min(skip, working.size());
@@ -210,11 +216,14 @@ public final class FindCommandHandler implements CommandHandler {
     }
 
     private static int compareBySortKeys(
-            final BsonDocument left, final BsonDocument right, final List<SortKey> sortKeys) {
+            final BsonDocument left,
+            final BsonDocument right,
+            final List<SortKey> sortKeys,
+            final CollationSupport.Config collation) {
         for (final SortKey sortKey : sortKeys) {
             final BsonValue leftValue = resolvePath(left, sortKey.field());
             final BsonValue rightValue = resolvePath(right, sortKey.field());
-            final int compared = compareSortValues(leftValue, rightValue);
+            final int compared = compareSortValues(leftValue, rightValue, collation);
             if (compared != 0) {
                 return sortKey.direction() == 1 ? compared : -compared;
             }
@@ -253,7 +262,8 @@ public final class FindCommandHandler implements CommandHandler {
         return current;
     }
 
-    private static int compareSortValues(final BsonValue left, final BsonValue right) {
+    private static int compareSortValues(
+            final BsonValue left, final BsonValue right, final CollationSupport.Config collation) {
         if (left == right) {
             return 0;
         }
@@ -267,7 +277,7 @@ public final class FindCommandHandler implements CommandHandler {
             return Double.compare(left.asNumber().doubleValue(), right.asNumber().doubleValue());
         }
         if (left.isString() && right.isString()) {
-            return left.asString().getValue().compareTo(right.asString().getValue());
+            return collation.compareStrings(left.asString().getValue(), right.asString().getValue());
         }
         if (left.isBoolean() && right.isBoolean()) {
             return Boolean.compare(left.asBoolean().getValue(), right.asBoolean().getValue());

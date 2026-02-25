@@ -8,16 +8,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.bson.Document;
 
 final class UpdateApplier {
     private UpdateApplier() {}
 
     static ParsedUpdate parse(final Document update) {
+        return parse(update, List.of());
+    }
+
+    static ParsedUpdate parse(final Document update, final List<Document> arrayFilters) {
         Objects.requireNonNull(update, "update");
         if (update.isEmpty()) {
             throw new IllegalArgumentException("update must not be empty");
         }
+        final ArrayFilterBindings parsedArrayFilters = ArrayFilterBindings.parse(arrayFilters);
 
         final boolean operatorStyle = update.keySet().iterator().next().startsWith("$");
         for (final String key : update.keySet()) {
@@ -28,6 +34,9 @@ final class UpdateApplier {
         }
 
         if (!operatorStyle) {
+            if (!parsedArrayFilters.isEmpty()) {
+                throw new IllegalArgumentException("arrayFilters is only supported for operator updates");
+            }
             return ParsedUpdate.replacement(DocumentCopies.copy(update));
         }
 
@@ -39,7 +48,7 @@ final class UpdateApplier {
 
         for (final Map.Entry<String, Object> entry : update.entrySet()) {
             final String operator = entry.getKey();
-            final Map<String, Object> definition = readDefinition(operator, entry.getValue());
+            final Map<String, Object> definition = readDefinition(operator, entry.getValue(), parsedArrayFilters);
             switch (operator) {
                 case "$set":
                     for (final Map.Entry<String, Object> setEntry : definition.entrySet()) {
@@ -79,7 +88,12 @@ final class UpdateApplier {
         }
 
         return ParsedUpdate.operator(
-                setOperations, setOnInsertOperations, incrementOperations, unsetOperations, addToSetOperations);
+                setOperations,
+                setOnInsertOperations,
+                incrementOperations,
+                unsetOperations,
+                addToSetOperations,
+                parsedArrayFilters);
     }
 
     static void validateApplicable(final Document document, final ParsedUpdate update) {
@@ -101,15 +115,15 @@ final class UpdateApplier {
         }
 
         for (final SetOperation operation : update.setOperations()) {
-            ensureWritablePath(document, operation.path());
+            ensureWritablePath(document, operation.path(), update.arrayFilterBindings());
         }
         if (includeSetOnInsert) {
             for (final SetOnInsertOperation operation : update.setOnInsertOperations()) {
-                ensureWritablePath(document, operation.path());
+                ensureWritablePath(document, operation.path(), update.arrayFilterBindings());
             }
         }
         for (final IncOperation operation : update.incrementOperations()) {
-            ensureWritablePath(document, operation.path());
+            ensureWritablePath(document, operation.path(), update.arrayFilterBindings());
 
             final PathLookup target = lookupPath(document, operation.path());
             if (target.exists() && !(target.value() instanceof Number)) {
@@ -118,7 +132,7 @@ final class UpdateApplier {
             }
         }
         for (final AddToSetOperation operation : update.addToSetOperations()) {
-            ensureWritablePath(document, operation.path());
+            ensureWritablePath(document, operation.path(), update.arrayFilterBindings());
 
             final PathLookup target = lookupPath(document, operation.path());
             if (target.exists() && !(target.value() instanceof List<?>)) {
@@ -148,18 +162,18 @@ final class UpdateApplier {
         boolean modified = false;
 
         for (final SetOperation operation : update.setOperations()) {
-            modified |= applySet(document, operation.path(), operation.value());
+            modified |= applySet(document, operation.path(), operation.value(), update.arrayFilterBindings());
         }
         if (includeSetOnInsert) {
             for (final SetOnInsertOperation operation : update.setOnInsertOperations()) {
-                modified |= applySet(document, operation.path(), operation.value());
+                modified |= applySet(document, operation.path(), operation.value(), update.arrayFilterBindings());
             }
         }
         for (final IncOperation operation : update.incrementOperations()) {
             modified |= applyIncrement(document, operation.path(), operation.delta());
         }
         for (final String path : update.unsetOperations()) {
-            modified |= applyUnset(document, path);
+            modified |= applyUnset(document, path, update.arrayFilterBindings());
         }
         for (final AddToSetOperation operation : update.addToSetOperations()) {
             modified |= applyAddToSet(document, operation.path(), operation.values());
@@ -221,7 +235,8 @@ final class UpdateApplier {
         return true;
     }
 
-    private static Map<String, Object> readDefinition(final String operator, final Object rawDefinition) {
+    private static Map<String, Object> readDefinition(
+            final String operator, final Object rawDefinition, final ArrayFilterBindings arrayFilterBindings) {
         if (!(rawDefinition instanceof Map<?, ?>)) {
             throw new IllegalArgumentException(operator + " definition must be a document");
         }
@@ -232,13 +247,34 @@ final class UpdateApplier {
                 throw new IllegalArgumentException(operator + " field path must be a string");
             }
             final String fieldPath = (String) entry.getKey();
-            parsePath(fieldPath);
+            validateSupportedPathForOperator(fieldPath, operator, arrayFilterBindings);
             definition.put(fieldPath, entry.getValue());
         }
         return definition;
     }
 
-    private static boolean applySet(final Document document, final String path, final Object value) {
+    private static void validateSupportedPathForOperator(
+            final String fieldPath, final String operator, final ArrayFilterBindings arrayFilterBindings) {
+        final boolean arrayFilterPath = pathContainsArrayFilter(fieldPath);
+        if (arrayFilterPath && !"$set".equals(operator) && !"$unset".equals(operator)) {
+            throw new IllegalArgumentException(
+                    "arrayFilters currently support only $set/$unset for path '" + fieldPath + "'");
+        }
+        parsePath(fieldPath, arrayFilterBindings.identifiers(), arrayFilterPath);
+    }
+
+    private static boolean applySet(
+            final Document document,
+            final String path,
+            final Object value,
+            final ArrayFilterBindings arrayFilterBindings) {
+        if (pathContainsArrayFilter(path)) {
+            return applySetWithArrayFilters(document, path, value, arrayFilterBindings);
+        }
+        return applySetWithoutArrayFilters(document, path, value);
+    }
+
+    private static boolean applySetWithoutArrayFilters(final Document document, final String path, final Object value) {
         final Map<String, Object> parent = getOrCreateParent(document, path);
         final String leaf = leaf(path);
 
@@ -252,6 +288,95 @@ final class UpdateApplier {
 
         parent.put(leaf, nextValue);
         return true;
+    }
+
+    private static boolean applySetWithArrayFilters(
+            final Document document,
+            final String path,
+            final Object value,
+            final ArrayFilterBindings arrayFilterBindings) {
+        if (arrayFilterBindings.isEmpty()) {
+            throw new IllegalArgumentException("arrayFilters must be specified for path '" + path + "'");
+        }
+        final String[] segments = parsePath(path, arrayFilterBindings.identifiers(), true);
+        return applySetWithArrayFilters(document, path, segments, 0, value, arrayFilterBindings);
+    }
+
+    private static boolean applySetWithArrayFilters(
+            final Object current,
+            final String path,
+            final String[] segments,
+            final int segmentIndex,
+            final Object value,
+            final ArrayFilterBindings arrayFilterBindings) {
+        final String segment = segments[segmentIndex];
+        final boolean leaf = segmentIndex == segments.length - 1;
+
+        if (isArrayFilterSegment(segment)) {
+            if (!(current instanceof List<?> listValue)) {
+                throw new IllegalArgumentException(
+                        "cannot update path '" + path + "' through non-array segment '" + segment + "'");
+            }
+            final List<Object> list = castList(listValue);
+            final Document arrayFilter = arrayFilterBindings.filterFor(arrayFilterIdentifier(segment));
+            boolean modified = false;
+            for (int i = 0; i < list.size(); i++) {
+                final Object item = list.get(i);
+                if (!matchesArrayFilter(item, arrayFilter)) {
+                    continue;
+                }
+                if (leaf) {
+                    final Object nextValue = DocumentCopies.copyAny(value);
+                    if (valueEquals(item, nextValue)) {
+                        continue;
+                    }
+                    list.set(i, nextValue);
+                    modified = true;
+                    continue;
+                }
+                modified |= applySetWithArrayFilters(item, path, segments, segmentIndex + 1, value, arrayFilterBindings);
+            }
+            return modified;
+        }
+
+        if (!(current instanceof Map<?, ?> mapValue)) {
+            throw new IllegalArgumentException(
+                    "cannot update path '" + path + "' through non-document segment '" + segment + "'");
+        }
+
+        final Map<String, Object> map = castMap(mapValue);
+        if (leaf) {
+            final Object nextValue = DocumentCopies.copyAny(value);
+            if (map.containsKey(segment) && valueEquals(map.get(segment), nextValue)) {
+                return false;
+            }
+            map.put(segment, nextValue);
+            return true;
+        }
+
+        final String nextSegment = segments[segmentIndex + 1];
+        if (!map.containsKey(segment)) {
+            if (isArrayFilterSegment(nextSegment)) {
+                return false;
+            }
+            final Document created = new Document();
+            map.put(segment, created);
+            return applySetWithArrayFilters(created, path, segments, segmentIndex + 1, value, arrayFilterBindings);
+        }
+
+        final Object next = map.get(segment);
+        if (isArrayFilterSegment(nextSegment)) {
+            if (!(next instanceof List<?>)) {
+                throw new IllegalArgumentException(
+                        "cannot update path '" + path + "' through non-array segment '" + segment + "'");
+            }
+            return applySetWithArrayFilters(next, path, segments, segmentIndex + 1, value, arrayFilterBindings);
+        }
+        if (!(next instanceof Map<?, ?>)) {
+            throw new IllegalArgumentException(
+                    "cannot update path '" + path + "' through non-document segment '" + segment + "'");
+        }
+        return applySetWithArrayFilters(next, path, segments, segmentIndex + 1, value, arrayFilterBindings);
     }
 
     private static boolean applyIncrement(final Document document, final String path, final Number delta) {
@@ -277,7 +402,15 @@ final class UpdateApplier {
         return true;
     }
 
-    private static boolean applyUnset(final Document document, final String path) {
+    private static boolean applyUnset(
+            final Document document, final String path, final ArrayFilterBindings arrayFilterBindings) {
+        if (pathContainsArrayFilter(path)) {
+            return applyUnsetWithArrayFilters(document, path, arrayFilterBindings);
+        }
+        return applyUnsetWithoutArrayFilters(document, path);
+    }
+
+    private static boolean applyUnsetWithoutArrayFilters(final Document document, final String path) {
         final Map<String, Object> parent = findParent(document, path);
         if (parent == null) {
             return false;
@@ -290,6 +423,68 @@ final class UpdateApplier {
 
         parent.remove(leaf);
         return true;
+    }
+
+    private static boolean applyUnsetWithArrayFilters(
+            final Document document, final String path, final ArrayFilterBindings arrayFilterBindings) {
+        if (arrayFilterBindings.isEmpty()) {
+            throw new IllegalArgumentException("arrayFilters must be specified for path '" + path + "'");
+        }
+        final String[] segments = parsePath(path, arrayFilterBindings.identifiers(), true);
+        return applyUnsetWithArrayFilters(document, path, segments, 0, arrayFilterBindings);
+    }
+
+    private static boolean applyUnsetWithArrayFilters(
+            final Object current,
+            final String path,
+            final String[] segments,
+            final int segmentIndex,
+            final ArrayFilterBindings arrayFilterBindings) {
+        final String segment = segments[segmentIndex];
+        final boolean leaf = segmentIndex == segments.length - 1;
+
+        if (isArrayFilterSegment(segment)) {
+            if (!(current instanceof List<?> listValue)) {
+                return false;
+            }
+            final List<Object> list = castList(listValue);
+            final Document arrayFilter = arrayFilterBindings.filterFor(arrayFilterIdentifier(segment));
+            boolean modified = false;
+            for (int i = 0; i < list.size(); i++) {
+                final Object item = list.get(i);
+                if (!matchesArrayFilter(item, arrayFilter)) {
+                    continue;
+                }
+                if (leaf) {
+                    if (item == null) {
+                        continue;
+                    }
+                    list.set(i, null);
+                    modified = true;
+                    continue;
+                }
+                modified |= applyUnsetWithArrayFilters(item, path, segments, segmentIndex + 1, arrayFilterBindings);
+            }
+            return modified;
+        }
+
+        if (!(current instanceof Map<?, ?> mapValue)) {
+            return false;
+        }
+        final Map<String, Object> map = castMap(mapValue);
+        if (leaf) {
+            if (!map.containsKey(segment)) {
+                return false;
+            }
+            map.remove(segment);
+            return true;
+        }
+        if (!map.containsKey(segment)) {
+            return false;
+        }
+
+        final Object next = map.get(segment);
+        return applyUnsetWithArrayFilters(next, path, segments, segmentIndex + 1, arrayFilterBindings);
     }
 
     private static boolean applyAddToSet(final Document document, final String path, final List<Object> values) {
@@ -333,7 +528,12 @@ final class UpdateApplier {
         return false;
     }
 
-    private static void ensureWritablePath(final Document document, final String path) {
+    private static void ensureWritablePath(
+            final Document document, final String path, final ArrayFilterBindings arrayFilterBindings) {
+        if (pathContainsArrayFilter(path)) {
+            parsePath(path, arrayFilterBindings.identifiers(), true);
+            return;
+        }
         final String[] segments = parsePath(path);
         @SuppressWarnings("unchecked")
         Map<String, Object> current = (Map<String, Object>) document;
@@ -436,6 +636,13 @@ final class UpdateApplier {
     }
 
     private static String[] parsePath(final String fieldPath) {
+        return parsePath(fieldPath, Set.of(), false);
+    }
+
+    private static String[] parsePath(
+            final String fieldPath,
+            final Set<String> arrayFilterIdentifiers,
+            final boolean allowArrayFilterSegments) {
         if (fieldPath == null || fieldPath.isBlank()) {
             throw new IllegalArgumentException("field path must not be blank");
         }
@@ -445,19 +652,34 @@ final class UpdateApplier {
             if (segment.isEmpty()) {
                 throw new IllegalArgumentException("field path must not contain empty segments");
             }
-            if (isUnsupportedPositionalSegment(segment)) {
+            if ("$".equals(segment) || "$[]".equals(segment)) {
                 throw new IllegalArgumentException(
                         "positional and array filter updates are not supported for path '" + fieldPath + "'");
             }
+            if (!isArrayFilterSegment(segment)) {
+                if (segment.contains("$[") || segment.contains("]")) {
+                    throw new IllegalArgumentException(
+                            "invalid array filter identifier segment in path '" + fieldPath + "'");
+                }
+                continue;
+            }
+
+            if (!allowArrayFilterSegments) {
+                throw new IllegalArgumentException(
+                        "positional and array filter updates are not supported for path '" + fieldPath + "'");
+            }
+            final String identifier = arrayFilterIdentifier(segment);
+            if (identifier.isEmpty() || !isValidArrayFilterIdentifier(identifier)) {
+                throw new IllegalArgumentException("invalid array filter identifier '" + identifier + "'");
+            }
+            if (arrayFilterIdentifiers.isEmpty()) {
+                throw new IllegalArgumentException("arrayFilters must be specified for path '" + fieldPath + "'");
+            }
+            if (!arrayFilterIdentifiers.contains(identifier)) {
+                throw new IllegalArgumentException("no array filter found for identifier '" + identifier + "'");
+            }
         }
         return segments;
-    }
-
-    private static boolean isUnsupportedPositionalSegment(final String segment) {
-        if ("$".equals(segment) || "$[]".equals(segment)) {
-            return true;
-        }
-        return segment.startsWith("$[") && segment.endsWith("]");
     }
 
     private static String leaf(final String path) {
@@ -468,6 +690,66 @@ final class UpdateApplier {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> castMap(final Map<?, ?> value) {
         return (Map<String, Object>) value;
+    }
+
+    private static boolean pathContainsArrayFilter(final String path) {
+        if (path == null) {
+            return false;
+        }
+        for (final String segment : path.split("\\.")) {
+            if (isArrayFilterSegment(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isArrayFilterSegment(final String segment) {
+        return segment.startsWith("$[") && segment.endsWith("]");
+    }
+
+    private static String arrayFilterIdentifier(final String segment) {
+        if (!isArrayFilterSegment(segment) || segment.length() <= 3) {
+            return "";
+        }
+        return segment.substring(2, segment.length() - 1);
+    }
+
+    private static boolean isValidArrayFilterIdentifier(final String identifier) {
+        if (identifier == null || identifier.isEmpty()) {
+            return false;
+        }
+        final char first = identifier.charAt(0);
+        if (!(Character.isLetter(first) || first == '_')) {
+            return false;
+        }
+        for (int i = 1; i < identifier.length(); i++) {
+            final char c = identifier.charAt(i);
+            if (!(Character.isLetterOrDigit(c) || c == '_')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean matchesArrayFilter(final Object candidate, final Document filter) {
+        if (filter == null) {
+            return false;
+        }
+        if (candidate instanceof Document documentCandidate) {
+            return QueryMatcher.matches(documentCandidate, filter);
+        }
+        if (!(candidate instanceof Map<?, ?> mapCandidate)) {
+            return false;
+        }
+
+        final Document wrappedCandidate = new Document();
+        for (final Map.Entry<?, ?> entry : mapCandidate.entrySet()) {
+            if (entry.getKey() instanceof String key) {
+                wrappedCandidate.put(key, entry.getValue());
+            }
+        }
+        return QueryMatcher.matches(wrappedCandidate, filter);
     }
 
     private static boolean valueEquals(final Object left, final Object right) {
@@ -540,6 +822,7 @@ final class UpdateApplier {
         private final List<String> unsetOperations;
         private final List<AddToSetOperation> addToSetOperations;
         private final Document replacementDocument;
+        private final ArrayFilterBindings arrayFilterBindings;
 
         private ParsedUpdate(
                 final List<SetOperation> setOperations,
@@ -547,13 +830,15 @@ final class UpdateApplier {
                 final List<IncOperation> incrementOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations,
-                final Document replacementDocument) {
+                final Document replacementDocument,
+                final ArrayFilterBindings arrayFilterBindings) {
             this.setOperations = List.copyOf(setOperations);
             this.setOnInsertOperations = List.copyOf(setOnInsertOperations);
             this.incrementOperations = List.copyOf(incrementOperations);
             this.unsetOperations = List.copyOf(unsetOperations);
             this.addToSetOperations = List.copyOf(addToSetOperations);
             this.replacementDocument = replacementDocument == null ? null : DocumentCopies.copy(replacementDocument);
+            this.arrayFilterBindings = Objects.requireNonNull(arrayFilterBindings, "arrayFilterBindings");
         }
 
         static ParsedUpdate operator(
@@ -561,18 +846,27 @@ final class UpdateApplier {
                 final List<SetOnInsertOperation> setOnInsertOperations,
                 final List<IncOperation> incrementOperations,
                 final List<String> unsetOperations,
-                final List<AddToSetOperation> addToSetOperations) {
+                final List<AddToSetOperation> addToSetOperations,
+                final ArrayFilterBindings arrayFilterBindings) {
             return new ParsedUpdate(
                     setOperations,
                     setOnInsertOperations,
                     incrementOperations,
                     unsetOperations,
                     addToSetOperations,
-                    null);
+                    null,
+                    arrayFilterBindings);
         }
 
         static ParsedUpdate replacement(final Document replacementDocument) {
-            return new ParsedUpdate(List.of(), List.of(), List.of(), List.of(), List.of(), replacementDocument);
+            return new ParsedUpdate(
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    replacementDocument,
+                    ArrayFilterBindings.empty());
         }
 
         boolean replacementStyle() {
@@ -601,6 +895,89 @@ final class UpdateApplier {
 
         List<AddToSetOperation> addToSetOperations() {
             return Collections.unmodifiableList(addToSetOperations);
+        }
+
+        ArrayFilterBindings arrayFilterBindings() {
+            return arrayFilterBindings;
+        }
+    }
+
+    private static final class ArrayFilterBindings {
+        private static final ArrayFilterBindings EMPTY = new ArrayFilterBindings(Map.of());
+
+        private final Map<String, Document> bindings;
+
+        private ArrayFilterBindings(final Map<String, Document> bindings) {
+            this.bindings = Map.copyOf(bindings);
+        }
+
+        static ArrayFilterBindings empty() {
+            return EMPTY;
+        }
+
+        static ArrayFilterBindings parse(final List<Document> arrayFilters) {
+            if (arrayFilters == null || arrayFilters.isEmpty()) {
+                return EMPTY;
+            }
+
+            final Map<String, Document> parsed = new LinkedHashMap<>();
+            for (final Document arrayFilter : arrayFilters) {
+                if (arrayFilter == null || arrayFilter.isEmpty()) {
+                    throw new IllegalArgumentException("arrayFilters entries must be non-empty documents");
+                }
+
+                String identifier = null;
+                final Document normalizedFilter = new Document();
+                for (final Map.Entry<String, Object> entry : arrayFilter.entrySet()) {
+                    final String key = entry.getKey();
+                    final int separator = key.indexOf('.');
+                    if (separator <= 0 || separator == key.length() - 1) {
+                        throw new IllegalArgumentException(
+                                "arrayFilters entries must use '<identifier>.<fieldPath>' keys");
+                    }
+
+                    final String candidateIdentifier = key.substring(0, separator);
+                    if (!isValidArrayFilterIdentifier(candidateIdentifier)) {
+                        throw new IllegalArgumentException(
+                                "invalid array filter identifier '" + candidateIdentifier + "'");
+                    }
+                    if (identifier == null) {
+                        identifier = candidateIdentifier;
+                    } else if (!identifier.equals(candidateIdentifier)) {
+                        throw new IllegalArgumentException(
+                                "arrayFilters entries must reference a single identifier");
+                    }
+
+                    final String fieldPath = key.substring(separator + 1);
+                    parsePath(fieldPath);
+                    normalizedFilter.put(fieldPath, DocumentCopies.copyAny(entry.getValue()));
+                }
+
+                if (identifier == null || normalizedFilter.isEmpty()) {
+                    throw new IllegalArgumentException("arrayFilters entries must not be empty");
+                }
+                if (parsed.containsKey(identifier)) {
+                    throw new IllegalArgumentException("duplicate array filter identifier '" + identifier + "'");
+                }
+                parsed.put(identifier, normalizedFilter);
+            }
+            return new ArrayFilterBindings(parsed);
+        }
+
+        boolean isEmpty() {
+            return bindings.isEmpty();
+        }
+
+        Set<String> identifiers() {
+            return bindings.keySet();
+        }
+
+        Document filterFor(final String identifier) {
+            final Document filter = bindings.get(identifier);
+            if (filter == null) {
+                throw new IllegalArgumentException("no array filter found for identifier '" + identifier + "'");
+            }
+            return filter;
         }
     }
 

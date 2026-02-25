@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 
@@ -120,6 +121,47 @@ class UpdateApplierTest {
                         IllegalArgumentException.class,
                         () -> UpdateApplier.parse(new Document("$set", new Document("items.$.qty", 1))));
         assertTrue(error.getMessage().contains("positional and array filter updates are not supported"));
+    }
+
+    @Test
+    void applySupportsArrayFilterSetAndUnsetSubset() {
+        Document target =
+                new Document("_id", 1)
+                        .append(
+                                "items",
+                                List.of(
+                                        new Document("sku", "A").append("qty", 1).append("legacy", true),
+                                        new Document("sku", "B").append("qty", 4).append("legacy", true)));
+        Document update =
+                new Document("$set", new Document("items.$[hot].qty", 9))
+                        .append("$unset", new Document("items.$[hot].legacy", true));
+        List<Document> arrayFilters = List.of(new Document("hot.qty", new Document("$gte", 3)));
+
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update, arrayFilters);
+        UpdateApplier.validateApplicable(target, parsed);
+
+        assertTrue(UpdateApplier.apply(target, parsed));
+        assertEquals(1, target.getList("items", Document.class).get(0).getInteger("qty"));
+        assertEquals(9, target.getList("items", Document.class).get(1).getInteger("qty"));
+        assertTrue(!target.getList("items", Document.class).get(1).containsKey("legacy"));
+    }
+
+    @Test
+    void parseRejectsArrayFilterPathWithoutBindings() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$set", new Document("items.$[e].qty", 1)), List.of()));
+        assertTrue(error.getMessage().contains("arrayFilters must be specified"));
+    }
+
+    @Test
+    void parseRejectsArrayFilterPathOnUnsupportedOperator() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> UpdateApplier.parse(
+                        new Document("$inc", new Document("items.$[e].qty", 1)),
+                        List.of(new Document("e.qty", new Document("$gte", 2)))));
+        assertTrue(error.getMessage().contains("arrayFilters currently support only $set/$unset"));
     }
 
     @Test

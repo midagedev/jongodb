@@ -210,7 +210,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksKnownUnsupportedQueryUpdateFeaturesAsUnsupported() throws IOException {
+    void importsArrayFiltersUpdateSubsetWhileKeepingOtherUnsupportedCasesSkipped() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-query-update.json"),
                 """
@@ -250,10 +250,18 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(2, result.unsupportedCount());
+        assertEquals(1, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
         assertTrue(result.skippedCases().stream().allMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("update", scenario.commands().get(0).commandName());
+        final Object updatesValue = scenario.commands().get(0).payload().get("updates");
+        assertTrue(updatesValue instanceof List<?>);
+        final Object updateEntry = ((List<?>) updatesValue).get(0);
+        assertTrue(updateEntry instanceof java.util.Map<?, ?>);
+        assertTrue(((java.util.Map<?, ?>) updateEntry).containsKey("arrayFilters"));
     }
 
     @Test

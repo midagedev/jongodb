@@ -383,15 +383,13 @@ class CommandDispatcherE2ETest {
                 "{\"distinct\":\"users\",\"key\":\"name\",\"query\":1}"));
         assertCommandError(queryTypeMismatch, "TypeMismatch");
 
-        final BsonDocument collationUnsupported = dispatcher.dispatch(BsonDocument.parse(
-                "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"collation\":{\"locale\":\"en\"}}"));
-        assertCommandError(collationUnsupported, 238, "NotImplemented");
-        assertEquals(
-                true,
-                collationUnsupported.getString("errmsg").getValue().contains("collation"));
-        assertEquals(
-                "UnsupportedFeature",
-                collationUnsupported.getArray("errorLabels").get(0).asString().getValue());
+        final BsonDocument unsupportedCollationOption = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"collation\":{\"locale\":\"en\",\"alternate\":\"shifted\"}}"));
+        assertCommandError(unsupportedCollationOption, 238, "NotImplemented");
+
+        final BsonDocument collationTypeMismatch = dispatcher.dispatch(BsonDocument.parse(
+                "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"collation\":{\"locale\":1}}"));
+        assertCommandError(collationTypeMismatch, "TypeMismatch");
 
         final BsonDocument hintBadValue = dispatcher.dispatch(BsonDocument.parse(
                 "{\"distinct\":\"users\",\"key\":\"name\",\"query\":{},\"hint\":{}}"));
@@ -417,6 +415,70 @@ class CommandDispatcherE2ETest {
         assertEquals(1.0, documentHint.get("ok").asNumber().doubleValue());
         assertEquals(2, documentHint.getArray("values").size());
         assertEquals(0, store.lastFindFilter.size());
+    }
+
+    @Test
+    void distinctCommandAppliesCollationForCaseInsensitiveDedupe() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "Alpha"},
+                    {"_id": 2, "name": "alpha"},
+                    {"_id": 3, "name": "ALPHA"}
+                  ]
+                }
+                """));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "distinct": "users",
+                  "$db": "app",
+                  "key": "name",
+                  "query": {},
+                  "collation": {"locale": "en", "strength": 1}
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, response.getArray("values").size());
+        assertEquals("Alpha", response.getArray("values").get(0).asString().getValue());
+    }
+
+    @Test
+    void findCommandAppliesCollationForSortOrdering() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "z"},
+                    {"_id": 2, "name": "ä"}
+                  ]
+                }
+                """));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "find": "users",
+                  "$db": "app",
+                  "filter": {},
+                  "sort": {"name": 1},
+                  "collation": {"locale": "en", "strength": 1}
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray batch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals("ä", batch.get(0).asDocument().getString("name").getValue());
+        assertEquals("z", batch.get(1).asDocument().getString("name").getValue());
     }
 
     @Test
@@ -902,6 +964,45 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void updateCommandSupportsArrayFiltersSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "items": [{"sku": "A", "qty": 1}, {"sku": "B", "qty": 3}]}
+                  ]
+                }
+                """));
+
+        final BsonDocument updateResponse = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "update": "users",
+                  "$db": "app",
+                  "updates": [
+                    {
+                      "q": {"_id": 1},
+                      "u": {"$set": {"items.$[match].qty": 10}},
+                      "arrayFilters": [{"match.qty": {"$gte": 2}}]
+                    }
+                  ]
+                }
+                """));
+        assertEquals(1.0, updateResponse.get("ok").asNumber().doubleValue());
+        assertEquals(1, updateResponse.getInt32("n").getValue());
+        assertEquals(1, updateResponse.getInt32("nModified").getValue());
+
+        final BsonDocument findResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
+        final BsonDocument updated = findResponse.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals(1, updated.getArray("items").get(0).asDocument().getInt32("qty").getValue());
+        assertEquals(10, updated.getArray("items").get(1).asDocument().getInt32("qty").getValue());
+    }
+
+    @Test
     void updateCommandCallsStoreAndReturnsWriteShape() {
         final RecordingStore store = new RecordingStore();
         store.updateResult = new CommandStore.UpdateResult(2, 1);
@@ -921,6 +1022,41 @@ class CommandDispatcherE2ETest {
                 store.lastUpdateRequests.get(0).query().getString("role").getValue());
         assertTrue(store.lastUpdateRequests.get(0).multi());
         assertTrue(!store.lastUpdateRequests.get(0).upsert());
+        assertEquals(0, store.lastUpdateRequests.get(0).arrayFilters().size());
+    }
+
+    @Test
+    void updateCommandPassesArrayFiltersToStore() {
+        final RecordingStore store = new RecordingStore();
+        store.updateResult = new CommandStore.UpdateResult(1, 1);
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "update": "users",
+                  "$db": "app",
+                  "updates": [
+                    {
+                      "q": {"_id": 1},
+                      "u": {"$set": {"items.$[e].qty": 7}},
+                      "arrayFilters": [{"e.qty": {"$gte": 2}}]
+                    }
+                  ]
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, store.lastUpdateRequests.size());
+        assertEquals(1, store.lastUpdateRequests.get(0).arrayFilters().size());
+        assertEquals(
+                2,
+                store.lastUpdateRequests.get(0)
+                        .arrayFilters()
+                        .get(0)
+                        .getDocument("e.qty")
+                        .getInt32("$gte")
+                        .getValue());
     }
 
     @Test
@@ -1028,6 +1164,38 @@ class CommandDispatcherE2ETest {
         assertEquals(1.0, response.get("ok").asNumber().doubleValue());
         assertEquals("Neo", response.getDocument("value").getString("name").getValue());
         assertEquals("inserted", response.getDocument("value").getString("createdAt").getValue());
+    }
+
+    @Test
+    void findOneAndUpdateCommandSupportsArrayFiltersSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "items": [{"sku": "A", "qty": 1}, {"sku": "B", "qty": 4}]}
+                  ]
+                }
+                """));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "findOneAndUpdate": "users",
+                  "$db": "app",
+                  "filter": {"_id": 1},
+                  "update": {"$set": {"items.$[hot].status": "hot"}},
+                  "arrayFilters": [{"hot.qty": {"$gte": 3}}],
+                  "returnDocument": "after"
+                }
+                """));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonDocument value = response.getDocument("value");
+        assertTrue(!value.getArray("items").get(0).asDocument().containsKey("status"));
+        assertEquals("hot", value.getArray("items").get(1).asDocument().getString("status").getValue());
     }
 
     @Test
@@ -1188,6 +1356,14 @@ class CommandDispatcherE2ETest {
         final BsonDocument unsupportedArrayFilters = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"a\":1}},\"arrayFilters\":[]}]}"));
         assertCommandError(unsupportedArrayFilters, "BadValue");
+
+        final BsonDocument missingArrayFilterBinding = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"items.$[e].qty\":1}},\"arrayFilters\":[{\"x.qty\":{\"$gte\":2}}]}]}"));
+        assertCommandError(missingArrayFilterBinding, "BadValue");
+
+        final BsonDocument arrayFilterWithUnsupportedOperator = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$inc\":{\"items.$[e].qty\":1}},\"arrayFilters\":[{\"e.qty\":{\"$gte\":2}}]}]}"));
+        assertCommandError(arrayFilterWithUnsupportedOperator, "BadValue");
 
         final BsonDocument unsupportedPipelineStage = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":[{\"$replaceRoot\":{\"newRoot\":{\"x\":1}}}]}]}"));

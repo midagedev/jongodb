@@ -480,7 +480,11 @@ public final class R2CompatibilityScorecard {
                     new SupportEntry("aggregation.expression-operators", "aggregation", SupportStatus.PARTIAL, "Limited expression coverage"),
                     new SupportEntry("index.unique-sparse-partial", "index", SupportStatus.SUPPORTED, "Unique/sparse/partial"),
                     new SupportEntry("index.collation-metadata", "index", SupportStatus.SUPPORTED, "Collation metadata round-trip"),
-                    new SupportEntry("index.collation-semantic", "index", SupportStatus.UNSUPPORTED, "Locale-aware comparison semantics"),
+                    new SupportEntry(
+                            "index.collation-semantic",
+                            "index",
+                            SupportStatus.PARTIAL,
+                            "Subset: locale/strength/caseLevel on query-sort-distinct and unique index checks"),
                     new SupportEntry("transactions-single-session", "transaction", SupportStatus.SUPPORTED, "Session + txn command flow"),
                     new SupportEntry("transactions-retryable-advanced", "transaction", SupportStatus.PARTIAL, "Partial compatibility"),
                     new SupportEntry("protocol-unsupported-contract", "protocol", SupportStatus.SUPPORTED, "NotImplemented + UnsupportedFeature labels")));

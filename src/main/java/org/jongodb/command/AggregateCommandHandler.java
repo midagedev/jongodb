@@ -8,6 +8,7 @@ import org.bson.BsonDouble;
 import org.bson.BsonInt64;
 import org.bson.BsonString;
 import org.bson.BsonValue;
+import org.jongodb.engine.CollationSupport;
 
 public final class AggregateCommandHandler implements CommandHandler {
     private final CommandStore store;
@@ -38,6 +39,7 @@ public final class AggregateCommandHandler implements CommandHandler {
         if (optionError != null) {
             return optionError;
         }
+        final CollationSupport.Config collation = CrudCommandOptionValidator.collationOrSimple(command, "collation");
 
         final BsonValue pipelineValue = command.get("pipeline");
         if (pipelineValue == null || !pipelineValue.isArray()) {
@@ -73,7 +75,7 @@ public final class AggregateCommandHandler implements CommandHandler {
 
         final List<BsonDocument> aggregatedDocuments;
         try {
-            aggregatedDocuments = store.aggregate(database, collection, List.copyOf(pipeline));
+            aggregatedDocuments = store.aggregate(database, collection, List.copyOf(pipeline), collation);
         } catch (final IllegalArgumentException exception) {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }

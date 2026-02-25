@@ -195,13 +195,20 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     @Override
     public synchronized List<Document> findAll() {
-        return copyMatchingDocuments(new Document());
+        return copyMatchingDocuments(new Document(), CollationSupport.Config.simple());
     }
 
     @Override
     public synchronized List<Document> find(Document filter) {
+        return find(filter, CollationSupport.Config.simple());
+    }
+
+    @Override
+    public synchronized List<Document> find(final Document filter, final CollationSupport.Config collation) {
         Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
-        return copyMatchingDocuments(effectiveFilter);
+        final CollationSupport.Config effectiveCollation =
+                collation == null ? CollationSupport.Config.simple() : collation;
+        return copyMatchingDocuments(effectiveFilter, effectiveCollation);
     }
 
     @Override
@@ -226,9 +233,20 @@ public final class InMemoryCollectionStore implements CollectionStore {
     @Override
     public synchronized UpdateManyResult update(
             final Document filter, final Document update, final boolean multi, final boolean upsert) {
+        return update(filter, update, multi, upsert, List.of());
+    }
+
+    @Override
+    public synchronized UpdateManyResult update(
+            final Document filter,
+            final Document update,
+            final boolean multi,
+            final boolean upsert,
+            final List<Document> arrayFilters) {
         final Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
         final Document effectiveUpdate = update == null ? null : DocumentCopies.copy(update);
-        final UpdateApplier.ParsedUpdate parsedUpdate = UpdateApplier.parse(effectiveUpdate);
+        final List<Document> effectiveArrayFilters = copyArrayFilters(arrayFilters);
+        final UpdateApplier.ParsedUpdate parsedUpdate = UpdateApplier.parse(effectiveUpdate, effectiveArrayFilters);
 
         final List<Document> matchedDocuments = new ArrayList<>();
         for (final Document document : documents) {
@@ -287,6 +305,17 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return new UpdateManyResult(matchedDocuments.size(), modifiedCount);
     }
 
+    private static List<Document> copyArrayFilters(final List<Document> arrayFilters) {
+        if (arrayFilters == null || arrayFilters.isEmpty()) {
+            return List.of();
+        }
+        final List<Document> copied = new ArrayList<>(arrayFilters.size());
+        for (final Document filter : arrayFilters) {
+            copied.add(DocumentCopies.copy(Objects.requireNonNull(filter, "arrayFilters entries must not be null")));
+        }
+        return List.copyOf(copied);
+    }
+
     @Override
     public synchronized DeleteManyResult deleteMany(Document filter) {
         Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
@@ -304,10 +333,10 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return new DeleteManyResult(deletedCount, deletedCount);
     }
 
-    private List<Document> copyMatchingDocuments(Document filter) {
+    private List<Document> copyMatchingDocuments(final Document filter, final CollationSupport.Config collation) {
         List<Document> matches = new ArrayList<>();
         for (Document document : documents) {
-            if (QueryMatcher.matches(document, filter)) {
+            if (QueryMatcher.matches(document, filter, collation)) {
                 matches.add(DocumentCopies.copy(document));
             }
         }
@@ -468,10 +497,13 @@ public final class InMemoryCollectionStore implements CollectionStore {
                 continue;
             }
 
-            Map<UniqueValueKey, Boolean> seenValues = new HashMap<>();
+            final CollationSupport.Config indexCollation = index.collation() == null
+                    ? CollationSupport.Config.simple()
+                    : CollationSupport.Config.fromDocument(index.collation());
+            final List<UniqueValueKey> seenValues = new ArrayList<>();
             for (Document document : candidateDocuments) {
                 if (index.partialFilterExpression() != null
-                        && !QueryMatcher.matches(document, index.partialFilterExpression())) {
+                        && !QueryMatcher.matches(document, index.partialFilterExpression(), indexCollation)) {
                     continue;
                 }
                 if (index.sparse() && isSparseExcluded(document, index.uniqueFieldPaths())) {
@@ -479,9 +511,11 @@ public final class InMemoryCollectionStore implements CollectionStore {
                 }
 
                 final Object[] values = resolvePathValues(document, index.uniqueFieldPaths());
-                if (seenValues.putIfAbsent(new UniqueValueKey(values), Boolean.TRUE) != null) {
+                final UniqueValueKey candidateKey = new UniqueValueKey(values, indexCollation);
+                if (seenValues.contains(candidateKey)) {
                     throw new DuplicateKeyException(duplicateKeyMessage(index, values));
                 }
+                seenValues.add(candidateKey);
             }
         }
     }
@@ -729,12 +763,12 @@ public final class InMemoryCollectionStore implements CollectionStore {
             List<String> uniqueFieldPaths) {}
 
     private static final class UniqueValueKey {
-        private final Object value;
-        private final int hashCode;
+        private final Object[] values;
+        private final CollationSupport.Config collation;
 
-        private UniqueValueKey(final Object value) {
-            this.value = value;
-            this.hashCode = Arrays.deepHashCode(new Object[] {value});
+        private UniqueValueKey(final Object[] values, final CollationSupport.Config collation) {
+            this.values = values == null ? new Object[0] : Arrays.copyOf(values, values.length);
+            this.collation = Objects.requireNonNull(collation, "collation");
         }
 
         @Override
@@ -745,12 +779,20 @@ public final class InMemoryCollectionStore implements CollectionStore {
             if (!(other instanceof UniqueValueKey that)) {
                 return false;
             }
-            return Objects.deepEquals(value, that.value);
+            if (values.length != that.values.length) {
+                return false;
+            }
+            for (int i = 0; i < values.length; i++) {
+                if (!collation.valuesEqual(values[i], that.values[i])) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         @Override
         public int hashCode() {
-            return hashCode;
+            return 0;
         }
     }
 }
