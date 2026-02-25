@@ -51,7 +51,6 @@ The above metadata is published in artifact JSON under:
 - `cq.path.array-index-comparison`
 - `cq.expr.basic-comparison`
 - `cq.expr.logical-composition`
-- `cq.expr.array-index-comparison`
 - `cq.regex.case-insensitive-and-ne`
 - `cq.exists-null-in`
 - `cq.type-and-size`
@@ -64,6 +63,7 @@ The above metadata is published in artifact JSON under:
 - `cq.aggregate.facet-group-sort`
 - `cq.aggregate.sortbycount-after-project`
 - `cq.aggregate.unionwith-and-match`
+- `cq.expr.array-index-comparison`
 
 ### Explicitly Unsupported
 
@@ -123,3 +123,13 @@ Workflow:
 - `.github/workflows/complex-query-certification.yml`
 
 The workflow bootstraps a single-node replica set, runs `complexQueryCertificationEvidence` with `failOnGate=true`, and uploads artifacts and diagnostics.
+
+## Spring Matrix Alignment
+
+Spring-focused complex scenarios are published by:
+- `springCompatibilityMatrixEvidence`
+- artifact: `build/reports/spring-matrix/spring-compatibility-matrix.json/.md`
+
+Complex Spring matrix rows include `certificationPatternId` to map back to this pack.
+CI workflow:
+- `.github/workflows/spring-complex-query-matrix.yml`

@@ -25,6 +25,11 @@ class SpringCompatibilityMatrixRunnerTest {
     void defaultCatalogIncludesMultipleProjectTargetsAndScenarioCoverage() {
         assertTrue(SpringCompatibilityMatrixRunner.defaultTargets().size() >= 4);
         assertTrue(SpringCompatibilityMatrixRunner.defaultScenarios().size() >= 5);
+        assertTrue(
+            SpringCompatibilityMatrixRunner.defaultScenarios().stream()
+                .anyMatch(SpringCompatibilityMatrixRunner.SpringScenario::isComplexQueryScenario),
+            "expected at least one complex query scenario"
+        );
     }
 
     @Test
@@ -101,14 +106,20 @@ class SpringCompatibilityMatrixRunnerTest {
         assertTrue(json.contains("\"matrixDimensions\""));
         assertTrue(json.contains("\"targetSummary\""));
         assertTrue(json.contains("\"surfaceSummary\""));
+        assertTrue(json.contains("\"complexQuerySummary\""));
+        assertTrue(json.contains("\"complexQueryScenarios\""));
+        assertTrue(json.contains("\"certificationPatternId\""));
         assertTrue(json.contains("\"scenarioId\":\"spring.mongo-template.basic-crud\""));
         assertTrue(json.contains("\"scenarioId\":\"spring.transaction-template.multi-template.same-manager\""));
+        assertTrue(json.contains("\"scenarioId\":\"spring.complex.aggregation.lookup-unwind-group\""));
         assertTrue(json.contains("\"failureMinimization\":[]"));
 
         assertTrue(markdown.contains("# Spring Data Mongo Compatibility Matrix"));
         assertTrue(markdown.contains("## Matrix"));
+        assertTrue(markdown.contains("## Complex Query Matrix"));
         assertTrue(markdown.contains("## Failure Minimization"));
         assertTrue(markdown.contains("spring.transaction-template.out-of-scope.same-namespace-interleaving"));
+        assertTrue(markdown.contains("spring.complex.query.nested-criteria"));
         assertTrue(markdown.contains("| spring.transaction-template.commit | TransactionTemplate | PASS | PASS |"));
 
         assertEquals(0, report.failCount());

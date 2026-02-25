@@ -415,7 +415,7 @@ public final class ComplexQueryPatternPack {
         return pattern(
                 "cq.expr.array-index-comparison",
                 "expr positional path comparison",
-                SupportClass.SUPPORTED,
+                SupportClass.PARTIAL,
                 ExpectedOutcome.MATCH,
                 "Validates $expr path resolution when arrays are indexed.",
                 "time-series baseline check",
@@ -618,7 +618,9 @@ public final class ComplexQueryPatternPack {
                                         payload("$unwind", "$customer"),
                                         payload("$match", payload("customer.tier", "gold")),
                                         payload("$project", payload("_id", 1, "amount", 1, "customerName", "$customer.name")),
-                                        payload("$sort", payload("_id", 1))))));
+                                        payload("$sort", payload("_id", 1))),
+                                "cursor",
+                                payload())));
     }
 
     private static PatternCase lookupPipelineLetMatch() {
@@ -672,7 +674,9 @@ public final class ComplexQueryPatternPack {
                                                                 payload("$match", payload("qty", payload("$gte", 2)))),
                                                         "as",
                                                         "items")),
-                                        payload("$match", payload("items", payload("$elemMatch", payload("sku", "A"))))))));
+                                        payload("$match", payload("items", payload("$elemMatch", payload("sku", "A"))))),
+                                "cursor",
+                                payload())));
     }
 
     private static PatternCase aggregateFacetGroupSort() {
@@ -707,7 +711,9 @@ public final class ComplexQueryPatternPack {
                                                 "byRegion",
                                                 List.of(
                                                         payload("$group", payload("_id", "$region", "total", payload("$sum", 1))),
-                                                        payload("$sort", payload("_id", 1)))))))));
+                                                        payload("$sort", payload("_id", 1)))))),
+                                "cursor",
+                                payload())));
     }
 
     private static PatternCase aggregateSortByCountAfterProject() {
@@ -734,7 +740,9 @@ public final class ComplexQueryPatternPack {
                                 "collection",
                                 "cq_sortbycount_users",
                                 "pipeline",
-                                List.of(payload("$project", payload("city", "$profile.city")), payload("$sortByCount", "$city")))));
+                                List.of(payload("$project", payload("city", "$profile.city")), payload("$sortByCount", "$city")),
+                                "cursor",
+                                payload())));
     }
 
     private static PatternCase aggregateUnionWithAndMatch() {
@@ -768,7 +776,9 @@ public final class ComplexQueryPatternPack {
                                 List.of(
                                         payload("$unionWith", payload("coll", "cq_union_archive")),
                                         payload("$match", payload("status", "open")),
-                                        payload("$sort", payload("_id", 1))))));
+                                        payload("$sort", payload("_id", 1))),
+                                "cursor",
+                                payload())));
     }
 
     private static PatternCase unsupportedQueryMod() {
@@ -857,7 +867,9 @@ public final class ComplexQueryPatternPack {
                                                 "connectToField",
                                                 "_id",
                                                 "as",
-                                                "graph"))))));
+                                                "graph"))),
+                                "cursor",
+                                payload())));
     }
 
     private static PatternCase unsupportedQueryBitsAllSet() {

@@ -1,0 +1,67 @@
+name: Spring Complex Query Matrix
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/main/**"
+      - "src/test/**"
+      - "testkit/spring-suite/**"
+      - "build.gradle.kts"
+      - ".github/workflows/spring-complex-query-matrix.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/main/**"
+      - "src/test/**"
+      - "testkit/spring-suite/**"
+      - "build.gradle.kts"
+      - ".github/workflows/spring-complex-query-matrix.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spring-complex-query-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: Run Spring matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Run Spring compatibility matrix (complex-query section included)
+        run: |
+          gradle --no-daemon --stacktrace \
+            -PspringMatrixOutputDir="build/reports/spring-matrix" \
+            -PspringMatrixFailOnFailures=true \
+            springCompatibilityMatrixEvidence
+
+      - name: Upload Spring matrix artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spring-complex-query-matrix
+          path: |
+            build/reports/spring-matrix/**/*.json
+            build/reports/spring-matrix/**/*.md
+          if-no-files-found: error
+          retention-days: 14
