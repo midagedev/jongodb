@@ -68,6 +68,11 @@ class AccountIntegrationTest {
 Optional database override:
 - set `jongodb.test.database=<dbName>` as a test property.
 
+Optional shared-server mode for multi-context suites:
+- set `jongodb.test.sharedServer=true` as a test property.
+- when enabled, Spring contexts in the same JVM reuse one in-process TCP server.
+- use unique `jongodb.test.database` values per test class when sharing to avoid data bleed.
+
 ### Option C: `@DynamicPropertySource`
 
 Use `JongodbMongoDynamicPropertySupport` as a drop-in replacement pattern for many Testcontainers setups:
