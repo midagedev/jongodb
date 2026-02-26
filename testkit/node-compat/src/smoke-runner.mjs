@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import process from "node:process";
 
 import express from "express";
+import Koa from "koa";
 import { MongoClient } from "mongodb";
 import mongoose from "mongoose";
 import { startJongodbMemoryServer } from "../../../packages/memory-server/dist/esm/index.js";
@@ -39,6 +40,9 @@ try {
     await runScenario("express.mongodb.route", () => expressMongoRoute(uri))
   );
   scenarioResults.push(
+    await runScenario("koa.mongodb.route", () => koaMongoRoute(uri))
+  );
+  scenarioResults.push(
     await runScenario("mongodb.transaction.commit", () =>
       mongodbTransactionCommit(uri)
     )
@@ -69,7 +73,7 @@ const failed = scenarioResults.length - passed;
 
 const report = {
   generatedAt: new Date().toISOString(),
-  compatibilityTarget: "node-driver-express-and-mongoose-smoke",
+  compatibilityTarget: "node-driver-express-koa-and-mongoose-smoke",
   server: {
     uriScheme: "mongodb",
     backend: "jongodb",
@@ -160,6 +164,84 @@ async function expressMongoRoute(uri) {
     const payload = await readResponse.json();
     if (payload?.name !== "neo") {
       throw new Error("Express route returned unexpected payload.");
+    }
+  } finally {
+    await closeHttpServer(httpServer);
+    await client.close();
+  }
+}
+
+async function koaMongoRoute(uri) {
+  const client = new MongoClient(uri);
+  await client.connect();
+  const db = client.db("node_smoke");
+  await db.collection("koa_users").deleteMany({});
+
+  const app = new Koa();
+  app.use(async (ctx) => {
+    const match = /^\/users\/([^/]+)$/.exec(ctx.path);
+    if (match === null) {
+      ctx.status = 404;
+      ctx.body = { error: "not found" };
+      return;
+    }
+
+    const id = decodeURIComponent(match[1]);
+    if (ctx.method === "PUT") {
+      const name = String(ctx.query.name ?? "").trim();
+      if (name.length === 0) {
+        ctx.status = 400;
+        ctx.body = { error: "name query is required" };
+        return;
+      }
+
+      await db.collection("koa_users").updateOne(
+        { _id: id },
+        {
+          $set: { name },
+        },
+        { upsert: true }
+      );
+
+      ctx.status = 200;
+      ctx.body = { ok: 1, id };
+      return;
+    }
+
+    if (ctx.method === "GET") {
+      const found = await db.collection("koa_users").findOne({ _id: id });
+      if (found === null) {
+        ctx.status = 404;
+        ctx.body = { error: "not found" };
+        return;
+      }
+      ctx.body = found;
+      return;
+    }
+
+    ctx.status = 405;
+    ctx.body = { error: "method not allowed" };
+  });
+
+  const httpServer = createServer(app.callback());
+  const port = await listenOnRandomPort(httpServer);
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const createResponse = await fetch(`${baseUrl}/users/koa-1?name=atlas`, {
+      method: "PUT",
+    });
+    if (createResponse.status !== 200) {
+      throw new Error(`Koa upsert route failed with status ${createResponse.status}.`);
+    }
+
+    const readResponse = await fetch(`${baseUrl}/users/koa-1`);
+    if (readResponse.status !== 200) {
+      throw new Error(`Koa read route failed with status ${readResponse.status}.`);
+    }
+    const payload = await readResponse.json();
+    if (payload?.name !== "atlas") {
+      throw new Error("Koa route returned unexpected payload.");
     }
   } finally {
     await closeHttpServer(httpServer);
@@ -392,7 +474,7 @@ async function listenOnRandomPort(httpServer) {
     httpServer.listen(0, "127.0.0.1", () => {
       const address = httpServer.address();
       if (address === null || typeof address === "string") {
-        reject(new Error("Failed to allocate local port for express smoke server."));
+        reject(new Error("Failed to allocate local port for HTTP smoke server."));
         return;
       }
       resolve(address.port);
