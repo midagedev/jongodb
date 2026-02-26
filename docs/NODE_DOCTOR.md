@@ -17,6 +17,7 @@ Outputs:
 - Node version baseline (`>=20`)
 - memory-server build artifact presence
 - `JONGODB_BINARY_PATH` validity (if configured)
+- `JONGODB_BINARY_CHECKSUM` format/match against explicit binary path (if configured)
 - bundled binary package resolution for current platform/arch
 - classpath availability:
   - direct `JONGODB_CLASSPATH`

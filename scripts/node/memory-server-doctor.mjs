@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -25,6 +26,7 @@ async function main() {
   checks.push(checkNodeVersion());
   checks.push(checkBuildArtifacts(repoRoot));
   checks.push(checkBinaryEnvPath());
+  checks.push(checkBinaryChecksum());
 
   const bundledBinary = resolveBundledBinary(repoRoot);
   checks.push(bundledBinary.check);
@@ -143,6 +145,64 @@ function checkBinaryEnvPath() {
     status: "pass",
     summary: "JONGODB_BINARY_PATH points to an existing file.",
     details: candidate,
+  };
+}
+
+function checkBinaryChecksum() {
+  const binaryPath = process.env.JONGODB_BINARY_PATH?.trim() ?? "";
+  const expected = process.env.JONGODB_BINARY_CHECKSUM?.trim().toLowerCase() ?? "";
+
+  if (binaryPath.length === 0) {
+    return {
+      id: "binary-checksum",
+      status: "warn",
+      summary: "Binary checksum validation skipped (JONGODB_BINARY_PATH is not set).",
+      details: "Set JONGODB_BINARY_PATH and JONGODB_BINARY_CHECKSUM to enforce explicit binary integrity checks.",
+    };
+  }
+
+  if (!existsSync(binaryPath)) {
+    return {
+      id: "binary-checksum",
+      status: "warn",
+      summary: "Binary checksum validation skipped (binary path does not exist).",
+      details: binaryPath,
+    };
+  }
+
+  if (expected.length === 0) {
+    return {
+      id: "binary-checksum",
+      status: "warn",
+      summary: "Binary checksum is not configured for explicit binary path.",
+      details: "Set JONGODB_BINARY_CHECKSUM to expected SHA-256 (64 lowercase hex chars).",
+    };
+  }
+
+  if (!/^[a-f0-9]{64}$/u.test(expected)) {
+    return {
+      id: "binary-checksum",
+      status: "fail",
+      summary: "JONGODB_BINARY_CHECKSUM has invalid format.",
+      details: "Expected 64-character lowercase hex SHA-256 value.",
+    };
+  }
+
+  const actual = createHash("sha256").update(readFileSync(binaryPath)).digest("hex");
+  if (actual !== expected) {
+    return {
+      id: "binary-checksum",
+      status: "fail",
+      summary: "Explicit binary checksum does not match file contents.",
+      details: `expected=${expected} actual=${actual} path=${binaryPath}`,
+    };
+  }
+
+  return {
+    id: "binary-checksum",
+    status: "pass",
+    summary: "Explicit binary checksum matches file contents.",
+    details: `${binaryPath} (${expected})`,
   };
 }
 
