@@ -254,6 +254,11 @@ Bundled targets:
 
 Java fallback:
 - set `classpath` option or `JONGODB_CLASSPATH`
+- if both are missing, classpath auto-discovery probes:
+  - command: `options.classpathDiscoveryCommand` -> `JONGODB_CLASSPATH_DISCOVERY_CMD` -> repo-local Gradle -> `gradle`
+  - args: `--no-daemon -q printLauncherClasspath`
+  - working directory: `options.classpathDiscoveryWorkingDirectory` -> `JONGODB_CLASSPATH_DISCOVERY_CWD` -> `process.cwd()`
+  - disable probe: `classpathDiscovery: "off"` or `JONGODB_CLASSPATH_DISCOVERY=off`
 
 Launcher contract:
 - stdout ready line: `JONGODB_URI=mongodb://...`
@@ -294,6 +299,9 @@ Core:
 - `launchMode`: `auto` | `binary` | `java` (default: `auto`)
 - `binaryPath`: binary executable override path
 - `classpath`: Java classpath string or string array
+- `classpathDiscovery`: `auto` | `off` (default: `auto`)
+- `classpathDiscoveryCommand`: override command used for classpath auto-discovery probe
+- `classpathDiscoveryWorkingDirectory`: cwd for classpath auto-discovery probe
 - `javaPath`: Java executable path (default: `java`)
 - `launcherClass`: Java launcher class (default: `org.jongodb.server.TcpMongoServerLauncher`)
 - `topologyProfile`: `standalone` | `singleNodeReplicaSet` (default: `standalone`)
@@ -358,6 +366,7 @@ const runtime = createJongodbEnvRuntime({
 - `No launcher runtime configured`: set `binaryPath` / `JONGODB_BINARY_PATH` / `classpath` / `JONGODB_CLASSPATH`
 - `Binary launch mode requested but no binary was found`: provide `binaryPath` or `JONGODB_BINARY_PATH`
 - `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
+- `Classpath auto-discovery probe failed`: set explicit `classpath` / `JONGODB_CLASSPATH`, or fix Gradle probe command/cwd
 - `spawn ... ENOENT`: missing runtime executable path
 - startup timeout: launcher did not emit `JONGODB_URI=...`
 - `Launcher URI topology options are out of sync`: emitted URI query does not match requested `topologyProfile`/`replicaSetName`
