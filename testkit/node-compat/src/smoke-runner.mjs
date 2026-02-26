@@ -1,8 +1,10 @@
+import { createServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 
+import express from "express";
 import { MongoClient } from "mongodb";
 import mongoose from "mongoose";
 import { startJongodbMemoryServer } from "../../../packages/memory-server/dist/esm/index.js";
@@ -34,6 +36,9 @@ try {
   const uri = server.uri;
   scenarioResults.push(await runScenario("mongodb.crud", () => mongodbCrud(uri)));
   scenarioResults.push(
+    await runScenario("express.mongodb.route", () => expressMongoRoute(uri))
+  );
+  scenarioResults.push(
     await runScenario("mongodb.transaction.commit", () =>
       mongodbTransactionCommit(uri)
     )
@@ -64,7 +69,7 @@ const failed = scenarioResults.length - passed;
 
 const report = {
   generatedAt: new Date().toISOString(),
-  compatibilityTarget: "node-driver-and-mongoose-smoke",
+  compatibilityTarget: "node-driver-express-and-mongoose-smoke",
   server: {
     uriScheme: "mongodb",
     backend: "jongodb",
@@ -99,6 +104,65 @@ async function mongodbCrud(uri) {
       throw new Error("CRUD read value mismatch for mongodb driver scenario.");
     }
   } finally {
+    await client.close();
+  }
+}
+
+async function expressMongoRoute(uri) {
+  const client = new MongoClient(uri);
+  await client.connect();
+  const db = client.db("node_smoke");
+  await db.collection("express_users").deleteMany({});
+
+  const app = express();
+  app.use(express.json());
+
+  app.post("/users", async (request, response) => {
+    const id = String(request.body?.id ?? "").trim();
+    const name = String(request.body?.name ?? "").trim();
+    if (id.length === 0 || name.length === 0) {
+      response.status(400).json({ error: "id and name are required" });
+      return;
+    }
+    await db.collection("express_users").insertOne({ _id: id, name });
+    response.status(201).json({ ok: 1, id });
+  });
+
+  app.get("/users/:id", async (request, response) => {
+    const found = await db.collection("express_users").findOne({ _id: request.params.id });
+    if (found === null) {
+      response.status(404).json({ error: "not found" });
+      return;
+    }
+    response.json(found);
+  });
+
+  const httpServer = createServer(app);
+  const port = await listenOnRandomPort(httpServer);
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const createResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ id: "express-1", name: "neo" }),
+    });
+    if (createResponse.status !== 201) {
+      throw new Error(`Express create route failed with status ${createResponse.status}.`);
+    }
+
+    const readResponse = await fetch(`${baseUrl}/users/express-1`);
+    if (readResponse.status !== 200) {
+      throw new Error(`Express read route failed with status ${readResponse.status}.`);
+    }
+    const payload = await readResponse.json();
+    if (payload?.name !== "neo") {
+      throw new Error("Express route returned unexpected payload.");
+    }
+  } finally {
+    await closeHttpServer(httpServer);
     await client.close();
   }
 }
@@ -320,4 +384,30 @@ async function safeMongooseDisconnect() {
   } catch (_) {
     // no-op
   }
+}
+
+async function listenOnRandomPort(httpServer) {
+  return await new Promise((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(0, "127.0.0.1", () => {
+      const address = httpServer.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("Failed to allocate local port for express smoke server."));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+}
+
+async function closeHttpServer(httpServer) {
+  return await new Promise((resolve, reject) => {
+    httpServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }
