@@ -170,6 +170,23 @@ import { registerJongodbForVitest } from "@jongodb/memory-server/vitest";
 registerJongodbForVitest({ beforeAll, afterAll });
 ```
 
+Vitest workspace (project isolation):
+
+```ts
+import { beforeAll, afterAll } from "vitest";
+import { registerJongodbForVitestWorkspace } from "@jongodb/memory-server/vitest";
+
+registerJongodbForVitestWorkspace({ beforeAll, afterAll }, {
+  projectName: "catalog-api",
+  isolationMode: "project",
+  databaseName: "test",
+});
+```
+
+Workspace helper behavior:
+- `isolationMode: "project"` (default): appends project token to database name and writes project-scoped URI env key
+- `isolationMode: "shared"`: keeps provided database name without project suffix
+
 NestJS (Jest E2E):
 
 ```ts
@@ -230,6 +247,7 @@ Nest export (`@jongodb/memory-server/nestjs`):
 
 Vitest export (`@jongodb/memory-server/vitest`):
 - `registerJongodbForVitest(hooks, options?)`
+- `registerJongodbForVitestWorkspace(hooks, workspaceOptions)`
 
 ## Options Reference
 

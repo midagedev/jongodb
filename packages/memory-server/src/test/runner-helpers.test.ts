@@ -11,7 +11,10 @@ import {
   registerJongodbForJest,
 } from "../jest.js";
 import { registerJongodbForNestJest } from "../nestjs.js";
-import { registerJongodbForVitest } from "../vitest.js";
+import {
+  registerJongodbForVitest,
+  registerJongodbForVitestWorkspace,
+} from "../vitest.js";
 import { resolveTestClasspath } from "./support/classpath.js";
 
 const classpathForRuntime = resolveTestClasspath();
@@ -55,6 +58,85 @@ test(
     assert.equal(process.env.JONGODB_VITEST_URI, registration.uri);
 
     await hooks.runAfterAll();
+  }
+);
+
+test(
+  "registerJongodbForVitestWorkspace applies project-level isolation defaults",
+  { concurrency: false },
+  async () => {
+    const projectEnvKey = "MONGODB_URI_CATALOG_API";
+    const previousDefault = process.env.MONGODB_URI;
+    const previousProject = process.env[projectEnvKey];
+    delete process.env[projectEnvKey];
+
+    const hooks = new HookHarness();
+    const registration = registerJongodbForVitestWorkspace(hooks, {
+      classpath: classpathForRuntime,
+      projectName: "catalog-api",
+      databaseName: "vitest_workspace",
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      await hooks.runBeforeAll();
+      assert.equal(registration.isolationMode, "project");
+      assert.equal(registration.databaseName, "vitest_workspace_pcatalog_api");
+      assert.match(
+        registration.uri,
+        /^mongodb:\/\/.+\/vitest_workspace_pcatalog_api$/u
+      );
+      assert.equal(process.env.MONGODB_URI, registration.uri);
+      assert.equal(process.env[projectEnvKey], registration.uri);
+      assert.ok(registration.envVarNames.includes("MONGODB_URI"));
+      assert.ok(registration.envVarNames.includes(projectEnvKey));
+    } finally {
+      await hooks.runAfterAll();
+      if (previousDefault === undefined) {
+        delete process.env.MONGODB_URI;
+      } else {
+        process.env.MONGODB_URI = previousDefault;
+      }
+      if (previousProject === undefined) {
+        delete process.env[projectEnvKey];
+      } else {
+        process.env[projectEnvKey] = previousProject;
+      }
+    }
+  }
+);
+
+test(
+  "registerJongodbForVitestWorkspace supports shared mode without project DB suffix",
+  { concurrency: false },
+  async () => {
+    const projectEnvKey = "MONGODB_URI_BILLING";
+    const previousProject = process.env[projectEnvKey];
+    delete process.env[projectEnvKey];
+
+    const hooks = new HookHarness();
+    const registration = registerJongodbForVitestWorkspace(hooks, {
+      classpath: classpathForRuntime,
+      projectName: "billing",
+      isolationMode: "shared",
+      databaseName: "vitest_shared",
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      await hooks.runBeforeAll();
+      assert.equal(registration.isolationMode, "shared");
+      assert.equal(registration.databaseName, "vitest_shared");
+      assert.match(registration.uri, /^mongodb:\/\/.+\/vitest_shared$/u);
+      assert.equal(process.env[projectEnvKey], undefined);
+    } finally {
+      await hooks.runAfterAll();
+      if (previousProject === undefined) {
+        delete process.env[projectEnvKey];
+      } else {
+        process.env[projectEnvKey] = previousProject;
+      }
+    }
   }
 );
 
