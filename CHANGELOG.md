@@ -32,6 +32,7 @@ All notable changes to this project are documented in this file.
 - Added ESM/CJS dual-export contract smoke checks for Node adapter entrypoints.
 - Added Node cold-start benchmark suite with CI budget gate and report artifacts.
 - Added runtime launcher log secret redaction policy and regression coverage.
+- Added Node debug bundle collector CLI and issue template for reproducible support reports.
 
 ## [0.1.3] - 2026-02-24
 

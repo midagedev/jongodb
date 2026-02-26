@@ -367,3 +367,7 @@ Parallel test tip:
 
 Security policy reference:
 - [`docs/NODE_LOG_REDACTION_POLICY.md`](../../docs/NODE_LOG_REDACTION_POLICY.md)
+
+Support/debug bundle:
+- generate issue bundle: `npm run node:debug:bundle -- --outputDir build/reports/node-debug-bundle`
+- collector guide: [`docs/NODE_DEBUG_BUNDLE.md`](../../docs/NODE_DEBUG_BUNDLE.md)
