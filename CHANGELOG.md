@@ -33,6 +33,7 @@ All notable changes to this project are documented in this file.
 - Added Node cold-start benchmark suite with CI budget gate and report artifacts.
 - Added runtime launcher log secret redaction policy and regression coverage.
 - Added Node debug bundle collector CLI and issue template for reproducible support reports.
+- Added startup latency telemetry hook for launch attempts (including auto fallback success/failure events).
 
 ## [0.1.3] - 2026-02-24
 

@@ -224,6 +224,90 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer emits startup telemetry for successful binary launch",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const events: Array<{
+        attempt: number;
+        mode: "binary" | "java";
+        source: string;
+        startupDurationMs: number;
+        success: boolean;
+        errorMessage?: string;
+      }> = [];
+      const server = await startJongodbMemoryServer({
+        launchMode: "binary",
+        binaryPath,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "telemetry_success",
+        onStartupTelemetry(event) {
+          events.push(event);
+        },
+      });
+
+      try {
+        assert.equal(events.length, 1);
+        assert.equal(events[0].attempt, 1);
+        assert.equal(events[0].mode, "binary");
+        assert.equal(events[0].source, "options.binaryPath");
+        assert.equal(events[0].success, true);
+        assert.equal(events[0].errorMessage, undefined);
+        assert.ok(events[0].startupDurationMs >= 0);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer emits telemetry for auto fallback failure and recovery",
+  { concurrency: false },
+  async () => {
+    await withFakeLaunchers(async ({ brokenBinaryPath, fakeJavaPath }) => {
+      const events: Array<{
+        attempt: number;
+        mode: "binary" | "java";
+        source: string;
+        startupDurationMs: number;
+        success: boolean;
+        errorMessage?: string;
+      }> = [];
+
+      const server = await startJongodbMemoryServer({
+        launchMode: "auto",
+        binaryPath: brokenBinaryPath,
+        javaPath: fakeJavaPath,
+        classpath: "ignored-classpath-for-fake-java",
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "telemetry_auto_fallback",
+        onStartupTelemetry(event) {
+          events.push(event);
+        },
+      });
+
+      try {
+        assert.equal(events.length, 2);
+        assert.equal(events[0].attempt, 1);
+        assert.equal(events[0].mode, "binary");
+        assert.equal(events[0].success, false);
+        assert.match(events[0].errorMessage ?? "", /simulated binary startup failure/u);
+
+        assert.equal(events[1].attempt, 2);
+        assert.equal(events[1].mode, "java");
+        assert.equal(events[1].success, true);
+        assert.ok(events[1].startupDurationMs >= 0);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer fails when replica-set profile URI omits replicaSet query",
   { concurrency: false },
   async () => {

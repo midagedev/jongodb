@@ -307,6 +307,7 @@ Core:
 - `stopTimeoutMs`: stop timeout before forced kill (default: `5000`)
 - `env`: extra child process environment variables
 - `logLevel`: `silent` | `info` | `debug` (default: `silent`)
+- `onStartupTelemetry`: optional hook for startup attempt telemetry (`attempt`, `mode`, `source`, `startupDurationMs`, `success`, `errorMessage`)
 
 Runtime helper options:
 - `envVarName`: single target env key (default: `MONGODB_URI`)
