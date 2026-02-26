@@ -1,10 +1,10 @@
-const assert = require("node:assert/strict");
+import assert from "node:assert/strict";
 
-const core = require("@jongodb/memory-server");
-const runtime = require("@jongodb/memory-server/runtime");
-const jest = require("@jongodb/memory-server/jest");
-const nestjs = require("@jongodb/memory-server/nestjs");
-const vitest = require("@jongodb/memory-server/vitest");
+import * as core from "@jongodb/memory-server";
+import * as jest from "@jongodb/memory-server/jest";
+import * as nestjs from "@jongodb/memory-server/nestjs";
+import * as runtime from "@jongodb/memory-server/runtime";
+import * as vitest from "@jongodb/memory-server/vitest";
 
 assert.equal(typeof core.startJongodbMemoryServer, "function");
 assert.equal(typeof runtime.createJongodbEnvRuntime, "function");
@@ -17,4 +17,4 @@ assert.equal(typeof nestjs.registerJongodbForNestJest, "function");
 assert.equal(typeof vitest.registerJongodbForVitest, "function");
 assert.equal(typeof vitest.registerJongodbForVitestWorkspace, "function");
 
-process.stdout.write("CJS smoke check passed.\n");
+process.stdout.write("ESM smoke check passed.\n");

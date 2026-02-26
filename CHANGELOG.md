@@ -29,6 +29,7 @@ All notable changes to this project are documented in this file.
 - Added dedicated migration guide from `mongodb-memory-server` to `@jongodb/memory-server`.
 - Added Node adapter troubleshooting playbook mapped by error signatures.
 - Added strict Node API type coverage report workflow and export coverage report artifact.
+- Added ESM/CJS dual-export contract smoke checks for Node adapter entrypoints.
 
 ## [0.1.3] - 2026-02-24
 
