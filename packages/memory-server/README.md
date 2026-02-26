@@ -40,6 +40,11 @@ Node adapter compatibility smoke runs in CI across:
 - OS: `ubuntu-latest`, `macos-latest`
 - Node: `20`, `22`
 
+## Versioning Policy
+
+SemVer/compatibility policy for Node adapter releases:
+- [`docs/NODE_SEMVER_POLICY.md`](../../docs/NODE_SEMVER_POLICY.md)
+
 ## Install
 
 ```bash
