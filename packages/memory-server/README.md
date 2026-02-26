@@ -247,6 +247,10 @@ Binary resolution order:
 2. `JONGODB_BINARY_PATH`
 3. bundled platform binary package
 
+Binary integrity verification:
+- bundled platform binary packages are verified against embedded `jongodb.sha256` metadata before launch
+- explicit binary paths can opt into verification with `binaryChecksum` or `JONGODB_BINARY_CHECKSUM`
+
 Bundled targets:
 - `@jongodb/memory-server-bin-darwin-arm64`
 - `@jongodb/memory-server-bin-linux-x64-gnu`
@@ -298,6 +302,7 @@ Vitest export (`@jongodb/memory-server/vitest`):
 Core:
 - `launchMode`: `auto` | `binary` | `java` (default: `auto`)
 - `binaryPath`: binary executable override path
+- `binaryChecksum`: expected SHA-256 checksum for explicit binary verification
 - `classpath`: Java classpath string or string array
 - `classpathDiscovery`: `auto` | `off` (default: `auto`)
 - `classpathDiscoveryCommand`: override command used for classpath auto-discovery probe
@@ -365,6 +370,7 @@ const runtime = createJongodbEnvRuntime({
 - runtime startup logs and failure tails apply secret redaction (`<redacted>`) for password/token-style values
 - `No launcher runtime configured`: set `binaryPath` / `JONGODB_BINARY_PATH` / `classpath` / `JONGODB_CLASSPATH`
 - `Binary launch mode requested but no binary was found`: provide `binaryPath` or `JONGODB_BINARY_PATH`
+- `Binary checksum verification failed`: validate `binaryChecksum` / `JONGODB_BINARY_CHECKSUM` and binary file provenance
 - `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
 - `Classpath auto-discovery probe failed`: set explicit `classpath` / `JONGODB_CLASSPATH`, or fix Gradle probe command/cwd
 - `spawn ... ENOENT`: missing runtime executable path

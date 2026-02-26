@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -23,6 +24,93 @@ test(
         assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/binary_path$/u);
       } finally {
         await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer verifies explicit binary checksum when configured",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const checksum = await sha256(binaryPath);
+      const server = await startJongodbMemoryServer({
+        launchMode: "binary",
+        binaryPath,
+        binaryChecksum: checksum,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "binary_checksum_ok",
+      });
+
+      try {
+        assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/binary_checksum_ok$/u);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer rejects explicit binary when checksum does not match",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "binary",
+            binaryPath,
+            binaryChecksum:
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "binary_checksum_mismatch",
+          });
+        },
+        /Binary checksum verification failed/i
+      );
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer supports JONGODB_BINARY_CHECKSUM for explicit binary verification",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const checksum = await sha256(binaryPath);
+      const previousPath = process.env.JONGODB_BINARY_PATH;
+      const previousChecksum = process.env.JONGODB_BINARY_CHECKSUM;
+      process.env.JONGODB_BINARY_PATH = binaryPath;
+      process.env.JONGODB_BINARY_CHECKSUM = checksum;
+
+      try {
+        const server = await startJongodbMemoryServer({
+          launchMode: "binary",
+          host: "127.0.0.1",
+          port: 0,
+          databaseName: "binary_checksum_env",
+        });
+
+        try {
+          assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/binary_checksum_env$/u);
+        } finally {
+          await server.stop();
+        }
+      } finally {
+        if (previousPath === undefined) {
+          delete process.env.JONGODB_BINARY_PATH;
+        } else {
+          process.env.JONGODB_BINARY_PATH = previousPath;
+        }
+        if (previousChecksum === undefined) {
+          delete process.env.JONGODB_BINARY_CHECKSUM;
+        } else {
+          process.env.JONGODB_BINARY_CHECKSUM = previousChecksum;
+        }
       }
     });
   }
@@ -635,6 +723,11 @@ async function withFakeLaunchersWithClasspathProbe(
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function sha256(filePath: string): Promise<string> {
+  const contents = await readFile(filePath);
+  return createHash("sha256").update(contents).digest("hex");
 }
 
 function brokenBinaryScript(): string {

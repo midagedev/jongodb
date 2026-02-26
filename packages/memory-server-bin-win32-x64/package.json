@@ -24,6 +24,8 @@
   "scripts": {},
   "jongodb": {
     "binary": "bin/jongodb.cmd",
+    "sha256": "5d0b7dd673e16b5b6612963a19b4d8b7dfc5a049fa9a74ba978cbb893a408a09",
+    "sha256Target": "bin/jongodb.cmd",
     "platform": "win32",
     "arch": "x64"
   },

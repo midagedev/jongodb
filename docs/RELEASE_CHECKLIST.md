@@ -51,10 +51,11 @@ Use this when publishing `@jongodb/memory-server`:
 7. Confirm core package publishes after binaries with synced optional dependency versions.
 8. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
 9. Confirm workflow packs tarball artifacts first (binary/core) and publishes from those packed files.
-10. Confirm GitHub Artifact Attestations are generated for packed tarballs (`actions/attest-build-provenance`).
-11. Run `npm publish --dry-run` and review package contents.
-12. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
-13. Update README usage examples with the released package version.
+10. Confirm staged binary package metadata contains refreshed `jongodb.sha256` checksum before publish.
+11. Confirm GitHub Artifact Attestations are generated for packed tarballs (`actions/attest-build-provenance`).
+12. Run `npm publish --dry-run` and review package contents.
+13. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
+14. Update README usage examples with the released package version.
 
 ## Node Canary Channel Gate (Draft)
 

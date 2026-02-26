@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, resolve } from "node:path";
@@ -55,6 +56,7 @@ export interface JongodbMemoryServerOptions {
   classpathDiscoveryCommand?: string;
   classpathDiscoveryWorkingDirectory?: string;
   binaryPath?: string;
+  binaryChecksum?: string;
   launchMode?: LaunchMode;
   topologyProfile?: TopologyProfile;
   replicaSetName?: string;
@@ -91,6 +93,9 @@ interface SpawnLaunchConfig {
   source: string;
   topologyProfile: TopologyProfile;
   replicaSetName: string;
+  binaryChecksum?: string;
+  binaryChecksumSource?: string;
+  binaryChecksumTargetPath?: string;
 }
 
 interface LaunchResolution {
@@ -111,6 +116,14 @@ interface JavaCandidateResolution {
     source: string;
   } | null;
   diagnostics?: string;
+}
+
+interface BinaryCandidate {
+  path: string;
+  source: string;
+  checksum?: string;
+  checksumSource?: string;
+  checksumTargetPath?: string;
 }
 
 export async function startJongodbMemoryServer(
@@ -235,6 +248,10 @@ async function startWithLaunchConfig(
     env?: Record<string, string>;
   }
 ): Promise<JongodbMemoryServer> {
+  if (launchConfig.mode === "binary") {
+    verifyBinaryChecksum(launchConfig);
+  }
+
   const child = spawn(launchConfig.command, launchConfig.args, {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -359,7 +376,7 @@ function resolveLaunchConfigs(
     throw new Error(`launchMode must be one of: auto, binary, java (got: ${mode}).`);
   }
 
-  const binary = resolveBinaryCandidate(options.binaryPath);
+  const binary = resolveBinaryCandidate(options);
   const javaWithoutDiscovery = resolveJavaCandidate(options, {
     allowClasspathDiscovery: false,
   });
@@ -375,7 +392,7 @@ function resolveLaunchConfigs(
       );
     }
     return {
-      launchConfigs: [toBinaryLaunchConfig(binary.path, binary.source, context)],
+      launchConfigs: [toBinaryLaunchConfig(binary, context)],
     };
   }
 
@@ -402,7 +419,7 @@ function resolveLaunchConfigs(
   if (binary !== null && javaWithoutDiscovery.candidate !== null) {
     return {
       launchConfigs: [
-        toBinaryLaunchConfig(binary.path, binary.source, context),
+        toBinaryLaunchConfig(binary, context),
         toJavaLaunchConfig(javaWithoutDiscovery.candidate, context),
       ],
     };
@@ -410,7 +427,7 @@ function resolveLaunchConfigs(
 
   if (binary !== null) {
     return {
-      launchConfigs: [toBinaryLaunchConfig(binary.path, binary.source, context)],
+      launchConfigs: [toBinaryLaunchConfig(binary, context)],
       deferredJavaFallback: () => {
         const discoveredJava = resolveJavaCandidate(options, {
           allowClasspathDiscovery: true,
@@ -456,8 +473,7 @@ function resolveLaunchConfigs(
 }
 
 function toBinaryLaunchConfig(
-  binaryPath: string,
-  source: string,
+  binary: BinaryCandidate,
   context: {
     host: string;
     port: number;
@@ -477,11 +493,14 @@ function toBinaryLaunchConfig(
   }
   return {
     mode: "binary",
-    command: binaryPath,
+    command: binary.path,
     args,
-    source,
+    source: binary.source,
     topologyProfile: context.topologyProfile,
     replicaSetName: context.replicaSetName,
+    binaryChecksum: binary.checksum,
+    binaryChecksumSource: binary.checksumSource,
+    binaryChecksumTargetPath: binary.checksumTargetPath,
   };
 }
 
@@ -570,17 +589,23 @@ function ensureUriTopologyProfileSync(
   }
 }
 
-function resolveBinaryCandidate(
-  explicitBinaryPath: string | undefined
-): { path: string; source: string } | null {
-  const fromOption = normalizeBinaryPath(explicitBinaryPath, "options.binaryPath");
+function resolveBinaryCandidate(options: JongodbMemoryServerOptions): BinaryCandidate | null {
+  const fromOption = normalizeBinaryPath(options.binaryPath, "options.binaryPath");
   if (fromOption !== null) {
-    return { path: fromOption, source: "options.binaryPath" };
+    return {
+      path: fromOption,
+      source: "options.binaryPath",
+      ...resolveExplicitBinaryChecksum(options.binaryChecksum),
+    };
   }
 
   const fromEnv = normalizeBinaryPath(process.env.JONGODB_BINARY_PATH, "JONGODB_BINARY_PATH");
   if (fromEnv !== null) {
-    return { path: fromEnv, source: "JONGODB_BINARY_PATH" };
+    return {
+      path: fromEnv,
+      source: "JONGODB_BINARY_PATH",
+      ...resolveExplicitBinaryChecksum(options.binaryChecksum),
+    };
   }
 
   const fromBundled = resolveBundledBinaryPath();
@@ -602,14 +627,17 @@ function normalizeBinaryPath(value: string | undefined, fieldName: string): stri
   return normalized;
 }
 
-function resolveBundledBinaryPath(): { path: string; source: string } | null {
+function resolveBundledBinaryPath(): BinaryCandidate | null {
   const candidates = bundledBinaryPackageCandidates();
   for (const packageName of candidates) {
-    const pathFromPackage = resolveBinaryPathFromPackage(packageName);
-    if (pathFromPackage !== null) {
+    const candidate = resolveBinaryPathFromPackage(packageName);
+    if (candidate !== null) {
       return {
-        path: pathFromPackage,
+        path: candidate.path,
         source: `bundled-package:${packageName}`,
+        checksum: candidate.checksum,
+        checksumSource: `bundled-package:${packageName}:jongodb.sha256`,
+        checksumTargetPath: candidate.checksumTargetPath,
       };
     }
   }
@@ -650,13 +678,15 @@ function detectLinuxLibcVariant(): "gnu" | "musl" {
   return "musl";
 }
 
-function resolveBinaryPathFromPackage(packageName: string): string | null {
+function resolveBinaryPathFromPackage(
+  packageName: string
+): { path: string; checksum: string; checksumTargetPath: string } | null {
   try {
     const packageJsonPath = moduleRequire.resolve(`${packageName}/package.json`);
     const packageDir = dirname(packageJsonPath);
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
       bin?: string | Record<string, string>;
-      jongodb?: { binary?: string };
+      jongodb?: { binary?: string; sha256?: string; sha256Target?: string };
     };
 
     const binaryRelativePath =
@@ -667,7 +697,20 @@ function resolveBinaryPathFromPackage(packageName: string): string | null {
       return null;
     }
 
-    return resolve(packageDir, binaryRelativePath);
+    const checksum = normalizeRequiredChecksum(
+      packageJson.jongodb?.sha256,
+      `${packageName} package.json#jongodb.sha256`
+    );
+    const checksumTargetRelativePath = readJongodbChecksumTargetPath(
+      packageJson,
+      binaryRelativePath
+    );
+
+    return {
+      path: resolve(packageDir, binaryRelativePath),
+      checksum,
+      checksumTargetPath: resolve(packageDir, checksumTargetRelativePath),
+    };
   } catch {
     return null;
   }
@@ -682,6 +725,91 @@ function readJongodbBinaryPath(packageJson: {
   }
   const normalized = binary.trim();
   return normalized.length === 0 ? null : normalized;
+}
+
+function readJongodbChecksumTargetPath(
+  packageJson: {
+    jongodb?: { sha256Target?: string };
+  },
+  fallbackRelativePath: string
+): string {
+  const target = packageJson.jongodb?.sha256Target;
+  if (typeof target !== "string") {
+    return fallbackRelativePath;
+  }
+  const normalized = target.trim();
+  if (normalized.length === 0) {
+    return fallbackRelativePath;
+  }
+  return normalized;
+}
+
+function resolveExplicitBinaryChecksum(
+  explicitChecksum: string | undefined
+): { checksum?: string; checksumSource?: string } {
+  const fromOption = normalizeOptionalChecksum(
+    explicitChecksum,
+    "options.binaryChecksum"
+  );
+  if (fromOption !== undefined) {
+    return {
+      checksum: fromOption,
+      checksumSource: "options.binaryChecksum",
+    };
+  }
+
+  const fromEnv = normalizeOptionalChecksum(
+    process.env.JONGODB_BINARY_CHECKSUM,
+    "JONGODB_BINARY_CHECKSUM"
+  );
+  if (fromEnv !== undefined) {
+    return {
+      checksum: fromEnv,
+      checksumSource: "JONGODB_BINARY_CHECKSUM",
+    };
+  }
+
+  return {};
+}
+
+function normalizeRequiredChecksum(
+  value: string | undefined,
+  fieldName: string
+): string {
+  if (value === undefined) {
+    throw new Error(`${fieldName} is required.`);
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) {
+    throw new Error(`${fieldName} must not be empty.`);
+  }
+  assertSha256Hex(normalized, fieldName);
+  return normalized;
+}
+
+function normalizeOptionalChecksum(
+  value: string | undefined,
+  fieldName: string
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  assertSha256Hex(normalized, fieldName);
+  return normalized;
+}
+
+function assertSha256Hex(value: string, fieldName: string): void {
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(
+      `${fieldName} must be a 64-character lowercase hex SHA-256 value.`
+    );
+  }
 }
 
 function readBinEntryPath(
@@ -1032,6 +1160,33 @@ function resolveExplicitClasspath(
   }
 
   return null;
+}
+
+function verifyBinaryChecksum(launchConfig: SpawnLaunchConfig): void {
+  if (launchConfig.mode !== "binary") {
+    return;
+  }
+
+  const expectedChecksum = launchConfig.binaryChecksum;
+  if (expectedChecksum === undefined) {
+    return;
+  }
+
+  const checksumTargetPath = launchConfig.binaryChecksumTargetPath ?? launchConfig.command;
+  const binaryContents = readFileSync(checksumTargetPath);
+  const actualChecksum = createHash("sha256").update(binaryContents).digest("hex");
+  if (actualChecksum !== expectedChecksum) {
+    throw new Error(
+      [
+        "Binary checksum verification failed.",
+        `source=${launchConfig.source}`,
+        `checksumSource=${launchConfig.binaryChecksumSource ?? "unknown"}`,
+        `expected=${expectedChecksum}`,
+        `actual=${actualChecksum}`,
+        `path=${checksumTargetPath}`,
+      ].join(" ")
+    );
+  }
 }
 
 async function waitForStartup(params: {

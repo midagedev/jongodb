@@ -27,6 +27,7 @@
   "scripts": {},
   "jongodb": {
     "binary": "bin/jongodb",
+    "sha256": "627df6248da49ffabd461becb946009c89439d161f2342a8ec42330942a508e7",
     "platform": "linux",
     "arch": "x64",
     "libc": "gnu"

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
@@ -29,6 +31,29 @@ if (primaryPath.endsWith(".cmd")) {
   chmodSync(primaryPath, 0o755);
   console.log(`[stage-bin] copied executable -> ${primaryPath}`);
 }
+
+const checksumTargetRelativePath = resolveChecksumTargetRelativePath(
+  packageJson,
+  relativePrimaryPath.trim()
+);
+const checksumTargetPath = resolve(workspace, checksumTargetRelativePath);
+if (!existsSync(checksumTargetPath)) {
+  throw new Error(
+    `[stage-bin] checksum target file does not exist: ${checksumTargetPath}`
+  );
+}
+
+const checksum = createHash("sha256")
+  .update(readFileSync(checksumTargetPath))
+  .digest("hex");
+if (typeof packageJson.jongodb !== "object" || packageJson.jongodb === null) {
+  packageJson.jongodb = {};
+}
+packageJson.jongodb.sha256 = checksum;
+writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+console.log(
+  `[stage-bin] updated checksum -> ${checksum} (${checksumTargetRelativePath})`
+);
 
 function parseArgs(argv) {
   const parsed = {};
@@ -74,4 +99,12 @@ function resolveBinaryPath(requested) {
     }
   }
   throw new Error(`Binary file not found: ${requested}`);
+}
+
+function resolveChecksumTargetRelativePath(packageJson, defaultRelativePath) {
+  const candidate = packageJson?.jongodb?.sha256Target;
+  if (typeof candidate !== "string" || candidate.trim().length === 0) {
+    return defaultRelativePath;
+  }
+  return candidate.trim();
 }
