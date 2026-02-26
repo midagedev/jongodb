@@ -3,14 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node ./src/smoke-runner.mjs --report ./reports/node-compat-smoke.json"
+    "prisma:generate": "prisma generate --schema ./prisma/schema.prisma",
+    "test": "npm run prisma:generate && node ./src/smoke-runner.mjs --report ./reports/node-compat-smoke.json"
   },
   "dependencies": {
+    "@prisma/client": "^6.16.0",
     "express": "^4.21.2",
     "koa": "^2.16.3",
     "mongodb": "^6.21.0",
     "mongoose": "^8.19.1",
     "reflect-metadata": "^0.2.2",
     "typeorm": "^0.3.27"
+  },
+  "devDependencies": {
+    "prisma": "^6.16.0"
   }
 }

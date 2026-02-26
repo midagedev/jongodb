@@ -21,6 +21,7 @@ All notable changes to this project are documented in this file.
 - Added Koa integration smoke scenario and recipe coverage in node-compat suite.
 - Added Mongoose transaction/session smoke harness scenario with session visibility/commit coverage.
 - Added TypeORM MongoDB repository CRUD smoke harness scenario in node-compat suite.
+- Added Prisma MongoDB provider CRUD smoke harness with generated client workflow in node-compat suite.
 
 ## [0.1.3] - 2026-02-24
 

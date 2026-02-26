@@ -7,6 +7,7 @@ import process from "node:process";
 import "reflect-metadata";
 import express from "express";
 import Koa from "koa";
+import { PrismaClient } from "@prisma/client";
 import { MongoClient } from "mongodb";
 import mongoose from "mongoose";
 import { DataSource, EntitySchema } from "typeorm";
@@ -48,6 +49,9 @@ try {
     await runScenario("typeorm.mongodb.repository", () => typeormMongoRepository(uri))
   );
   scenarioResults.push(
+    await runScenario("prisma.mongodb.provider", () => prismaMongoProvider(uri))
+  );
+  scenarioResults.push(
     await runScenario("mongodb.transaction.commit", () =>
       mongodbTransactionCommit(uri)
     )
@@ -83,7 +87,7 @@ const failed = scenarioResults.length - passed;
 
 const report = {
   generatedAt: new Date().toISOString(),
-  compatibilityTarget: "node-driver-express-koa-typeorm-and-mongoose-smoke",
+  compatibilityTarget: "node-driver-express-koa-typeorm-prisma-and-mongoose-smoke",
   server: {
     uriScheme: "mongodb",
     backend: "jongodb",
@@ -300,6 +304,39 @@ async function typeormMongoRepository(uri) {
     }
   } finally {
     await dataSource.destroy();
+  }
+}
+
+async function prismaMongoProvider(uri) {
+  const prisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: uri,
+      },
+    },
+  });
+
+  try {
+    await prisma.$connect();
+    await prisma.prismaSmokeUser.deleteMany({});
+    await prisma.prismaSmokeUser.create({
+      data: {
+        email: "prisma-smoke@example.com",
+        name: "oracle",
+      },
+    });
+
+    const found = await prisma.prismaSmokeUser.findUnique({
+      where: {
+        email: "prisma-smoke@example.com",
+      },
+    });
+
+    if (found?.name !== "oracle") {
+      throw new Error("Prisma provider CRUD value mismatch.");
+    }
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
