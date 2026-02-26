@@ -26,6 +26,7 @@ All notable changes to this project are documented in this file.
 - Added npm release pipeline tarball attestation flow (`actions/attest-build-provenance`) for binary/core Node packages.
 - Added Node adapter canary pre-release workflow with canary dist-tag publish automation and attested tarball flow.
 - Added Node adapter semver/compatibility policy documentation (`docs/NODE_SEMVER_POLICY.md`).
+- Added dedicated migration guide from `mongodb-memory-server` to `@jongodb/memory-server`.
 
 ## [0.1.3] - 2026-02-24
 

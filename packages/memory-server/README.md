@@ -100,6 +100,9 @@ const runtime = createJongodbEnvRuntime({ databaseName: "test" });
 
 ## Migration from `mongodb-memory-server`
 
+Full migration guide:
+- [`docs/NODE_MIGRATION_FROM_MONGODB_MEMORY_SERVER.md`](../../docs/NODE_MIGRATION_FROM_MONGODB_MEMORY_SERVER.md)
+
 Basic Jest migration:
 
 Before:
