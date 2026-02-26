@@ -356,6 +356,58 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer retries with next port after collision",
+  { concurrency: false },
+  async () => {
+    await withPortCollisionBinary(async (binaryPath) => {
+      const server = await startJongodbMemoryServer({
+        launchMode: "binary",
+        binaryPath,
+        host: "127.0.0.1",
+        port: 28017,
+        portRetryAttempts: 2,
+        portRetryBackoffMs: 1,
+        databaseName: "port_retry_success",
+        env: {
+          JONGODB_COLLISION_PORT: "28017",
+        },
+      });
+
+      try {
+        assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:28018\/port_retry_success$/u);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer fails on collision when port retry is disabled",
+  { concurrency: false },
+  async () => {
+    await withPortCollisionBinary(async (binaryPath) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "binary",
+            binaryPath,
+            host: "127.0.0.1",
+            port: 28117,
+            portRetryAttempts: 0,
+            databaseName: "port_retry_disabled",
+            env: {
+              JONGODB_COLLISION_PORT: "28117",
+            },
+          });
+        },
+        /EADDRINUSE|address already in use/i
+      );
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer java mode resolves classpath via auto-discovery",
   { concurrency: false },
   async () => {
@@ -801,6 +853,21 @@ async function withFakeBinary(
   }
 }
 
+async function withPortCollisionBinary(
+  block: (binaryPath: string) => Promise<void>
+): Promise<void> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "jongodb-bin-port-collision-"));
+  const binaryPath = path.join(tempDir, "fake-jongodb-binary-port-collision");
+
+  try {
+    await writeFile(binaryPath, portCollisionBinaryLauncherScript(), "utf8");
+    await chmod(binaryPath, 0o755);
+    await block(binaryPath);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 async function withTopologyMismatchBinary(
   block: (binaryPath: string) => Promise<void>
 ): Promise<void> {
@@ -1001,6 +1068,35 @@ if (typeof pidFile === "string" && pidFile.length > 0) {
   fs.writeFileSync(pidFile, String(process.pid));
 }
 console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db + query);
+const keepAlive = setInterval(() => {}, 1000);
+const shutdown = () => {
+  clearInterval(keepAlive);
+  process.exit(0);
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+`;
+}
+
+function portCollisionBinaryLauncherScript(): string {
+  return `#!/usr/bin/env node
+const valueOf = (name, fallback) => {
+  const prefixed = name + "=";
+  const found = process.argv.find((arg) => arg.startsWith(prefixed));
+  return found ? found.slice(prefixed.length) : fallback;
+};
+const host = valueOf("--host", "127.0.0.1");
+const portRaw = Number(valueOf("--port", "0"));
+const db = valueOf("--database", "test");
+const port = Number.isInteger(portRaw) && portRaw > 0 ? portRaw : 27017;
+const collisionPort = Number(process.env.JONGODB_COLLISION_PORT ?? "27017");
+if (port === collisionPort) {
+  console.error(
+    "JONGODB_START_FAILURE=listen EADDRINUSE: address already in use " + host + ":" + port
+  );
+  process.exit(1);
+}
+console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db);
 const keepAlive = setInterval(() => {}, 1000);
 const shutdown = () => {
   clearInterval(keepAlive);

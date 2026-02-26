@@ -34,6 +34,8 @@ const DEFAULT_ARTIFACT_CACHE_RELATIVE_DIR = ".jongodb/cache";
 const DEFAULT_ARTIFACT_CACHE_MAX_ENTRIES = 32;
 const DEFAULT_ARTIFACT_CACHE_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_ARTIFACT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_PORT_RETRY_ATTEMPTS = 3;
+const DEFAULT_PORT_RETRY_BACKOFF_MS = 100;
 const MAX_LOG_LINES = 50;
 const REDACTED_PLACEHOLDER = "<redacted>";
 const URI_CREDENTIAL_PATTERN =
@@ -56,6 +58,8 @@ type ClasspathDiscoveryMode = "auto" | "off";
 export interface JongodbMemoryServerOptions {
   host?: string;
   port?: number;
+  portRetryAttempts?: number;
+  portRetryBackoffMs?: number;
   databaseName?: string;
   databaseNameSuffix?: string;
   databaseNameStrategy?: DatabaseNameStrategy;
@@ -167,63 +171,40 @@ export async function startJongodbMemoryServer(
     "stopTimeoutMs"
   );
   const host = normalizeHost(options.host);
-  const port = normalizePort(options.port);
+  const requestedPort = normalizePort(options.port);
+  const portRetryPolicy = resolvePortRetryPolicy(options, requestedPort);
   const databaseName = resolveDatabaseName(options);
   const topologyProfile = normalizeTopologyProfile(options.topologyProfile);
   const replicaSetName = normalizeReplicaSetName(options.replicaSetName);
   const logLevel = options.logLevel ?? "silent";
   const cleanupOnProcessExit = options.cleanupOnProcessExit ?? true;
   const onStartupTelemetry = options.onStartupTelemetry;
-  const launchResolution = resolveLaunchConfigs(options, {
-    host,
-    port,
-    databaseName,
-    topologyProfile,
-    replicaSetName,
-  });
-  const launchConfigs = launchResolution.launchConfigs;
   const launchErrors: string[] = [];
 
   let attempt = 0;
-  for (const launchConfig of launchConfigs) {
-    const startupStartedAt = performance.now();
-    attempt += 1;
-    try {
-      const server = await startWithLaunchConfig(launchConfig, {
-        startupTimeoutMs,
-        stopTimeoutMs,
-        logLevel,
-        env: options.env,
-        cleanupOnProcessExit,
-      });
-      emitStartupTelemetry(onStartupTelemetry, {
-        attempt,
-        mode: launchConfig.mode,
-        source: launchConfig.source,
-        startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
-        success: true,
-      });
-      return server;
-    } catch (error: unknown) {
-      const normalized = wrapError(error);
-      emitStartupTelemetry(onStartupTelemetry, {
-        attempt,
-        mode: launchConfig.mode,
-        source: launchConfig.source,
-        startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
-        success: false,
-        errorMessage: normalized.message,
-      });
+  for (
+    let portAttempt = 0;
+    portAttempt <= portRetryPolicy.attempts;
+    portAttempt += 1
+  ) {
+    const resolvedPort = requestedPort === 0 ? 0 : requestedPort + portAttempt;
+    if (resolvedPort > 65535) {
       launchErrors.push(
-        `[${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
+        `[port-retry] exhausted valid port range at port=${resolvedPort}.`
       );
+      break;
     }
-  }
 
-  if (launchResolution.deferredJavaFallback !== undefined) {
-    const deferredAttempt = launchResolution.deferredJavaFallback();
-    if (deferredAttempt.launchConfig !== null) {
-      const launchConfig = deferredAttempt.launchConfig;
+    let sawPortCollision = false;
+    const launchResolution = resolveLaunchConfigs(options, {
+      host,
+      port: resolvedPort,
+      databaseName,
+      topologyProfile,
+      replicaSetName,
+    });
+
+    for (const launchConfig of launchResolution.launchConfigs) {
       const startupStartedAt = performance.now();
       attempt += 1;
       try {
@@ -252,13 +233,78 @@ export async function startJongodbMemoryServer(
           success: false,
           errorMessage: normalized.message,
         });
+        if (isPortCollisionError(normalized.message)) {
+          sawPortCollision = true;
+        }
         launchErrors.push(
-          `[${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
+          `[port=${resolvedPort}] [${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
         );
       }
-    } else if (deferredAttempt.diagnostics !== undefined) {
-      launchErrors.push(`[java:classpath-auto-discovery] ${deferredAttempt.diagnostics}`);
     }
+
+    if (launchResolution.deferredJavaFallback !== undefined) {
+      const deferredAttempt = launchResolution.deferredJavaFallback();
+      if (deferredAttempt.launchConfig !== null) {
+        const launchConfig = deferredAttempt.launchConfig;
+        const startupStartedAt = performance.now();
+        attempt += 1;
+        try {
+          const server = await startWithLaunchConfig(launchConfig, {
+            startupTimeoutMs,
+            stopTimeoutMs,
+            logLevel,
+            env: options.env,
+            cleanupOnProcessExit,
+          });
+          emitStartupTelemetry(onStartupTelemetry, {
+            attempt,
+            mode: launchConfig.mode,
+            source: launchConfig.source,
+            startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
+            success: true,
+          });
+          return server;
+        } catch (error: unknown) {
+          const normalized = wrapError(error);
+          emitStartupTelemetry(onStartupTelemetry, {
+            attempt,
+            mode: launchConfig.mode,
+            source: launchConfig.source,
+            startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
+            success: false,
+            errorMessage: normalized.message,
+          });
+          if (isPortCollisionError(normalized.message)) {
+            sawPortCollision = true;
+          }
+          launchErrors.push(
+            `[port=${resolvedPort}] [${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
+          );
+        }
+      } else if (deferredAttempt.diagnostics !== undefined) {
+        launchErrors.push(
+          `[port=${resolvedPort}] [java:classpath-auto-discovery] ${deferredAttempt.diagnostics}`
+        );
+      }
+    }
+
+    const shouldRetryPort =
+      requestedPort > 0 &&
+      portAttempt < portRetryPolicy.attempts &&
+      sawPortCollision;
+
+    if (shouldRetryPort) {
+      const backoffMs = portRetryPolicy.backoffMs * (portAttempt + 1);
+      launchErrors.push(
+        `[port-retry] collision detected on port=${resolvedPort}; retrying port=${resolvedPort + 1} after ${backoffMs}ms.`
+      );
+      if (backoffMs > 0) {
+        await sleepFor(backoffMs);
+      }
+      continue;
+    }
+
+    break;
   }
 
   throw new Error(
@@ -1318,6 +1364,61 @@ function normalizePort(port: number | undefined): number {
   return normalized;
 }
 
+function resolvePortRetryPolicy(
+  options: JongodbMemoryServerOptions,
+  requestedPort: number
+): { attempts: number; backoffMs: number } {
+  if (requestedPort === 0) {
+    return { attempts: 0, backoffMs: 0 };
+  }
+
+  return {
+    attempts: resolveNonNegativeIntegerOption(
+      options.portRetryAttempts,
+      "JONGODB_PORT_RETRY_ATTEMPTS",
+      DEFAULT_PORT_RETRY_ATTEMPTS,
+      "portRetryAttempts"
+    ),
+    backoffMs: resolveNonNegativeIntegerOption(
+      options.portRetryBackoffMs,
+      "JONGODB_PORT_RETRY_BACKOFF_MS",
+      DEFAULT_PORT_RETRY_BACKOFF_MS,
+      "portRetryBackoffMs"
+    ),
+  };
+}
+
+function resolveNonNegativeIntegerOption(
+  fromOption: number | undefined,
+  envVarName: string,
+  fallback: number,
+  fieldName: string
+): number {
+  if (fromOption !== undefined) {
+    if (!Number.isFinite(fromOption) || fromOption < 0) {
+      throw new Error(`${fieldName} must be a non-negative number.`);
+    }
+    return Math.floor(fromOption);
+  }
+
+  const fromEnvRaw = process.env[envVarName]?.trim();
+  if (fromEnvRaw !== undefined && fromEnvRaw.length > 0) {
+    const parsed = Number(fromEnvRaw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error(`${envVarName} must be a non-negative number.`);
+    }
+    return Math.floor(parsed);
+  }
+
+  return fallback;
+}
+
+function isPortCollisionError(message: string): boolean {
+  return /EADDRINUSE|address already in use|port (?:is )?already in use|bind failed/iu.test(
+    message
+  );
+}
+
 function normalizeTopologyProfile(
   profile: TopologyProfile | undefined
 ): TopologyProfile {
@@ -1728,6 +1829,12 @@ function ensureProcessExitCleanupHook(): void {
       }
     }
     managedLauncherProcesses.clear();
+  });
+}
+
+function sleepFor(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 
