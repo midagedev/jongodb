@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { createInterface } from "node:readline";
 
 const moduleRequire = createRequire(
@@ -50,6 +51,7 @@ export interface JongodbMemoryServerOptions {
   replicaSetName?: string;
   env?: Record<string, string>;
   logLevel?: LogLevel;
+  onStartupTelemetry?: (event: JongodbStartupTelemetry) => void;
 }
 
 export interface JongodbMemoryServer {
@@ -57,6 +59,15 @@ export interface JongodbMemoryServer {
   readonly pid: number;
   detach(): void;
   stop(): Promise<void>;
+}
+
+export interface JongodbStartupTelemetry {
+  attempt: number;
+  mode: "binary" | "java";
+  source: string;
+  startupDurationMs: number;
+  success: boolean;
+  errorMessage?: string;
 }
 
 interface ExitResult {
@@ -92,6 +103,7 @@ export async function startJongodbMemoryServer(
   const topologyProfile = normalizeTopologyProfile(options.topologyProfile);
   const replicaSetName = normalizeReplicaSetName(options.replicaSetName);
   const logLevel = options.logLevel ?? "silent";
+  const onStartupTelemetry = options.onStartupTelemetry;
   const launchConfigs = resolveLaunchConfigs(options, {
     host,
     port,
@@ -103,15 +115,33 @@ export async function startJongodbMemoryServer(
 
   for (let index = 0; index < launchConfigs.length; index += 1) {
     const launchConfig = launchConfigs[index];
+    const startupStartedAt = performance.now();
+    const attempt = index + 1;
     try {
-      return await startWithLaunchConfig(launchConfig, {
+      const server = await startWithLaunchConfig(launchConfig, {
         startupTimeoutMs,
         stopTimeoutMs,
         logLevel,
         env: options.env,
       });
+      emitStartupTelemetry(onStartupTelemetry, {
+        attempt,
+        mode: launchConfig.mode,
+        source: launchConfig.source,
+        startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
+        success: true,
+      });
+      return server;
     } catch (error: unknown) {
       const normalized = wrapError(error);
+      emitStartupTelemetry(onStartupTelemetry, {
+        attempt,
+        mode: launchConfig.mode,
+        source: launchConfig.source,
+        startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
+        success: false,
+        errorMessage: normalized.message,
+      });
       launchErrors.push(
         `[${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
       );
@@ -911,6 +941,24 @@ function redactSensitiveData(input: string): string {
     .replace(SECRET_JSON_PATTERN, `$1${REDACTED_PLACEHOLDER}$3`)
     .replace(SECRET_QUERY_PATTERN, `$1${REDACTED_PLACEHOLDER}`)
     .replace(SECRET_ASSIGNMENT_PATTERN, `$1${REDACTED_PLACEHOLDER}`);
+}
+
+function emitStartupTelemetry(
+  hook: ((event: JongodbStartupTelemetry) => void) | undefined,
+  event: JongodbStartupTelemetry
+): void {
+  if (hook === undefined) {
+    return;
+  }
+  try {
+    hook(event);
+  } catch {
+    // telemetry hooks must not break runtime startup flow
+  }
+}
+
+function roundDurationMs(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 async function forceStopIfAlive(
