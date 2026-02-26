@@ -14,9 +14,18 @@ permissions:
 
 jobs:
   smoke:
-    name: mongodb + mongoose smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: node-compat smoke (${{ matrix.os }}, node-${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        node:
+          - "20"
+          - "22"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,11 +36,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Node 20
+      - name: Set up Node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node }}
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            testkit/node-compat/package-lock.json
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -67,7 +79,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: node-compat-smoke-report
+          name: node-compat-smoke-report-${{ matrix.os }}-node${{ matrix.node }}
           path: testkit/node-compat/reports/node-compat-smoke.json
           if-no-files-found: warn
           retention-days: 14
