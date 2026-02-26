@@ -270,6 +270,38 @@ test(
   }
 );
 
+test(
+  "startJongodbMemoryServer redacts secrets from launcher failure logs",
+  { concurrency: false },
+  async () => {
+    await withSecretFailureBinary(async (binaryPath) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "binary",
+            binaryPath,
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "redaction_case",
+            startupTimeoutMs: 3_000,
+          });
+        },
+        (error: unknown) => {
+          if (!(error instanceof Error)) {
+            return false;
+          }
+          assert.match(error.message, /<redacted>/u);
+          assert.doesNotMatch(error.message, /superSecretPwd/u);
+          assert.doesNotMatch(error.message, /token-123456/u);
+          assert.doesNotMatch(error.message, /plainpass/u);
+          assert.doesNotMatch(error.message, /querySecret/u);
+          return true;
+        }
+      );
+    });
+  }
+);
+
 async function withFakeBinary(
   block: (binaryPath: string) => Promise<void>
 ): Promise<void> {
@@ -315,6 +347,21 @@ async function withBrokenBinary(
   }
 }
 
+async function withSecretFailureBinary(
+  block: (binaryPath: string) => Promise<void>
+): Promise<void> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "jongodb-bin-secret-fail-"));
+  const binaryPath = path.join(tempDir, "secret-failing-jongodb-binary");
+
+  try {
+    await writeFile(binaryPath, secretFailureBinaryScript(), "utf8");
+    await chmod(binaryPath, 0o755);
+    await block(binaryPath);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 async function withFakeLaunchers(
   block: (paths: { brokenBinaryPath: string; fakeJavaPath: string }) => Promise<void>
 ): Promise<void> {
@@ -336,6 +383,13 @@ async function withFakeLaunchers(
 function brokenBinaryScript(): string {
   return `#!/usr/bin/env sh
 echo "JONGODB_START_FAILURE=simulated binary startup failure" 1>&2
+exit 1
+`;
+}
+
+function secretFailureBinaryScript(): string {
+  return `#!/usr/bin/env sh
+echo "JONGODB_START_FAILURE=auth failed password=superSecretPwd token=token-123456 uri=mongodb://alice:plainpass@127.0.0.1:27017/test?authSource=admin&password=querySecret" 1>&2
 exit 1
 `;
 }
