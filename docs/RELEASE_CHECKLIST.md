@@ -55,6 +55,16 @@ Use this when publishing `@jongodb/memory-server`:
 11. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
 12. Update README usage examples with the released package version.
 
+## Node Canary Channel Gate (Draft)
+
+Use this when validating `@jongodb/memory-server` canary automation:
+
+1. Confirm `Node Adapter Canary Release` workflow is configured on `main` push and `workflow_dispatch`.
+2. Confirm generated version format includes canary suffix (`<base>-canary.<UTC timestamp>.<short sha>`).
+3. Confirm workflow packs the npm tarball, attests it (`actions/attest-build-provenance`), then publishes from that tarball.
+4. Confirm publish uses npm dist-tag `canary` (never `latest`).
+5. Confirm dry-run path works without publish credentials (`publish=false` in manual run).
+
 ## Release History
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |

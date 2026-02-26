@@ -24,6 +24,7 @@ All notable changes to this project are documented in this file.
 - Added Prisma MongoDB provider CRUD smoke harness with generated client workflow in node-compat suite.
 - Added node adapter compatibility CI matrix across Ubuntu/macOS and Node 20/22.
 - Added npm release pipeline tarball attestation flow (`actions/attest-build-provenance`) for binary/core Node packages.
+- Added Node adapter canary pre-release workflow with canary dist-tag publish automation and attested tarball flow.
 
 ## [0.1.3] - 2026-02-24
 
