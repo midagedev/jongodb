@@ -54,6 +54,11 @@ try {
   );
   scenarioResults.push(await runScenario("mongoose.crud", () => mongooseCrud(uri)));
   scenarioResults.push(
+    await runScenario("mongoose.session.with-transaction", () =>
+      mongooseSessionWithTransaction(uri)
+    )
+  );
+  scenarioResults.push(
     await runScenario("mongoose.transaction.commit", () =>
       mongooseTransactionCommit(uri)
     )
@@ -352,6 +357,58 @@ async function mongooseTransactionRollback(uri) {
     const found = await Model.findById("mongoose-tx-1").lean().exec();
     if (found !== null) {
       throw new Error("Mongoose transaction rollback did not rollback.");
+    }
+  } finally {
+    await connection.close();
+  }
+}
+
+async function mongooseSessionWithTransaction(uri) {
+  const connection = await mongoose.createConnection(uri).asPromise();
+  try {
+    const schema = new mongoose.Schema(
+      {
+        _id: String,
+        value: String,
+      },
+      { versionKey: false }
+    );
+    const Model = connection.model(
+      "MongooseSessionSmoke",
+      schema,
+      "mongoose_session_smoke"
+    );
+    await Model.deleteMany({});
+
+    const session = await connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await Model.create([{ _id: "mongoose-session-1", value: "pending" }], {
+          session,
+        });
+
+        const inSession = await Model.findById("mongoose-session-1")
+          .session(session)
+          .lean()
+          .exec();
+        if (inSession?.value !== "pending") {
+          throw new Error("Mongoose session read in active transaction failed.");
+        }
+
+        const outsideSession = await Model.findById("mongoose-session-1").lean().exec();
+        if (outsideSession !== null) {
+          throw new Error(
+            "Mongoose session leaked uncommitted document outside transaction."
+          );
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    const committed = await Model.findById("mongoose-session-1").lean().exec();
+    if (committed?.value !== "pending") {
+      throw new Error("Mongoose session transaction did not commit document.");
     }
   } finally {
     await connection.close();
