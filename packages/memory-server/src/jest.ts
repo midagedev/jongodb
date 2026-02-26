@@ -68,6 +68,18 @@ export function createJestGlobalSetup(
   return async () => {
     const { envVarName, stateFile, runtimeOptions } =
       splitLifecycleOptions(options);
+
+    const existingState = await readJestGlobalState({ stateFile });
+    if (existingState !== null) {
+      if (isProcessRunning(existingState.pid)) {
+        // Idempotent setup: reuse already detached launcher when state is still healthy.
+        process.env[envVarName] = existingState.uri;
+        process.env[existingState.envVarName] = existingState.uri;
+        return;
+      }
+      await rm(stateFile, { force: true });
+    }
+
     const server = await startJongodbMemoryServer(runtimeOptions);
 
     process.env[envVarName] = server.uri;
@@ -100,6 +112,7 @@ export function createJestGlobalTeardown(
         options.killTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS
       );
     } finally {
+      delete process.env[state.envVarName];
       await rm(stateFile, { force: true });
     }
   };

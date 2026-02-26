@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -121,6 +122,88 @@ test(
   }
 );
 
+test(
+  "jest global setup is idempotent when state file already references a running process",
+  { concurrency: false },
+  async () => {
+    const stateFile = path.join(
+      tmpdir(),
+      `jongodb-jest-state-reuse-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+    );
+
+    const setup = createJestGlobalSetup({
+      classpath: classpathForRuntime,
+      stateFile,
+      envVarName: "JONGODB_GLOBAL_URI_REUSE",
+      startupTimeoutMs: 20_000,
+    });
+    const teardown = createJestGlobalTeardown({
+      stateFile,
+      killTimeoutMs: 5_000,
+    });
+
+    await setup();
+    const first = await readJestGlobalState({ stateFile });
+    assert.notEqual(first, null);
+
+    await setup();
+    const second = await readJestGlobalState({ stateFile });
+    assert.notEqual(second, null);
+    assert.equal(second!.pid, first!.pid);
+    assert.equal(second!.uri, first!.uri);
+    assert.equal(process.env.JONGODB_GLOBAL_URI_REUSE, first!.uri);
+
+    await teardown();
+    assert.equal(await readJestGlobalState({ stateFile }), null);
+  }
+);
+
+test(
+  "jest global setup replaces stale state file entries with a fresh detached process",
+  { concurrency: false },
+  async () => {
+    const stateFile = path.join(
+      tmpdir(),
+      `jongodb-jest-state-stale-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+    );
+    const stalePid = findUnusedPid();
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        {
+          uri: "mongodb://127.0.0.1:27017/stale",
+          pid: stalePid,
+          envVarName: "JONGODB_GLOBAL_URI_STALE",
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const setup = createJestGlobalSetup({
+      classpath: classpathForRuntime,
+      stateFile,
+      envVarName: "JONGODB_GLOBAL_URI_STALE",
+      startupTimeoutMs: 20_000,
+    });
+    const teardown = createJestGlobalTeardown({
+      stateFile,
+      killTimeoutMs: 5_000,
+    });
+
+    await setup();
+
+    const refreshed = await readJestGlobalState({ stateFile });
+    assert.notEqual(refreshed, null);
+    assert.notEqual(refreshed!.pid, stalePid);
+    assert.equal(isProcessRunning(refreshed!.pid), true);
+
+    await teardown();
+    assert.equal(await readJestGlobalState({ stateFile }), null);
+  }
+);
+
 class HookHarness {
   private readonly beforeCallbacks: Array<() => unknown | Promise<unknown>> = [];
   private readonly afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
@@ -161,4 +244,14 @@ function isProcessRunning(pid: number): boolean {
     }
     throw error;
   }
+}
+
+function findUnusedPid(): number {
+  // Choose a high PID range and probe until we hit an unused entry.
+  for (let pid = 900_000; pid < 910_000; pid += 1) {
+    if (!isProcessRunning(pid)) {
+      return pid;
+    }
+  }
+  return 999_999;
 }
