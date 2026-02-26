@@ -16,6 +16,7 @@ All notable changes to this project are documented in this file.
 - Added Node adapter topology-profile/URI option sync validation with mismatch regression tests.
 - Added Jest global setup/teardown stabilization for idempotent state reuse and stale state auto-recovery.
 - Added Vitest workspace helper for project-level DB/env isolation policy.
+- Added Nest Jest adapter hardened defaults (`MONGODB_URI`+`DATABASE_URL`, worker DB isolation) with override coverage.
 
 ## [0.1.3] - 2026-02-24
 
