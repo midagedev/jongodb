@@ -676,6 +676,77 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer emits structured launch logs at info level",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const logs: Array<{
+        timestamp: string;
+        level: "error" | "warn" | "info" | "debug";
+        event: string;
+        message: string;
+      }> = [];
+
+      const server = await startJongodbMemoryServer({
+        launchMode: "binary",
+        binaryPath,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "structured_logs_info",
+        logLevel: "info",
+        onLog(event) {
+          logs.push(event);
+        },
+      });
+
+      try {
+        assert.ok(logs.some((entry) => entry.event === "launch.attempt"));
+        assert.ok(logs.some((entry) => entry.event === "launch.success"));
+        assert.ok(
+          logs.every((entry) => /\d{4}-\d{2}-\d{2}T/u.test(entry.timestamp))
+        );
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer applies logLevel filtering to structured logs",
+  { concurrency: false },
+  async () => {
+    await withBrokenBinary(async (brokenBinaryPath) => {
+      const logs: Array<{
+        level: "error" | "warn" | "info" | "debug";
+        event: string;
+      }> = [];
+
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "binary",
+            binaryPath: brokenBinaryPath,
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "structured_logs_warn",
+            logLevel: "warn",
+            onLog(event) {
+              logs.push({ level: event.level, event: event.event });
+            },
+          });
+        },
+        /simulated binary startup failure/i
+      );
+
+      assert.ok(logs.some((entry) => entry.event === "launch.failure"));
+      assert.ok(logs.every((entry) => entry.level === "warn" || entry.level === "error"));
+      assert.ok(!logs.some((entry) => entry.event === "launch.success"));
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer emits startup telemetry for successful binary launch",
   { concurrency: false },
   async () => {

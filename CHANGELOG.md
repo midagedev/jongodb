@@ -40,6 +40,7 @@ All notable changes to this project are documented in this file.
 - Added local classpath-discovery artifact cache with TTL/quota pruning policy and configurable cache limits.
 - Added process-exit launcher cleanup hook (`cleanupOnProcessExit`) to reduce orphan runtime processes after abrupt test termination.
 - Added fixed-port collision retry/backoff strategy (`portRetryAttempts`, `portRetryBackoffMs`) with next-port fallback behavior.
+- Added structured runtime logging contract (`onLog`, `logFormat`) with expanded log levels (`error`/`warn`/`info`/`debug`).
 
 ## [0.1.3] - 2026-02-24
 
