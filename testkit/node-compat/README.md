@@ -7,6 +7,7 @@ Practical compatibility smoke suite for:
 - `koa` route integration with MongoDB driver
 - `mongoose` (CRUD + transaction/session)
 - `typeorm` MongoDB repository CRUD
+- `prisma` MongoDB provider CRUD
 
 The suite runs against `jongodb` started through the Node adapter runtime and writes a JSON report.
 
@@ -30,6 +31,8 @@ export JONGODB_CLASSPATH="$(./.tooling/gradle-8.10.2/bin/gradle --no-daemon -q p
 npm --prefix testkit/node-compat ci
 npm --prefix testkit/node-compat test
 ```
+
+`test` script generates Prisma client from `testkit/node-compat/prisma/schema.prisma` before running scenarios.
 
 Report output:
 
