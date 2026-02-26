@@ -63,6 +63,9 @@ This package supports both:
 - ESM (`import`)
 - CommonJS (`require`)
 
+Dual-export contract coverage:
+- test suite runs both `scripts/esm-smoke.mjs` and `scripts/cjs-smoke.cjs` to guard import/require entrypoint parity.
+
 ## Quick Start
 
 Recommended pattern: one runtime per test process.

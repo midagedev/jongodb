@@ -116,7 +116,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "type:report": "npm run typecheck && npm run build:esm && node ./scripts/type-api-coverage-report.mjs",
     "pretest": "npm run build",
-    "test": "node --test dist/esm/test/*.test.js && node ./scripts/cjs-smoke.cjs",
+    "test": "node --test dist/esm/test/*.test.js && node ./scripts/esm-smoke.mjs && node ./scripts/cjs-smoke.cjs",
     "prepack": "npm run clean && npm run build",
     "release:check": "npm run build && npm run type:report && npm run test && npm pack --dry-run"
   },
