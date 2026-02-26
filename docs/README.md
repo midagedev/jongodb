@@ -12,6 +12,7 @@ Runtime and compatibility:
 - `docs/COMPATIBILITY_SCORECARD.md`
 - `docs/NODE_COMPAT_SMOKE.md`
 - `docs/NODE_COLD_START_BENCHMARK.md`
+- `docs/NODE_ARTIFACT_CACHE_POLICY.md`
 - `docs/NODE_DEBUG_BUNDLE.md`
 - `docs/NODE_DOCTOR.md`
 - `docs/NODE_LOG_REDACTION_POLICY.md`

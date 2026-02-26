@@ -50,6 +50,12 @@ npm run node:build
 npm --prefix testkit/node-compat test
 ```
 
+Clear classpath artifact cache:
+
+```bash
+rm -rf .jongodb/cache
+```
+
 Clear Jest global runtime state:
 
 ```bash
@@ -60,6 +66,7 @@ rm -f .jongodb/jest-memory-server.json
 
 - `launchMode` is one of `auto`, `binary`, `java`.
 - `classpathDiscovery` is `auto` or `off` (`auto` default).
+- `artifactCacheMaxEntries` / `artifactCacheMaxBytes` / `artifactCacheTtlMs` are positive values.
 - `host`, `port`, `databaseName` values are valid/non-empty.
 - `topologyProfile` and `replicaSetName` match expected URI contract.
 - `envVarName` / `envVarNames` are valid and unique for your test runtime.
