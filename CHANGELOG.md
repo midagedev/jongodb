@@ -15,6 +15,7 @@ All notable changes to this project are documented in this file.
 - Added Node adapter replica-set profile contract tests for URI/env propagation and `hello` handshake invariants.
 - Added Node adapter topology-profile/URI option sync validation with mismatch regression tests.
 - Added Jest global setup/teardown stabilization for idempotent state reuse and stale state auto-recovery.
+- Added Vitest workspace helper for project-level DB/env isolation policy.
 
 ## [0.1.3] - 2026-02-24
 
