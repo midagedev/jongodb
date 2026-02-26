@@ -1,0 +1,95 @@
+name: Node memory-server bug report
+description: Report @jongodb/memory-server issues with reproducible debug bundle evidence
+title: "[node][memory-server] "
+labels:
+  - type:quality
+  - track:node
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please run the debug bundle collector before filing:
+
+        ```bash
+        npm run node:debug:bundle -- --outputDir build/reports/node-debug-bundle
+        ```
+
+        Attach:
+        - `build/reports/node-debug-bundle/bundle.json`
+        - `build/reports/node-debug-bundle/SUMMARY.md`
+
+  - type: input
+    id: package_version
+    attributes:
+      label: @jongodb/memory-server version
+      placeholder: e.g. 0.1.4
+    validations:
+      required: true
+
+  - type: input
+    id: node_version
+    attributes:
+      label: Node.js version
+      placeholder: e.g. 20.10.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / Architecture
+      placeholder: e.g. macOS 14 arm64, Ubuntu 22.04 x64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: launch_mode
+    attributes:
+      label: launchMode
+      options:
+        - auto
+        - binary
+        - java
+        - unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: failure_signature
+    attributes:
+      label: Failure signature (exact message)
+      description: Include the first failing error line and any `JONGODB_START_FAILURE=...` line.
+      placeholder: paste exact error text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Minimal reproduction
+      description: Commands and test setup required to reproduce.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs actual behavior
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+
+  - type: textarea
+    id: bundle_paths
+    attributes:
+      label: Attached debug bundle files
+      description: Confirm where you attached `bundle.json` and `SUMMARY.md`.
+      placeholder: build/reports/node-debug-bundle/...
+    validations:
+      required: true
