@@ -11,10 +11,12 @@ body:
         Please run the debug bundle collector before filing:
 
         ```bash
+        npm run node:doctor -- --outputDir build/reports/node-doctor
         npm run node:debug:bundle -- --outputDir build/reports/node-debug-bundle
         ```
 
         Attach:
+        - `build/reports/node-doctor/doctor.json` (or `doctor.md`)
         - `build/reports/node-debug-bundle/bundle.json`
         - `build/reports/node-debug-bundle/SUMMARY.md`
 

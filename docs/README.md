@@ -13,6 +13,7 @@ Runtime and compatibility:
 - `docs/NODE_COMPAT_SMOKE.md`
 - `docs/NODE_COLD_START_BENCHMARK.md`
 - `docs/NODE_DEBUG_BUNDLE.md`
+- `docs/NODE_DOCTOR.md`
 - `docs/NODE_LOG_REDACTION_POLICY.md`
 - `docs/NODE_MIGRATION_FROM_MONGODB_MEMORY_SERVER.md`
 - `docs/NODE_SEMVER_POLICY.md`

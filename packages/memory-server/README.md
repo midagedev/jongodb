@@ -372,3 +372,5 @@ Security policy reference:
 Support/debug bundle:
 - generate issue bundle: `npm run node:debug:bundle -- --outputDir build/reports/node-debug-bundle`
 - collector guide: [`docs/NODE_DEBUG_BUNDLE.md`](../../docs/NODE_DEBUG_BUNDLE.md)
+- preflight doctor: `npm run node:doctor -- --outputDir build/reports/node-doctor`
+- doctor guide: [`docs/NODE_DOCTOR.md`](../../docs/NODE_DOCTOR.md)
