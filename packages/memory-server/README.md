@@ -202,6 +202,7 @@ Nest adapter defaults:
 
 Common patterns:
 - NestJS + Mongoose: use `process.env.MONGODB_URI` in `forRootAsync`
+- Mongoose transaction/session tests: run `startSession`/`withTransaction` against runtime URI in integration suites
 - Prisma (Mongo): set runtime `envVarNames` to include `DATABASE_URL`
 - TypeORM (Mongo): pass runtime URI into `url`
 - Express: inject `process.env.MONGODB_URI` into a shared MongoClient bootstrap and keep app routes DB-agnostic

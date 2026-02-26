@@ -5,7 +5,7 @@ Practical compatibility smoke suite for:
 - official Node `mongodb` driver
 - `express` route integration with MongoDB driver
 - `koa` route integration with MongoDB driver
-- `mongoose`
+- `mongoose` (CRUD + transaction/session)
 
 The suite runs against `jongodb` started through the Node adapter runtime and writes a JSON report.
 
