@@ -9,6 +9,8 @@
     "express": "^4.21.2",
     "koa": "^2.16.3",
     "mongodb": "^6.21.0",
-    "mongoose": "^8.19.1"
+    "mongoose": "^8.19.1",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.27"
   }
 }

@@ -204,7 +204,7 @@ Common patterns:
 - NestJS + Mongoose: use `process.env.MONGODB_URI` in `forRootAsync`
 - Mongoose transaction/session tests: run `startSession`/`withTransaction` against runtime URI in integration suites
 - Prisma (Mongo): set runtime `envVarNames` to include `DATABASE_URL`
-- TypeORM (Mongo): pass runtime URI into `url`
+- TypeORM (Mongo): pass runtime URI into `url` and validate `MongoRepository` CRUD in smoke suites
 - Express: inject `process.env.MONGODB_URI` into a shared MongoClient bootstrap and keep app routes DB-agnostic
 - Koa: inject `process.env.MONGODB_URI` into app context/bootstrap and keep middleware layers DB-agnostic
 

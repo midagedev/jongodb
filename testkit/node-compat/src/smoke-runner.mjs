@@ -4,10 +4,12 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 
+import "reflect-metadata";
 import express from "express";
 import Koa from "koa";
 import { MongoClient } from "mongodb";
 import mongoose from "mongoose";
+import { DataSource, EntitySchema } from "typeorm";
 import { startJongodbMemoryServer } from "../../../packages/memory-server/dist/esm/index.js";
 
 const DEFAULT_REPORT_PATH = path.resolve(
@@ -41,6 +43,9 @@ try {
   );
   scenarioResults.push(
     await runScenario("koa.mongodb.route", () => koaMongoRoute(uri))
+  );
+  scenarioResults.push(
+    await runScenario("typeorm.mongodb.repository", () => typeormMongoRepository(uri))
   );
   scenarioResults.push(
     await runScenario("mongodb.transaction.commit", () =>
@@ -78,7 +83,7 @@ const failed = scenarioResults.length - passed;
 
 const report = {
   generatedAt: new Date().toISOString(),
-  compatibilityTarget: "node-driver-express-koa-and-mongoose-smoke",
+  compatibilityTarget: "node-driver-express-koa-typeorm-and-mongoose-smoke",
   server: {
     uriScheme: "mongodb",
     backend: "jongodb",
@@ -251,6 +256,50 @@ async function koaMongoRoute(uri) {
   } finally {
     await closeHttpServer(httpServer);
     await client.close();
+  }
+}
+
+async function typeormMongoRepository(uri) {
+  const UserEntity = new EntitySchema({
+    name: "TypeormSmokeUser",
+    columns: {
+      _id: {
+        type: "objectId",
+        objectId: true,
+        primary: true,
+        generated: true,
+      },
+      name: {
+        type: String,
+      },
+    },
+  });
+
+  const dataSource = new DataSource({
+    type: "mongodb",
+    url: uri,
+    database: "node_smoke",
+    entities: [UserEntity],
+    synchronize: true,
+    logging: false,
+  });
+
+  await dataSource.initialize();
+  try {
+    const repository = dataSource.getMongoRepository("TypeormSmokeUser");
+    await repository.deleteMany({});
+    const insertResult = await repository.insertOne({ name: "trinity" });
+    if (insertResult.acknowledged !== true) {
+      throw new Error("TypeORM repository insert did not acknowledge write.");
+    }
+
+    const found = await repository.findOneBy({ name: "trinity" });
+
+    if (found?.name !== "trinity") {
+      throw new Error("TypeORM repository CRUD value mismatch.");
+    }
+  } finally {
+    await dataSource.destroy();
   }
 }
 
