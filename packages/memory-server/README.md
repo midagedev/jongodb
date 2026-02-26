@@ -260,6 +260,16 @@ const runtime = createJongodbEnvRuntime({
 });
 ```
 
+Replica-set contract test coverage:
+- URI must include `?replicaSet=<name>` when `topologyProfile=singleNodeReplicaSet`
+- `hello` response must expose `setName`, `hosts`, `primary`, `isWritablePrimary`, `topologyVersion`
+
+Run Node adapter contract tests:
+
+```bash
+npm run --workspace @jongodb/memory-server test
+```
+
 Scoped env example:
 
 ```ts

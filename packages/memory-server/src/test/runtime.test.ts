@@ -55,6 +55,49 @@ test(
 );
 
 test(
+  "runtime manager enforces single-node replica-set handshake contract",
+  { concurrency: false },
+  async () => {
+    const replicaSetName = "rs-node-contract";
+    const server = await startJongodbMemoryServer({
+      classpath: classpathForRuntime,
+      databaseName: "node_runtime_rs",
+      topologyProfile: "singleNodeReplicaSet",
+      replicaSetName,
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      assert.match(
+        server.uri,
+        /^mongodb:\/\/127\.0\.0\.1:\d+\/node_runtime_rs\?replicaSet=rs-node-contract$/u
+      );
+
+      const client = new MongoClient(server.uri);
+      await client.connect();
+      try {
+        const db = client.db("node_runtime_rs");
+        const hello = await db.command({ hello: 1 });
+        const expectedMember = new URL(server.uri).host;
+
+        assert.equal(hello.ok, 1);
+        assert.equal(hello.setName, replicaSetName);
+        assert.equal(hello.primary, expectedMember);
+        assert.equal(hello.isWritablePrimary, true);
+        assert.ok(Array.isArray(hello.hosts));
+        assert.ok(hello.hosts.includes(expectedMember));
+        assert.equal(typeof hello.topologyVersion, "object");
+        assert.notEqual(hello.topologyVersion, null);
+      } finally {
+        await client.close();
+      }
+    } finally {
+      await server.stop();
+    }
+  }
+);
+
+test(
   "runtime manager reports actionable error for missing java binary",
   { concurrency: false },
   async () => {

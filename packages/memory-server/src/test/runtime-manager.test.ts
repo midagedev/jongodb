@@ -101,6 +101,40 @@ test(
 );
 
 test(
+  "createJongodbEnvRuntime propagates single-node replica-set URI contract",
+  { concurrency: false },
+  async () => {
+    const envKey = "TEST_MONGODB_URI_REPLICA";
+    const previous = process.env[envKey];
+
+    const runtime = createJongodbEnvRuntime({
+      classpath: classpathForRuntime,
+      envVarName: envKey,
+      databaseName: "runtime_replica",
+      topologyProfile: "singleNodeReplicaSet",
+      replicaSetName: "rs-runtime",
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      const uri = await runtime.setup();
+      assert.match(
+        uri,
+        /^mongodb:\/\/127\.0\.0\.1:\d+\/runtime_replica\?replicaSet=rs-runtime$/u
+      );
+      assert.equal(process.env[envKey], uri);
+    } finally {
+      await runtime.teardown();
+      if (previous === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = previous;
+      }
+    }
+  }
+);
+
+test(
   "createJongodbEnvRuntime avoids env clobbering across overlapping runtimes",
   { concurrency: false, timeout: 120_000 },
   async () => {

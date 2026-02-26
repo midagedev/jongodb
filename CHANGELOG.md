@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file.
 - Added sample fixture manifest templates under `testkit/fixture/manifests`.
 - Added fixture manifest onboarding documentation (`docs/FIXTURE_MANIFEST.md`).
 - Added fixture usage/operations playbook (`docs/FIXTURE_PLAYBOOK.md`) for developer/reviewer/operator workflows.
+- Added Node adapter replica-set profile contract tests for URI/env propagation and `hello` handshake invariants.
 
 ## [0.1.3] - 2026-02-24
 
