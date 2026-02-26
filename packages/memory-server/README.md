@@ -34,6 +34,12 @@ Actual deltas vary by test shape, dataset size, and CI machine characteristics.
 
 - Node.js 20+
 
+## CI Coverage
+
+Node adapter compatibility smoke runs in CI across:
+- OS: `ubuntu-latest`, `macos-latest`
+- Node: `20`, `22`
+
 ## Install
 
 ```bash
