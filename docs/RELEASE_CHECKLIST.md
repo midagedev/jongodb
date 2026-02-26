@@ -41,19 +41,20 @@ Use this when publishing `@jongodb/memory-server`:
 
 1. Confirm `Node Adapter Release` workflow verify job is green.
 2. Confirm package version is set explicitly (tag `node-vX.Y.Z` or manual input).
-3. Confirm npm scope ownership for `@jongodb` and valid `NPM_TOKEN` in GitHub repository secrets.
-4. Confirm GraalVM native-image is available in workflow runners (linux, macOS, windows) for binary jobs.
-5. Confirm platform binary packages publish first:
+3. Confirm version bump rationale aligns with `docs/NODE_SEMVER_POLICY.md` (patch/minor/major classification).
+4. Confirm npm scope ownership for `@jongodb` and valid `NPM_TOKEN` in GitHub repository secrets.
+5. Confirm GraalVM native-image is available in workflow runners (linux, macOS, windows) for binary jobs.
+6. Confirm platform binary packages publish first:
    - `@jongodb/memory-server-bin-linux-x64-gnu`
    - `@jongodb/memory-server-bin-darwin-arm64`
    - `@jongodb/memory-server-bin-win32-x64`
-6. Confirm core package publishes after binaries with synced optional dependency versions.
-7. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
-8. Confirm workflow packs tarball artifacts first (binary/core) and publishes from those packed files.
-9. Confirm GitHub Artifact Attestations are generated for packed tarballs (`actions/attest-build-provenance`).
-10. Run `npm publish --dry-run` and review package contents.
-11. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
-12. Update README usage examples with the released package version.
+7. Confirm core package publishes after binaries with synced optional dependency versions.
+8. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
+9. Confirm workflow packs tarball artifacts first (binary/core) and publishes from those packed files.
+10. Confirm GitHub Artifact Attestations are generated for packed tarballs (`actions/attest-build-provenance`).
+11. Run `npm publish --dry-run` and review package contents.
+12. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
+13. Update README usage examples with the released package version.
 
 ## Node Canary Channel Gate (Draft)
 

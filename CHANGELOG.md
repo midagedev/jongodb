@@ -25,6 +25,7 @@ All notable changes to this project are documented in this file.
 - Added node adapter compatibility CI matrix across Ubuntu/macOS and Node 20/22.
 - Added npm release pipeline tarball attestation flow (`actions/attest-build-provenance`) for binary/core Node packages.
 - Added Node adapter canary pre-release workflow with canary dist-tag publish automation and attested tarball flow.
+- Added Node adapter semver/compatibility policy documentation (`docs/NODE_SEMVER_POLICY.md`).
 
 ## [0.1.3] - 2026-02-24
 
