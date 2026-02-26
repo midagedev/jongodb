@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 - Added fixture manifest onboarding documentation (`docs/FIXTURE_MANIFEST.md`).
 - Added fixture usage/operations playbook (`docs/FIXTURE_PLAYBOOK.md`) for developer/reviewer/operator workflows.
 - Added Node adapter replica-set profile contract tests for URI/env propagation and `hello` handshake invariants.
+- Added Node adapter topology-profile/URI option sync validation with mismatch regression tests.
 
 ## [0.1.3] - 2026-02-24
 

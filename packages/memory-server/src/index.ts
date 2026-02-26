@@ -60,6 +60,8 @@ interface SpawnLaunchConfig {
   command: string;
   args: string[];
   source: string;
+  topologyProfile: TopologyProfile;
+  replicaSetName: string;
 }
 
 export async function startJongodbMemoryServer(
@@ -158,6 +160,17 @@ async function startWithLaunchConfig(
     await forceStopIfAlive(child, context.stopTimeoutMs);
     throw wrapError(error);
   });
+
+  try {
+    ensureUriTopologyProfileSync(
+      startupResult.uri,
+      launchConfig.topologyProfile,
+      launchConfig.replicaSetName
+    );
+  } catch (error: unknown) {
+    await forceStopIfAlive(child, context.stopTimeoutMs);
+    throw wrapError(error);
+  }
 
   const stop = async (): Promise<void> => {
     if (stopped) {
@@ -315,6 +328,8 @@ function toBinaryLaunchConfig(
     command: binaryPath,
     args,
     source,
+    topologyProfile: context.topologyProfile,
+    replicaSetName: context.replicaSetName,
   };
 }
 
@@ -347,7 +362,60 @@ function toJavaLaunchConfig(
       ...launcherArgs,
     ],
     source: java.source,
+    topologyProfile: context.topologyProfile,
+    replicaSetName: context.replicaSetName,
   };
+}
+
+function ensureUriTopologyProfileSync(
+  uri: string,
+  topologyProfile: TopologyProfile,
+  replicaSetName: string
+): void {
+  let parsedUri: URL;
+  try {
+    parsedUri = new URL(uri);
+  } catch {
+    throw new Error(`Launcher emitted invalid URI: ${uri}`);
+  }
+
+  const replicaSetFromUri = parsedUri.searchParams.get("replicaSet");
+  if (topologyProfile === "standalone") {
+    if (replicaSetFromUri !== null && replicaSetFromUri.trim().length > 0) {
+      throw new Error(
+        [
+          "Launcher URI topology options are out of sync.",
+          "Requested topologyProfile=standalone but URI includes replicaSet query.",
+          `uri=${uri}`,
+        ].join(" ")
+      );
+    }
+    return;
+  }
+
+  if (replicaSetFromUri === null || replicaSetFromUri.trim().length === 0) {
+    throw new Error(
+      [
+        "Launcher URI topology options are out of sync.",
+        "Requested topologyProfile=singleNodeReplicaSet but URI is missing replicaSet query.",
+        `expectedReplicaSet=${replicaSetName}`,
+        `uri=${uri}`,
+      ].join(" ")
+    );
+  }
+
+  const normalizedReplicaSet = replicaSetFromUri.trim();
+  if (normalizedReplicaSet !== replicaSetName) {
+    throw new Error(
+      [
+        "Launcher URI topology options are out of sync.",
+        "Requested replicaSetName does not match URI replicaSet query.",
+        `expectedReplicaSet=${replicaSetName}`,
+        `actualReplicaSet=${normalizedReplicaSet}`,
+        `uri=${uri}`,
+      ].join(" ")
+    );
+  }
 }
 
 function resolveBinaryCandidate(
