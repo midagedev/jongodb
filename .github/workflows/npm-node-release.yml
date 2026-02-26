@@ -17,6 +17,7 @@ on:
       - "node-v*.*.*"
 
 permissions:
+  attestations: write
   contents: read
   id-token: write
 
@@ -173,6 +174,24 @@ jobs:
         shell: bash
         run: node ./scripts/node/stage-bin-package.mjs --workspace "${{ matrix.workspace_dir }}" --binary "${RUNNER_TEMP}/${{ matrix.output_name }}"
 
+      - name: Pack binary npm artifact
+        id: pack_binary
+        shell: bash
+        run: |
+          mkdir -p "${RUNNER_TEMP}/npm-pack"
+          PACK_FILE=$(npm pack "./${{ matrix.workspace_dir }}" --pack-destination "${RUNNER_TEMP}/npm-pack" | tail -n 1)
+          PACK_PATH="${RUNNER_TEMP}/npm-pack/${PACK_FILE}"
+          if [[ ! -f "$PACK_PATH" ]]; then
+            echo "Packed tarball not found: $PACK_PATH"
+            exit 1
+          fi
+          echo "file=$PACK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Attest binary package provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.pack_binary.outputs.file }}
+
       - name: Validate npm credentials for publish
         if: needs.meta.outputs.should_publish == 'true'
         shell: bash
@@ -183,13 +202,13 @@ jobs:
           fi
 
       - name: npm publish dry-run
-        run: npm publish "./${{ matrix.workspace_dir }}" --access public --provenance --dry-run
+        run: npm publish "${{ steps.pack_binary.outputs.file }}" --access public --provenance --dry-run
 
       - name: npm publish
         if: needs.meta.outputs.should_publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish "./${{ matrix.workspace_dir }}" --access public --provenance
+        run: npm publish "${{ steps.pack_binary.outputs.file }}" --access public --provenance
 
   publish-core:
     name: Publish @jongodb/memory-server
@@ -219,6 +238,24 @@ jobs:
           npm version "${{ needs.meta.outputs.version }}" --workspace @jongodb/memory-server --no-git-tag-version
           node ./scripts/node/sync-memory-server-optional-bins.mjs --version "${{ needs.meta.outputs.version }}"
 
+      - name: Pack core npm artifact
+        id: pack_core
+        shell: bash
+        run: |
+          mkdir -p "${RUNNER_TEMP}/npm-pack"
+          PACK_FILE=$(npm pack "./packages/memory-server" --pack-destination "${RUNNER_TEMP}/npm-pack" | tail -n 1)
+          PACK_PATH="${RUNNER_TEMP}/npm-pack/${PACK_FILE}"
+          if [[ ! -f "$PACK_PATH" ]]; then
+            echo "Packed tarball not found: $PACK_PATH"
+            exit 1
+          fi
+          echo "file=$PACK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Attest core package provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.pack_core.outputs.file }}
+
       - name: Validate npm credentials for publish
         if: needs.meta.outputs.should_publish == 'true'
         shell: bash
@@ -229,10 +266,10 @@ jobs:
           fi
 
       - name: npm publish dry-run
-        run: npm publish --workspace @jongodb/memory-server --access public --provenance --dry-run
+        run: npm publish "${{ steps.pack_core.outputs.file }}" --access public --provenance --dry-run
 
       - name: npm publish
         if: needs.meta.outputs.should_publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --workspace @jongodb/memory-server --access public --provenance
+        run: npm publish "${{ steps.pack_core.outputs.file }}" --access public --provenance

@@ -49,9 +49,11 @@ Use this when publishing `@jongodb/memory-server`:
    - `@jongodb/memory-server-bin-win32-x64`
 6. Confirm core package publishes after binaries with synced optional dependency versions.
 7. For manual workflow runs, never set `publish=true` with empty `version` (workflow blocks this).
-8. Run `npm publish --dry-run` and review package contents.
-9. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
-10. Update README usage examples with the released package version.
+8. Confirm workflow packs tarball artifacts first (binary/core) and publishes from those packed files.
+9. Confirm GitHub Artifact Attestations are generated for packed tarballs (`actions/attest-build-provenance`).
+10. Run `npm publish --dry-run` and review package contents.
+11. Publish only when `NPM_TOKEN` is configured and verify npm registry visibility.
+12. Update README usage examples with the released package version.
 
 ## Release History
 
