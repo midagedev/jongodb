@@ -157,6 +157,10 @@ import { createJestGlobalTeardown } from "@jongodb/memory-server/jest";
 export default createJestGlobalTeardown();
 ```
 
+Global setup/teardown stabilization notes:
+- repeated global setup calls with the same state file now reuse the existing detached launcher (idempotent)
+- stale state files (PID no longer alive) are auto-healed by starting a fresh launcher
+
 Vitest:
 
 ```ts
