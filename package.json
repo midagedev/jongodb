@@ -13,6 +13,7 @@
     "node:release:check": "npm run --workspace @jongodb/memory-server release:check",
     "node:benchmark:cold-start": "node ./scripts/node/benchmark-memory-server-cold-start.mjs",
     "node:debug:bundle": "node ./scripts/node/collect-memory-server-debug-bundle.mjs",
+    "node:doctor": "node ./scripts/node/memory-server-doctor.mjs",
     "node:sync-bin-optional-deps": "node ./scripts/node/sync-memory-server-optional-bins.mjs",
     "node:benchmark:native-profiles": "node ./scripts/node/benchmark-native-image-profiles.mjs"
   }
