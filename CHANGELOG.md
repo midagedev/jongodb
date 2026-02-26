@@ -18,6 +18,7 @@ All notable changes to this project are documented in this file.
 - Added Vitest workspace helper for project-level DB/env isolation policy.
 - Added Nest Jest adapter hardened defaults (`MONGODB_URI`+`DATABASE_URL`, worker DB isolation) with override coverage.
 - Added Express integration smoke scenario and recipe coverage in node-compat suite.
+- Added Koa integration smoke scenario and recipe coverage in node-compat suite.
 
 ## [0.1.3] - 2026-02-24
 

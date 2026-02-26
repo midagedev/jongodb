@@ -205,6 +205,7 @@ Common patterns:
 - Prisma (Mongo): set runtime `envVarNames` to include `DATABASE_URL`
 - TypeORM (Mongo): pass runtime URI into `url`
 - Express: inject `process.env.MONGODB_URI` into a shared MongoClient bootstrap and keep app routes DB-agnostic
+- Koa: inject `process.env.MONGODB_URI` into app context/bootstrap and keep middleware layers DB-agnostic
 
 ## Runtime Resolution
 
