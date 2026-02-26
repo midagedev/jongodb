@@ -25,6 +25,7 @@ Use this playbook when `@jongodb/memory-server` startup or test-runtime integrat
 | `Requested replicaSetName does not match URI replicaSet query` | configured replica set name differs from emitted URI | align `replicaSetName` with launcher output |
 | `Jest global state file has invalid schema` | stale/corrupted `.jongodb/jest-memory-server.json` | delete state file and rerun setup |
 | `Unable to stop detached Jest process pid=` | detached launcher process did not terminate cleanly | verify PID ownership/process health and rerun teardown; if needed kill process manually |
+| port remains occupied after abrupt test abort | non-detached launcher was left running after forced interruption | keep `cleanupOnProcessExit=true` (default) and rerun teardown/cleanup |
 | `envVarName/envVarNames entries must not be empty` | invalid runtime/jest/vitest env key config | ensure all env var names are non-empty trimmed strings |
 | `projectName must not be empty` | invalid Vitest workspace integration input | provide non-empty `projectName` for `registerJongodbForVitestWorkspace` |
 
@@ -67,6 +68,7 @@ rm -f .jongodb/jest-memory-server.json
 - `launchMode` is one of `auto`, `binary`, `java`.
 - `classpathDiscovery` is `auto` or `off` (`auto` default).
 - `artifactCacheMaxEntries` / `artifactCacheMaxBytes` / `artifactCacheTtlMs` are positive values.
+- `cleanupOnProcessExit` is enabled unless you intentionally want detached/orphaned lifecycle behavior.
 - `host`, `port`, `databaseName` values are valid/non-empty.
 - `topologyProfile` and `replicaSetName` match expected URI contract.
 - `envVarName` / `envVarNames` are valid and unique for your test runtime.
