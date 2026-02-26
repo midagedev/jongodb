@@ -223,6 +223,53 @@ test(
   }
 );
 
+test(
+  "startJongodbMemoryServer fails when replica-set profile URI omits replicaSet query",
+  { concurrency: false },
+  async () => {
+    await withTopologyMismatchBinary(async (binaryPath) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "binary",
+            binaryPath,
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "replica_mismatch",
+            topologyProfile: "singleNodeReplicaSet",
+            replicaSetName: "rs-expected",
+            startupTimeoutMs: 5_000,
+          });
+        },
+        /topology options are out of sync|missing replicaSet/i
+      );
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer fails when standalone profile URI includes replicaSet query",
+  { concurrency: false },
+  async () => {
+    await withTopologyMismatchBinary(async (binaryPath) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "binary",
+            binaryPath,
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "standalone_mismatch",
+            topologyProfile: "standalone",
+            startupTimeoutMs: 5_000,
+          });
+        },
+        /topology options are out of sync|standalone/i
+      );
+    });
+  }
+);
+
 async function withFakeBinary(
   block: (binaryPath: string) => Promise<void>
 ): Promise<void> {
@@ -231,6 +278,21 @@ async function withFakeBinary(
 
   try {
     await writeFile(binaryPath, fakeBinaryLauncherScript(), "utf8");
+    await chmod(binaryPath, 0o755);
+    await block(binaryPath);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function withTopologyMismatchBinary(
+  block: (binaryPath: string) => Promise<void>
+): Promise<void> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "jongodb-bin-topology-mismatch-"));
+  const binaryPath = path.join(tempDir, "fake-jongodb-binary-topology-mismatch");
+
+  try {
+    await writeFile(binaryPath, topologyMismatchBinaryLauncherScript(), "utf8");
     await chmod(binaryPath, 0o755);
     await block(binaryPath);
   } finally {
@@ -295,6 +357,33 @@ const query =
   topologyProfile === "singleNodeReplicaSet"
     ? "?replicaSet=" + replicaSetName
     : "";
+console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db + query);
+const keepAlive = setInterval(() => {}, 1000);
+const shutdown = () => {
+  clearInterval(keepAlive);
+  process.exit(0);
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+`;
+}
+
+function topologyMismatchBinaryLauncherScript(): string {
+  return `#!/usr/bin/env node
+const valueOf = (name, fallback) => {
+  const prefixed = name + "=";
+  const found = process.argv.find((arg) => arg.startsWith(prefixed));
+  return found ? found.slice(prefixed.length) : fallback;
+};
+const host = valueOf("--host", "127.0.0.1");
+const portRaw = Number(valueOf("--port", "0"));
+const db = valueOf("--database", "test");
+const topologyProfile = valueOf("--topology-profile", "standalone");
+const port = Number.isInteger(portRaw) && portRaw > 0 ? portRaw : 27017;
+const query =
+  topologyProfile === "singleNodeReplicaSet"
+    ? ""
+    : "?replicaSet=unexpected-rs";
 console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db + query);
 const keepAlive = setInterval(() => {}, 1000);
 const shutdown = () => {

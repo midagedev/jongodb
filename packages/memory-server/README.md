@@ -204,6 +204,7 @@ Launcher contract:
 - stdout ready line: `JONGODB_URI=mongodb://...`
 - optional stderr failure line: `JONGODB_START_FAILURE=...`
 - process stays alive until termination signal
+- runtime validates URI topology sync (requested `topologyProfile` vs emitted `replicaSet` query)
 
 ## API Surface
 
@@ -287,6 +288,7 @@ const runtime = createJongodbEnvRuntime({
 - `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
 - `spawn ... ENOENT`: missing runtime executable path
 - startup timeout: launcher did not emit `JONGODB_URI=...`
+- `Launcher URI topology options are out of sync`: emitted URI query does not match requested `topologyProfile`/`replicaSetName`
 
 Parallel test tip:
 - use `databaseNameStrategy: "worker"` or per-worker suffixes to prevent data collisions
