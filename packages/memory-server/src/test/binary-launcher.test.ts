@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -320,6 +328,142 @@ test(
       } finally {
         await server.stop();
       }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer reuses classpath auto-discovery cache entries",
+  { concurrency: false },
+  async () => {
+    await withFakeJavaAndClasspathProbe(async ({ fakeJavaPath, fakeGradlePath, workingDirectory }) => {
+      const cacheDir = path.join(workingDirectory, "artifact-cache");
+
+      const firstServer = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpathDiscoveryCommand: fakeGradlePath,
+        classpathDiscoveryWorkingDirectory: workingDirectory,
+        artifactCacheDir: cacheDir,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_cache_hit_1",
+      });
+      await firstServer.stop();
+
+      await writeFile(fakeGradlePath, brokenGradleClasspathProbeScript(), "utf8");
+      await chmod(fakeGradlePath, 0o755);
+
+      const secondServer = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpathDiscoveryCommand: fakeGradlePath,
+        classpathDiscoveryWorkingDirectory: workingDirectory,
+        artifactCacheDir: cacheDir,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_cache_hit_2",
+      });
+
+      try {
+        assert.match(secondServer.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/java_cache_hit_2$/u);
+      } finally {
+        await secondServer.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer enforces artifact cache maxEntries pruning",
+  { concurrency: false },
+  async () => {
+    await withFakeJavaAndClasspathProbe(async ({ fakeJavaPath, fakeGradlePath, workingDirectory }) => {
+      const cacheDir = path.join(workingDirectory, "artifact-cache-prune");
+      const secondProbePath = path.join(workingDirectory, "fake-gradle-second");
+      await writeFile(secondProbePath, fakeGradleClasspathProbeScript(), "utf8");
+      await chmod(secondProbePath, 0o755);
+
+      const firstServer = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpathDiscoveryCommand: fakeGradlePath,
+        classpathDiscoveryWorkingDirectory: workingDirectory,
+        artifactCacheDir: cacheDir,
+        artifactCacheMaxEntries: 1,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_cache_prune_1",
+      });
+      await firstServer.stop();
+
+      const secondServer = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpathDiscoveryCommand: secondProbePath,
+        classpathDiscoveryWorkingDirectory: workingDirectory,
+        artifactCacheDir: cacheDir,
+        artifactCacheMaxEntries: 1,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_cache_prune_2",
+      });
+      await secondServer.stop();
+
+      const cacheFiles = (await readdir(cacheDir)).filter((fileName) =>
+        /^classpath-[a-f0-9]{64}\.json$/u.test(fileName)
+      );
+      assert.ok(
+        cacheFiles.length <= 1,
+        `expected <=1 cache entry after prune, got ${cacheFiles.length}`
+      );
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer expires stale classpath cache entries by TTL",
+  { concurrency: false },
+  async () => {
+    await withFakeJavaAndClasspathProbe(async ({ fakeJavaPath, fakeGradlePath, workingDirectory }) => {
+      const cacheDir = path.join(workingDirectory, "artifact-cache-ttl");
+
+      const firstServer = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpathDiscoveryCommand: fakeGradlePath,
+        classpathDiscoveryWorkingDirectory: workingDirectory,
+        artifactCacheDir: cacheDir,
+        artifactCacheTtlMs: 86_400_000,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_cache_ttl_1",
+      });
+      await firstServer.stop();
+
+      const cacheFile = (await readdir(cacheDir)).find((fileName) =>
+        /^classpath-[a-f0-9]{64}\.json$/u.test(fileName)
+      );
+      assert.ok(cacheFile, "expected classpath cache entry to exist");
+      const staleTime = new Date(Date.now() - 3 * 86_400_000);
+      await utimes(path.join(cacheDir, cacheFile!), staleTime, staleTime);
+
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "java",
+            javaPath: fakeJavaPath,
+            classpathDiscoveryCommand: "command-that-does-not-exist",
+            classpathDiscoveryWorkingDirectory: workingDirectory,
+            artifactCacheDir: cacheDir,
+            artifactCacheTtlMs: 1,
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "java_cache_ttl_2",
+          });
+        },
+        /Classpath auto-discovery probe failed/i
+      );
     });
   }
 );
@@ -831,5 +975,12 @@ function fakeGradleClasspathProbeScript(): string {
   return `#!/usr/bin/env sh
 echo "> Task :printLauncherClasspath"
 echo "/tmp/jongodb/fake-launcher-classpath.jar"
+`;
+}
+
+function brokenGradleClasspathProbeScript(): string {
+  return `#!/usr/bin/env sh
+echo "simulated classpath probe failure" 1>&2
+exit 1
 `;
 }

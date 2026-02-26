@@ -263,6 +263,7 @@ Java fallback:
   - args: `--no-daemon -q printLauncherClasspath`
   - working directory: `options.classpathDiscoveryWorkingDirectory` -> `JONGODB_CLASSPATH_DISCOVERY_CWD` -> `process.cwd()`
   - disable probe: `classpathDiscovery: "off"` or `JONGODB_CLASSPATH_DISCOVERY=off`
+  - probe results are cached under `.jongodb/cache` with default pruning (`maxEntries=32`, `maxBytes=5MiB`, `ttl=7d`)
 
 Launcher contract:
 - stdout ready line: `JONGODB_URI=mongodb://...`
@@ -307,6 +308,10 @@ Core:
 - `classpathDiscovery`: `auto` | `off` (default: `auto`)
 - `classpathDiscoveryCommand`: override command used for classpath auto-discovery probe
 - `classpathDiscoveryWorkingDirectory`: cwd for classpath auto-discovery probe
+- `artifactCacheDir`: artifact cache directory for classpath auto-discovery metadata (default: `.jongodb/cache`)
+- `artifactCacheMaxEntries`: max cache entries retained after prune (default: `32`)
+- `artifactCacheMaxBytes`: max cache size retained after prune (default: `5_242_880` bytes)
+- `artifactCacheTtlMs`: cache TTL for entries before expiration prune (default: `604_800_000`)
 - `javaPath`: Java executable path (default: `java`)
 - `launcherClass`: Java launcher class (default: `org.jongodb.server.TcpMongoServerLauncher`)
 - `topologyProfile`: `standalone` | `singleNodeReplicaSet` (default: `standalone`)
@@ -373,6 +378,7 @@ const runtime = createJongodbEnvRuntime({
 - `Binary checksum verification failed`: validate `binaryChecksum` / `JONGODB_BINARY_CHECKSUM` and binary file provenance
 - `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
 - `Classpath auto-discovery probe failed`: set explicit `classpath` / `JONGODB_CLASSPATH`, or fix Gradle probe command/cwd
+- stale cache concerns: tune `artifactCache*` options or remove `.jongodb/cache` to force fresh probe
 - `spawn ... ENOENT`: missing runtime executable path
 - startup timeout: launcher did not emit `JONGODB_URI=...`
 - `Launcher URI topology options are out of sync`: emitted URI query does not match requested `topologyProfile`/`replicaSetName`

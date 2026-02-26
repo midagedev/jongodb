@@ -1,8 +1,16 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
-import { delimiter, dirname, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { createInterface } from "node:readline";
 
@@ -22,6 +30,10 @@ const DEFAULT_CLASSPATH_DISCOVERY_TASK_ARGS = [
   "-q",
   "printLauncherClasspath",
 ] as const;
+const DEFAULT_ARTIFACT_CACHE_RELATIVE_DIR = ".jongodb/cache";
+const DEFAULT_ARTIFACT_CACHE_MAX_ENTRIES = 32;
+const DEFAULT_ARTIFACT_CACHE_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_ARTIFACT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_LOG_LINES = 50;
 const REDACTED_PLACEHOLDER = "<redacted>";
 const URI_CREDENTIAL_PATTERN =
@@ -55,6 +67,10 @@ export interface JongodbMemoryServerOptions {
   classpathDiscovery?: ClasspathDiscoveryMode;
   classpathDiscoveryCommand?: string;
   classpathDiscoveryWorkingDirectory?: string;
+  artifactCacheDir?: string;
+  artifactCacheMaxEntries?: number;
+  artifactCacheMaxBytes?: number;
+  artifactCacheTtlMs?: number;
   binaryPath?: string;
   binaryChecksum?: string;
   launchMode?: LaunchMode;
@@ -124,6 +140,13 @@ interface BinaryCandidate {
   checksum?: string;
   checksumSource?: string;
   checksumTargetPath?: string;
+}
+
+interface ArtifactCachePolicy {
+  dir: string;
+  maxEntries: number;
+  maxBytes: number;
+  ttlMs: number;
 }
 
 export async function startJongodbMemoryServer(
@@ -912,6 +935,24 @@ function resolveClasspathViaAutoDiscovery(options: JongodbMemoryServerOptions): 
   const command = resolveClasspathDiscoveryCommand(options);
   const workingDirectory = resolveClasspathDiscoveryWorkingDirectory(options);
   const commandDescription = `${command} ${DEFAULT_CLASSPATH_DISCOVERY_TASK_ARGS.join(" ")}`;
+  const artifactCachePolicy = resolveArtifactCachePolicy(options);
+  const cacheKey = buildClasspathDiscoveryCacheKey(commandDescription, workingDirectory);
+
+  pruneArtifactCache(artifactCachePolicy);
+  const cachedClasspath = readClasspathDiscoveryCache(
+    artifactCachePolicy,
+    cacheKey
+  );
+  if (cachedClasspath !== null) {
+    return {
+      classpath: cachedClasspath,
+      diagnostics: [
+        "Classpath auto-discovery cache hit.",
+        `Cache key: ${cacheKey}`,
+        `Cache dir: ${artifactCachePolicy.dir}`,
+      ].join(" "),
+    };
+  }
 
   let output: string;
   try {
@@ -949,12 +990,23 @@ function resolveClasspathViaAutoDiscovery(options: JongodbMemoryServerOptions): 
     };
   }
 
+  writeClasspathDiscoveryCache(
+    artifactCachePolicy,
+    cacheKey,
+    commandDescription,
+    workingDirectory,
+    classpath
+  );
+  pruneArtifactCache(artifactCachePolicy);
+
   return {
     classpath,
     diagnostics: [
       "Classpath auto-discovery succeeded.",
       `Attempted command: ${commandDescription}`,
       `Working directory: ${workingDirectory}`,
+      `Cache key: ${cacheKey}`,
+      `Cache dir: ${artifactCachePolicy.dir}`,
     ].join(" "),
   };
 }
@@ -1014,6 +1066,210 @@ function resolveClasspathDiscoveryWorkingDirectory(
   }
 
   return process.cwd();
+}
+
+function resolveArtifactCachePolicy(
+  options: JongodbMemoryServerOptions
+): ArtifactCachePolicy {
+  const fromOption = options.artifactCacheDir?.trim();
+  const fromEnv = process.env.JONGODB_ARTIFACT_CACHE_DIR?.trim();
+  const dir =
+    (fromOption !== undefined && fromOption.length > 0
+      ? fromOption
+      : fromEnv !== undefined && fromEnv.length > 0
+      ? fromEnv
+      : undefined) ?? resolve(process.cwd(), DEFAULT_ARTIFACT_CACHE_RELATIVE_DIR);
+
+  return {
+    dir,
+    maxEntries: resolvePositiveIntegerOption(
+      options.artifactCacheMaxEntries,
+      "JONGODB_ARTIFACT_CACHE_MAX_ENTRIES",
+      DEFAULT_ARTIFACT_CACHE_MAX_ENTRIES,
+      "artifactCacheMaxEntries"
+    ),
+    maxBytes: resolvePositiveIntegerOption(
+      options.artifactCacheMaxBytes,
+      "JONGODB_ARTIFACT_CACHE_MAX_BYTES",
+      DEFAULT_ARTIFACT_CACHE_MAX_BYTES,
+      "artifactCacheMaxBytes"
+    ),
+    ttlMs: resolvePositiveIntegerOption(
+      options.artifactCacheTtlMs,
+      "JONGODB_ARTIFACT_CACHE_TTL_MS",
+      DEFAULT_ARTIFACT_CACHE_TTL_MS,
+      "artifactCacheTtlMs"
+    ),
+  };
+}
+
+function resolvePositiveIntegerOption(
+  fromOption: number | undefined,
+  envVarName: string,
+  fallback: number,
+  fieldName: string
+): number {
+  if (fromOption !== undefined) {
+    if (!Number.isFinite(fromOption) || fromOption <= 0) {
+      throw new Error(`${fieldName} must be a positive number.`);
+    }
+    return Math.floor(fromOption);
+  }
+
+  const rawFromEnv = process.env[envVarName]?.trim();
+  if (rawFromEnv !== undefined && rawFromEnv.length > 0) {
+    const parsed = Number(rawFromEnv);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(`${envVarName} must be a positive number.`);
+    }
+    return Math.floor(parsed);
+  }
+
+  return fallback;
+}
+
+function buildClasspathDiscoveryCacheKey(
+  commandDescription: string,
+  workingDirectory: string
+): string {
+  return createHash("sha256")
+    .update(`${commandDescription}\n${workingDirectory}`)
+    .digest("hex");
+}
+
+function pruneArtifactCache(policy: ArtifactCachePolicy): void {
+  if (!existsSync(policy.dir)) {
+    return;
+  }
+
+  let entries = readClasspathCacheFiles(policy.dir);
+  if (entries.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const staleEntries = entries.filter(
+    (entry) => now - entry.mtimeMs > policy.ttlMs
+  );
+  for (const stale of staleEntries) {
+    safeRemoveFile(stale.fullPath);
+  }
+  entries = entries.filter((entry) => now - entry.mtimeMs <= policy.ttlMs);
+
+  entries.sort((left, right) => left.mtimeMs - right.mtimeMs);
+  while (entries.length > policy.maxEntries) {
+    const oldest = entries.shift();
+    if (oldest === undefined) {
+      break;
+    }
+    safeRemoveFile(oldest.fullPath);
+  }
+
+  let totalBytes = entries.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  while (totalBytes > policy.maxBytes && entries.length > 0) {
+    const oldest = entries.shift();
+    if (oldest === undefined) {
+      break;
+    }
+    safeRemoveFile(oldest.fullPath);
+    totalBytes -= oldest.sizeBytes;
+  }
+}
+
+function readClasspathDiscoveryCache(
+  policy: ArtifactCachePolicy,
+  cacheKey: string
+): string | null {
+  const filePath = join(policy.dir, `classpath-${cacheKey}.json`);
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+      classpath?: string;
+      updatedAt?: number;
+    };
+
+    if (typeof raw.classpath !== "string" || raw.classpath.trim().length === 0) {
+      safeRemoveFile(filePath);
+      return null;
+    }
+    if (typeof raw.updatedAt !== "number" || !Number.isFinite(raw.updatedAt)) {
+      safeRemoveFile(filePath);
+      return null;
+    }
+    if (Date.now() - raw.updatedAt > policy.ttlMs) {
+      safeRemoveFile(filePath);
+      return null;
+    }
+    return raw.classpath.trim();
+  } catch {
+    safeRemoveFile(filePath);
+    return null;
+  }
+}
+
+function writeClasspathDiscoveryCache(
+  policy: ArtifactCachePolicy,
+  cacheKey: string,
+  commandDescription: string,
+  workingDirectory: string,
+  classpath: string
+): void {
+  mkdirSync(policy.dir, { recursive: true });
+  const filePath = join(policy.dir, `classpath-${cacheKey}.json`);
+  const payload = {
+    schema: "classpath-discovery-cache-v1",
+    classpath,
+    commandDescription,
+    workingDirectory,
+    updatedAt: Date.now(),
+  };
+  writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+function readClasspathCacheFiles(cacheDir: string): Array<{
+  fullPath: string;
+  mtimeMs: number;
+  sizeBytes: number;
+}> {
+  let fileNames: string[];
+  try {
+    fileNames = readdirSync(cacheDir);
+  } catch {
+    return [];
+  }
+
+  const results: Array<{ fullPath: string; mtimeMs: number; sizeBytes: number }> = [];
+  for (const fileName of fileNames) {
+    if (!/^classpath-[a-f0-9]{64}\.json$/u.test(fileName)) {
+      continue;
+    }
+    const fullPath = join(cacheDir, fileName);
+    try {
+      const stats = statSync(fullPath);
+      if (!stats.isFile()) {
+        continue;
+      }
+      results.push({
+        fullPath,
+        mtimeMs: stats.mtimeMs,
+        sizeBytes: stats.size,
+      });
+    } catch {
+      // skip transiently unavailable files
+    }
+  }
+  return results;
+}
+
+function safeRemoveFile(filePath: string): void {
+  try {
+    rmSync(filePath, { force: true });
+  } catch {
+    // best-effort cleanup
+  }
 }
 
 function normalizeTimeout(
