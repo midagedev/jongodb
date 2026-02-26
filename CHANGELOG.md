@@ -30,6 +30,7 @@ All notable changes to this project are documented in this file.
 - Added Node adapter troubleshooting playbook mapped by error signatures.
 - Added strict Node API type coverage report workflow and export coverage report artifact.
 - Added ESM/CJS dual-export contract smoke checks for Node adapter entrypoints.
+- Added Node cold-start benchmark suite with CI budget gate and report artifacts.
 
 ## [0.1.3] - 2026-02-24
 

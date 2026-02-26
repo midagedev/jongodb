@@ -40,6 +40,10 @@ Node adapter compatibility smoke runs in CI across:
 - OS: `ubuntu-latest`, `macos-latest`
 - Node: `20`, `22`
 
+Cold-start performance gate:
+- workflow: `.github/workflows/node-cold-start-benchmark.yml`
+- benchmark docs: [`docs/NODE_COLD_START_BENCHMARK.md`](../../docs/NODE_COLD_START_BENCHMARK.md)
+
 ## Versioning Policy
 
 SemVer/compatibility policy for Node adapter releases:
