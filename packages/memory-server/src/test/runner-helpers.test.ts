@@ -141,30 +141,95 @@ test(
 );
 
 test(
-  "registerJongodbForNestJest wires lifecycle hooks and restores previous env value",
+  "registerJongodbForNestJest wires lifecycle hooks with hardened defaults",
   { concurrency: false },
   async () => {
-    const previous = process.env.MONGODB_URI;
+    const previousMongoUri = process.env.MONGODB_URI;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    const previousWorkerId = process.env.JEST_WORKER_ID;
     process.env.MONGODB_URI = "mongodb://previous-host:27017/previous";
+    process.env.DATABASE_URL = "mongodb://previous-host:27017/previous-db-url";
+    process.env.JEST_WORKER_ID = "7";
 
     try {
       const hooks = new HookHarness();
       const registration = registerJongodbForNestJest(hooks, {
         classpath: classpathForRuntime,
+        databaseName: "nest_e2e",
         startupTimeoutMs: 20_000,
       });
 
       await hooks.runBeforeAll();
-      assert.match(registration.uri, /^mongodb:\/\//u);
+      assert.match(registration.uri, /^mongodb:\/\/.+\/nest_e2e_w7$/u);
       assert.equal(process.env.MONGODB_URI, registration.uri);
+      assert.equal(process.env.DATABASE_URL, registration.uri);
 
       await hooks.runAfterAll();
       assert.equal(process.env.MONGODB_URI, "mongodb://previous-host:27017/previous");
+      assert.equal(
+        process.env.DATABASE_URL,
+        "mongodb://previous-host:27017/previous-db-url"
+      );
     } finally {
-      if (previous === undefined) {
+      if (previousMongoUri === undefined) {
         delete process.env.MONGODB_URI;
       } else {
-        process.env.MONGODB_URI = previous;
+        process.env.MONGODB_URI = previousMongoUri;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+      if (previousWorkerId === undefined) {
+        delete process.env.JEST_WORKER_ID;
+      } else {
+        process.env.JEST_WORKER_ID = previousWorkerId;
+      }
+    }
+  }
+);
+
+test(
+  "registerJongodbForNestJest allows explicit env/strategy overrides",
+  { concurrency: false },
+  async () => {
+    const previousMongoUri = process.env.MONGODB_URI;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    const previousNestUri = process.env.NEST_CUSTOM_URI;
+    delete process.env.NEST_CUSTOM_URI;
+
+    const hooks = new HookHarness();
+    const registration = registerJongodbForNestJest(hooks, {
+      classpath: classpathForRuntime,
+      databaseName: "nest_static",
+      databaseNameStrategy: "static",
+      envVarName: "NEST_CUSTOM_URI",
+      startupTimeoutMs: 20_000,
+    });
+
+    try {
+      await hooks.runBeforeAll();
+      assert.match(registration.uri, /^mongodb:\/\/.+\/nest_static$/u);
+      assert.equal(process.env.NEST_CUSTOM_URI, registration.uri);
+      assert.notEqual(process.env.MONGODB_URI, registration.uri);
+      assert.notEqual(process.env.DATABASE_URL, registration.uri);
+    } finally {
+      await hooks.runAfterAll();
+      if (previousMongoUri === undefined) {
+        delete process.env.MONGODB_URI;
+      } else {
+        process.env.MONGODB_URI = previousMongoUri;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+      if (previousNestUri === undefined) {
+        delete process.env.NEST_CUSTOM_URI;
+      } else {
+        process.env.NEST_CUSTOM_URI = previousNestUri;
       }
     }
   }

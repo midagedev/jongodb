@@ -196,6 +196,10 @@ import { registerJongodbForNestJest } from "@jongodb/memory-server/nestjs";
 registerJongodbForNestJest({ beforeAll, afterAll });
 ```
 
+Nest adapter defaults:
+- binds both `MONGODB_URI` and `DATABASE_URL` unless env keys are explicitly overridden
+- defaults to `databaseNameStrategy: "worker"` for Jest parallel isolation
+
 Common patterns:
 - NestJS + Mongoose: use `process.env.MONGODB_URI` in `forRootAsync`
 - Prisma (Mongo): set runtime `envVarNames` to include `DATABASE_URL`
