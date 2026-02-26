@@ -38,6 +38,7 @@ All notable changes to this project are documented in this file.
 - Added Java classpath auto-discovery fallback hardening for `auto`/`java` launch modes with configurable probe command/cwd.
 - Added runtime SHA-256 binary integrity verification for bundled binaries and explicit `binaryChecksum`/`JONGODB_BINARY_CHECKSUM` paths.
 - Added local classpath-discovery artifact cache with TTL/quota pruning policy and configurable cache limits.
+- Added process-exit launcher cleanup hook (`cleanupOnProcessExit`) to reduce orphan runtime processes after abrupt test termination.
 
 ## [0.1.3] - 2026-02-24
 

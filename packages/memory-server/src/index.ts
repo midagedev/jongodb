@@ -61,6 +61,7 @@ export interface JongodbMemoryServerOptions {
   databaseNameStrategy?: DatabaseNameStrategy;
   startupTimeoutMs?: number;
   stopTimeoutMs?: number;
+  cleanupOnProcessExit?: boolean;
   javaPath?: string;
   launcherClass?: string;
   classpath?: string | string[];
@@ -149,6 +150,9 @@ interface ArtifactCachePolicy {
   ttlMs: number;
 }
 
+const managedLauncherProcesses = new Map<symbol, ReturnType<typeof spawn>>();
+let processExitCleanupHookInstalled = false;
+
 export async function startJongodbMemoryServer(
   options: JongodbMemoryServerOptions = {}
 ): Promise<JongodbMemoryServer> {
@@ -168,6 +172,7 @@ export async function startJongodbMemoryServer(
   const topologyProfile = normalizeTopologyProfile(options.topologyProfile);
   const replicaSetName = normalizeReplicaSetName(options.replicaSetName);
   const logLevel = options.logLevel ?? "silent";
+  const cleanupOnProcessExit = options.cleanupOnProcessExit ?? true;
   const onStartupTelemetry = options.onStartupTelemetry;
   const launchResolution = resolveLaunchConfigs(options, {
     host,
@@ -189,6 +194,7 @@ export async function startJongodbMemoryServer(
         stopTimeoutMs,
         logLevel,
         env: options.env,
+        cleanupOnProcessExit,
       });
       emitStartupTelemetry(onStartupTelemetry, {
         attempt,
@@ -226,6 +232,7 @@ export async function startJongodbMemoryServer(
           stopTimeoutMs,
           logLevel,
           env: options.env,
+          cleanupOnProcessExit,
         });
         emitStartupTelemetry(onStartupTelemetry, {
           attempt,
@@ -269,6 +276,7 @@ async function startWithLaunchConfig(
     stopTimeoutMs: number;
     logLevel: LogLevel;
     env?: Record<string, string>;
+    cleanupOnProcessExit: boolean;
   }
 ): Promise<JongodbMemoryServer> {
   if (launchConfig.mode === "binary") {
@@ -321,11 +329,18 @@ async function startWithLaunchConfig(
     throw wrapError(error);
   }
 
+  const cleanupToken = context.cleanupOnProcessExit
+    ? registerManagedLauncherProcess(child)
+    : null;
+
   const stop = async (): Promise<void> => {
     if (stopped) {
       return;
     }
     stopped = true;
+    if (cleanupToken !== null) {
+      unregisterManagedLauncherProcess(cleanupToken);
+    }
 
     stdoutReader.close();
     stderrReader.close();
@@ -369,6 +384,9 @@ async function startWithLaunchConfig(
   }
 
   const detach = (): void => {
+    if (cleanupToken !== null) {
+      unregisterManagedLauncherProcess(cleanupToken);
+    }
     stdoutReader.close();
     stderrReader.close();
     child.stdout.destroy();
@@ -1673,6 +1691,43 @@ function waitForExit(
     };
 
     child.on("exit", onExit);
+  });
+}
+
+function registerManagedLauncherProcess(
+  child: ReturnType<typeof spawn>
+): symbol {
+  ensureProcessExitCleanupHook();
+  const token = Symbol("jongodb-managed-launcher");
+  managedLauncherProcesses.set(token, child);
+  child.once("exit", () => {
+    managedLauncherProcesses.delete(token);
+  });
+  return token;
+}
+
+function unregisterManagedLauncherProcess(token: symbol): void {
+  managedLauncherProcesses.delete(token);
+}
+
+function ensureProcessExitCleanupHook(): void {
+  if (processExitCleanupHookInstalled) {
+    return;
+  }
+  processExitCleanupHookInstalled = true;
+
+  process.once("exit", () => {
+    for (const child of managedLauncherProcesses.values()) {
+      if (child.exitCode !== null) {
+        continue;
+      }
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // best-effort shutdown during process exit
+      }
+    }
+    managedLauncherProcesses.clear();
   });
 }
 

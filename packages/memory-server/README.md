@@ -323,6 +323,7 @@ Core:
 - `port`: bind port (`0` means ephemeral)
 - `startupTimeoutMs`: startup timeout (default: `15000`)
 - `stopTimeoutMs`: stop timeout before forced kill (default: `5000`)
+- `cleanupOnProcessExit`: send `SIGTERM` to non-detached launcher on parent process exit (default: `true`)
 - `env`: extra child process environment variables
 - `logLevel`: `silent` | `info` | `debug` (default: `silent`)
 - `onStartupTelemetry`: optional hook for startup attempt telemetry (`attempt`, `mode`, `source`, `startupDurationMs`, `success`, `errorMessage`)

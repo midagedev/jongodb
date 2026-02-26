@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
@@ -119,6 +120,52 @@ test(
         } else {
           process.env.JONGODB_BINARY_CHECKSUM = previousChecksum;
         }
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer cleans up managed launcher process on parent exit",
+  { concurrency: false },
+  async () => {
+    await withFakeBinary(async (binaryPath) => {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "jongodb-exit-cleanup-"));
+      const pidFile = path.join(tempDir, "launcher.pid");
+      const scriptPath = path.join(tempDir, "parent-exit-cleanup.mjs");
+      const memoryServerEntry = path.resolve(process.cwd(), "packages/memory-server/dist/esm/index.js");
+
+      try {
+        await writeFile(
+          scriptPath,
+          `import { startJongodbMemoryServer } from ${JSON.stringify(memoryServerEntry)};
+await startJongodbMemoryServer({
+  launchMode: "binary",
+  binaryPath: ${JSON.stringify(binaryPath)},
+  host: "127.0.0.1",
+  port: 0,
+  databaseName: "exit_cleanup_probe",
+  env: { JONGODB_PID_FILE: ${JSON.stringify(pidFile)} },
+});
+setTimeout(() => process.exit(0), 50);
+`,
+          "utf8"
+        );
+
+        const parent = spawn(process.execPath, [scriptPath], {
+          stdio: "ignore",
+        });
+        const exitCode = await waitForExitCode(parent);
+        assert.equal(exitCode, 0);
+
+        const launcherPidRaw = await readFile(pidFile, "utf8");
+        const launcherPid = Number.parseInt(launcherPidRaw.trim(), 10);
+        assert.ok(Number.isInteger(launcherPid) && launcherPid > 0);
+
+        const cleaned = await waitForPidExit(launcherPid, 5_000);
+        assert.equal(cleaned, true);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
       }
     });
   }
@@ -874,6 +921,49 @@ async function sha256(filePath: string): Promise<string> {
   return createHash("sha256").update(contents).digest("hex");
 }
 
+function waitForExitCode(child: ReturnType<typeof spawn>): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      resolve(code);
+    });
+  });
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidRunning(pid)) {
+      return true;
+    }
+    await delay(50);
+  }
+  return !isPidRunning(pid);
+}
+
+function isPidRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "ESRCH"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function brokenBinaryScript(): string {
   return `#!/usr/bin/env sh
 echo "JONGODB_START_FAILURE=simulated binary startup failure" 1>&2
@@ -890,6 +980,7 @@ exit 1
 
 function fakeBinaryLauncherScript(): string {
   return `#!/usr/bin/env node
+const fs = require("node:fs");
 const valueOf = (name, fallback) => {
   const prefixed = name + "=";
   const found = process.argv.find((arg) => arg.startsWith(prefixed));
@@ -905,6 +996,10 @@ const query =
   topologyProfile === "singleNodeReplicaSet"
     ? "?replicaSet=" + replicaSetName
     : "";
+const pidFile = process.env.JONGODB_PID_FILE;
+if (typeof pidFile === "string" && pidFile.length > 0) {
+  fs.writeFileSync(pidFile, String(process.pid));
+}
 console.log("JONGODB_URI=" + "mongodb://" + host + ":" + port + "/" + db + query);
 const keepAlive = setInterval(() => {}, 1000);
 const shutdown = () => {
