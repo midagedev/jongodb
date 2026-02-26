@@ -16,6 +16,15 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 const DEFAULT_LAUNCHER_CLASS = "org.jongodb.server.TcpMongoServerLauncher";
 const MAX_LOG_LINES = 50;
+const REDACTED_PLACEHOLDER = "<redacted>";
+const URI_CREDENTIAL_PATTERN =
+  /(mongodb(?:\+srv)?:\/\/)([^\/\s:@]+):([^@\s\/]+)@/giu;
+const SECRET_ASSIGNMENT_PATTERN =
+  /((?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token)\s*[=:]\s*)([^,\s;]+)/giu;
+const SECRET_QUERY_PATTERN =
+  /([?&](?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token)=)([^&\s]+)/giu;
+const SECRET_JSON_PATTERN =
+  /("(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token)"\s*:\s*")([^"]*)(")/giu;
 
 const BUNDLED_BINARY_PACKAGE_PREFIX = "@jongodb/memory-server-bin";
 
@@ -864,17 +873,18 @@ function maybeLog(stream: "stdout" | "stderr", line: string, logLevel: LogLevel)
   if (logLevel === "info" && stream === "stdout") {
     return;
   }
+  const redactedLine = redactSensitiveData(line);
   if (stream === "stdout") {
     // eslint-disable-next-line no-console
-    console.log(`[jongodb:${stream}] ${line}`);
+    console.log(`[jongodb:${stream}] ${redactedLine}`);
     return;
   }
   // eslint-disable-next-line no-console
-  console.error(`[jongodb:${stream}] ${line}`);
+  console.error(`[jongodb:${stream}] ${redactedLine}`);
 }
 
 function appendLine(lines: string[], line: string): void {
-  lines.push(line);
+  lines.push(redactSensitiveData(line));
   if (lines.length > MAX_LOG_LINES) {
     lines.shift();
   }
@@ -893,6 +903,14 @@ function formatFailureLine(stderrLines: string[]): string {
     return "";
   }
   return failureLine;
+}
+
+function redactSensitiveData(input: string): string {
+  return input
+    .replace(URI_CREDENTIAL_PATTERN, `$1$2:${REDACTED_PLACEHOLDER}@`)
+    .replace(SECRET_JSON_PATTERN, `$1${REDACTED_PLACEHOLDER}$3`)
+    .replace(SECRET_QUERY_PATTERN, `$1${REDACTED_PLACEHOLDER}`)
+    .replace(SECRET_ASSIGNMENT_PATTERN, `$1${REDACTED_PLACEHOLDER}`);
 }
 
 async function forceStopIfAlive(

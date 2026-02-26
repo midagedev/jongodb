@@ -353,6 +353,7 @@ const runtime = createJongodbEnvRuntime({
 
 ## Troubleshooting
 
+- runtime startup logs and failure tails apply secret redaction (`<redacted>`) for password/token-style values
 - `No launcher runtime configured`: set `binaryPath` / `JONGODB_BINARY_PATH` / `classpath` / `JONGODB_CLASSPATH`
 - `Binary launch mode requested but no binary was found`: provide `binaryPath` or `JONGODB_BINARY_PATH`
 - `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
@@ -363,3 +364,6 @@ const runtime = createJongodbEnvRuntime({
 Parallel test tip:
 - use `databaseNameStrategy: "worker"` or per-worker suffixes to prevent data collisions
 - if multiple runtimes share a Node process, prefer `envTarget` for per-runtime scoped bindings
+
+Security policy reference:
+- [`docs/NODE_LOG_REDACTION_POLICY.md`](../../docs/NODE_LOG_REDACTION_POLICY.md)
