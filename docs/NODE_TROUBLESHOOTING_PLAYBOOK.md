@@ -71,6 +71,7 @@ rm -f .jongodb/jest-memory-server.json
 - `artifactCacheMaxEntries` / `artifactCacheMaxBytes` / `artifactCacheTtlMs` are positive values.
 - `cleanupOnProcessExit` is enabled unless you intentionally want detached/orphaned lifecycle behavior.
 - `portRetryAttempts` / `portRetryBackoffMs` are non-negative values for fixed-port collision handling.
+- `logLevel` is one of `silent`/`error`/`warn`/`info`/`debug` and `logFormat` is `plain` or `json`.
 - `host`, `port`, `databaseName` values are valid/non-empty.
 - `topologyProfile` and `replicaSetName` match expected URI contract.
 - `envVarName` / `envVarNames` are valid and unique for your test runtime.

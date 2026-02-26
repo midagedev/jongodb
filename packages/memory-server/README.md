@@ -331,7 +331,9 @@ Core:
 - `stopTimeoutMs`: stop timeout before forced kill (default: `5000`)
 - `cleanupOnProcessExit`: send `SIGTERM` to non-detached launcher on parent process exit (default: `true`)
 - `env`: extra child process environment variables
-- `logLevel`: `silent` | `info` | `debug` (default: `silent`)
+- `logLevel`: `silent` | `error` | `warn` | `info` | `debug` (default: `silent`)
+- `logFormat`: `plain` | `json` console output format (default: `plain`)
+- `onLog`: structured runtime log hook (`timestamp`, `level`, `event`, `message`, `attempt`, `mode`, `source`, `port`, `stream`)
 - `onStartupTelemetry`: optional hook for startup attempt telemetry (`attempt`, `mode`, `source`, `startupDurationMs`, `success`, `errorMessage`)
 
 Runtime helper options:

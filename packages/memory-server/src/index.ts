@@ -49,7 +49,8 @@ const SECRET_JSON_PATTERN =
 
 const BUNDLED_BINARY_PACKAGE_PREFIX = "@jongodb/memory-server-bin";
 
-type LogLevel = "silent" | "info" | "debug";
+type LogLevel = "silent" | "error" | "warn" | "info" | "debug";
+type LogFormat = "plain" | "json";
 type LaunchMode = "auto" | "binary" | "java";
 type DatabaseNameStrategy = "static" | "worker";
 type TopologyProfile = "standalone" | "singleNodeReplicaSet";
@@ -83,6 +84,8 @@ export interface JongodbMemoryServerOptions {
   replicaSetName?: string;
   env?: Record<string, string>;
   logLevel?: LogLevel;
+  logFormat?: LogFormat;
+  onLog?: (event: JongodbRuntimeLogEvent) => void;
   onStartupTelemetry?: (event: JongodbStartupTelemetry) => void;
 }
 
@@ -100,6 +103,23 @@ export interface JongodbStartupTelemetry {
   startupDurationMs: number;
   success: boolean;
   errorMessage?: string;
+}
+
+export interface JongodbRuntimeLogEvent {
+  timestamp: string;
+  level: Exclude<LogLevel, "silent">;
+  event:
+    | "launch.attempt"
+    | "launch.success"
+    | "launch.failure"
+    | "launch.retry"
+    | "launch.output";
+  message: string;
+  stream?: "stdout" | "stderr";
+  attempt?: number;
+  mode?: "binary" | "java";
+  source?: string;
+  port?: number;
 }
 
 interface ExitResult {
@@ -154,6 +174,13 @@ interface ArtifactCachePolicy {
   ttlMs: number;
 }
 
+interface RuntimeLogger {
+  level: LogLevel;
+  log(
+    event: Omit<JongodbRuntimeLogEvent, "timestamp">
+  ): void;
+}
+
 const managedLauncherProcesses = new Map<symbol, ReturnType<typeof spawn>>();
 let processExitCleanupHookInstalled = false;
 
@@ -176,7 +203,7 @@ export async function startJongodbMemoryServer(
   const databaseName = resolveDatabaseName(options);
   const topologyProfile = normalizeTopologyProfile(options.topologyProfile);
   const replicaSetName = normalizeReplicaSetName(options.replicaSetName);
-  const logLevel = options.logLevel ?? "silent";
+  const runtimeLogger = createRuntimeLogger(options);
   const cleanupOnProcessExit = options.cleanupOnProcessExit ?? true;
   const onStartupTelemetry = options.onStartupTelemetry;
   const launchErrors: string[] = [];
@@ -207,13 +234,33 @@ export async function startJongodbMemoryServer(
     for (const launchConfig of launchResolution.launchConfigs) {
       const startupStartedAt = performance.now();
       attempt += 1;
+      runtimeLogger.log({
+        level: "info",
+        event: "launch.attempt",
+        message: "Starting launcher attempt.",
+        attempt,
+        mode: launchConfig.mode,
+        source: launchConfig.source,
+        port: resolvedPort,
+      });
       try {
         const server = await startWithLaunchConfig(launchConfig, {
           startupTimeoutMs,
           stopTimeoutMs,
-          logLevel,
+          runtimeLogger,
           env: options.env,
           cleanupOnProcessExit,
+          attempt,
+          port: resolvedPort,
+        });
+        runtimeLogger.log({
+          level: "info",
+          event: "launch.success",
+          message: "Launcher attempt succeeded.",
+          attempt,
+          mode: launchConfig.mode,
+          source: launchConfig.source,
+          port: resolvedPort,
         });
         emitStartupTelemetry(onStartupTelemetry, {
           attempt,
@@ -225,6 +272,15 @@ export async function startJongodbMemoryServer(
         return server;
       } catch (error: unknown) {
         const normalized = wrapError(error);
+        runtimeLogger.log({
+          level: "error",
+          event: "launch.failure",
+          message: normalized.message,
+          attempt,
+          mode: launchConfig.mode,
+          source: launchConfig.source,
+          port: resolvedPort,
+        });
         emitStartupTelemetry(onStartupTelemetry, {
           attempt,
           mode: launchConfig.mode,
@@ -248,13 +304,33 @@ export async function startJongodbMemoryServer(
         const launchConfig = deferredAttempt.launchConfig;
         const startupStartedAt = performance.now();
         attempt += 1;
+        runtimeLogger.log({
+          level: "info",
+          event: "launch.attempt",
+          message: "Starting launcher fallback attempt.",
+          attempt,
+          mode: launchConfig.mode,
+          source: launchConfig.source,
+          port: resolvedPort,
+        });
         try {
           const server = await startWithLaunchConfig(launchConfig, {
             startupTimeoutMs,
             stopTimeoutMs,
-            logLevel,
+            runtimeLogger,
             env: options.env,
             cleanupOnProcessExit,
+            attempt,
+            port: resolvedPort,
+          });
+          runtimeLogger.log({
+            level: "info",
+            event: "launch.success",
+            message: "Launcher fallback attempt succeeded.",
+            attempt,
+            mode: launchConfig.mode,
+            source: launchConfig.source,
+            port: resolvedPort,
           });
           emitStartupTelemetry(onStartupTelemetry, {
             attempt,
@@ -266,6 +342,15 @@ export async function startJongodbMemoryServer(
           return server;
         } catch (error: unknown) {
           const normalized = wrapError(error);
+          runtimeLogger.log({
+            level: "error",
+            event: "launch.failure",
+            message: normalized.message,
+            attempt,
+            mode: launchConfig.mode,
+            source: launchConfig.source,
+            port: resolvedPort,
+          });
           emitStartupTelemetry(onStartupTelemetry, {
             attempt,
             mode: launchConfig.mode,
@@ -295,6 +380,12 @@ export async function startJongodbMemoryServer(
 
     if (shouldRetryPort) {
       const backoffMs = portRetryPolicy.backoffMs * (portAttempt + 1);
+      runtimeLogger.log({
+        level: "warn",
+        event: "launch.retry",
+        message: `Port collision detected; retrying on port ${resolvedPort + 1} after ${backoffMs}ms.`,
+        port: resolvedPort,
+      });
       launchErrors.push(
         `[port-retry] collision detected on port=${resolvedPort}; retrying port=${resolvedPort + 1} after ${backoffMs}ms.`
       );
@@ -320,9 +411,11 @@ async function startWithLaunchConfig(
   context: {
     startupTimeoutMs: number;
     stopTimeoutMs: number;
-    logLevel: LogLevel;
+    runtimeLogger: RuntimeLogger;
     env?: Record<string, string>;
     cleanupOnProcessExit: boolean;
+    attempt: number;
+    port: number;
   }
 ): Promise<JongodbMemoryServer> {
   if (launchConfig.mode === "binary") {
@@ -357,8 +450,12 @@ async function startWithLaunchConfig(
     stdoutLines,
     stderrLines,
     startupTimeoutMs: context.startupTimeoutMs,
-    logLevel: context.logLevel,
+    runtimeLogger: context.runtimeLogger,
     launchDescription: `${launchConfig.mode}:${launchConfig.source}`,
+    attempt: context.attempt,
+    port: context.port,
+    mode: launchConfig.mode,
+    source: launchConfig.source,
   }).catch(async (error: unknown) => {
     await forceStopIfAlive(child, context.stopTimeoutMs);
     throw wrapError(error);
@@ -1571,8 +1668,12 @@ async function waitForStartup(params: {
   stdoutLines: string[];
   stderrLines: string[];
   startupTimeoutMs: number;
-  logLevel: LogLevel;
+  runtimeLogger: RuntimeLogger;
   launchDescription: string;
+  attempt: number;
+  port: number;
+  mode: "binary" | "java";
+  source: string;
 }): Promise<{ uri: string }> {
   const {
     child,
@@ -1581,8 +1682,12 @@ async function waitForStartup(params: {
     stdoutLines,
     stderrLines,
     startupTimeoutMs,
-    logLevel,
+    runtimeLogger,
     launchDescription,
+    attempt,
+    port,
+    mode,
+    source,
   } = params;
 
   return new Promise((resolve, reject) => {
@@ -1624,7 +1729,15 @@ async function waitForStartup(params: {
 
     const onStdout = (line: string) => {
       appendLine(stdoutLines, line);
-      maybeLog("stdout", line, logLevel);
+      maybeLog({
+        stream: "stdout",
+        line,
+        runtimeLogger,
+        attempt,
+        port,
+        mode,
+        source,
+      });
 
       if (!line.startsWith(READY_PREFIX)) {
         return;
@@ -1640,7 +1753,15 @@ async function waitForStartup(params: {
 
     const onStderr = (line: string) => {
       appendLine(stderrLines, line);
-      maybeLog("stderr", line, logLevel);
+      maybeLog({
+        stream: "stderr",
+        line,
+        runtimeLogger,
+        attempt,
+        port,
+        mode,
+        source,
+      });
     };
 
     const onError = (error: Error) => {
@@ -1683,21 +1804,146 @@ async function waitForStartup(params: {
   });
 }
 
-function maybeLog(stream: "stdout" | "stderr", line: string, logLevel: LogLevel) {
-  if (logLevel === "silent") {
-    return;
-  }
-  if (logLevel === "info" && stream === "stdout") {
-    return;
-  }
+function maybeLog(params: {
+  stream: "stdout" | "stderr";
+  line: string;
+  runtimeLogger: RuntimeLogger;
+  attempt: number;
+  port: number;
+  mode: "binary" | "java";
+  source: string;
+}) {
+  const { stream, line, runtimeLogger, attempt, port, mode, source } = params;
   const redactedLine = redactSensitiveData(line);
-  if (stream === "stdout") {
-    // eslint-disable-next-line no-console
-    console.log(`[jongodb:${stream}] ${redactedLine}`);
-    return;
+  runtimeLogger.log({
+    level: stream === "stdout" ? "debug" : "warn",
+    event: "launch.output",
+    message: redactedLine,
+    stream,
+    attempt,
+    mode,
+    source,
+    port,
+  });
+}
+
+function createRuntimeLogger(
+  options: Pick<JongodbMemoryServerOptions, "logLevel" | "logFormat" | "onLog">
+): RuntimeLogger {
+  const level = normalizeLogLevel(options.logLevel);
+  const format = normalizeLogFormat(options.logFormat);
+  return {
+    level,
+    log(event): void {
+      if (!isLogEventEnabled(level, event.level)) {
+        return;
+      }
+      const payload: JongodbRuntimeLogEvent = {
+        timestamp: new Date().toISOString(),
+        ...event,
+      };
+
+      if (options.onLog !== undefined) {
+        try {
+          options.onLog(payload);
+        } catch {
+          // log hooks must not fail runtime startup flow
+        }
+      }
+
+      if (format === "json") {
+        const serialized = JSON.stringify(payload);
+        if (payload.level === "error" || payload.level === "warn") {
+          // eslint-disable-next-line no-console
+          console.error(serialized);
+        } else {
+          // eslint-disable-next-line no-console
+          console.log(serialized);
+        }
+        return;
+      }
+
+      const text = formatRuntimeLog(payload);
+      if (payload.level === "error" || payload.level === "warn") {
+        // eslint-disable-next-line no-console
+        console.error(text);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log(text);
+      }
+    },
+  };
+}
+
+function normalizeLogLevel(value: LogLevel | undefined): LogLevel {
+  const normalized = value ?? "silent";
+  if (
+    normalized === "silent" ||
+    normalized === "error" ||
+    normalized === "warn" ||
+    normalized === "info" ||
+    normalized === "debug"
+  ) {
+    return normalized;
   }
-  // eslint-disable-next-line no-console
-  console.error(`[jongodb:${stream}] ${redactedLine}`);
+  throw new Error(
+    `logLevel must be one of: silent, error, warn, info, debug (got: ${String(value)}).`
+  );
+}
+
+function normalizeLogFormat(value: LogFormat | undefined): LogFormat {
+  const normalized = value ?? "plain";
+  if (normalized === "plain" || normalized === "json") {
+    return normalized;
+  }
+  throw new Error(
+    `logFormat must be one of: plain, json (got: ${String(value)}).`
+  );
+}
+
+function isLogEventEnabled(configured: LogLevel, eventLevel: Exclude<LogLevel, "silent">): boolean {
+  const rank = (level: Exclude<LogLevel, "silent">): number => {
+    if (level === "error") {
+      return 0;
+    }
+    if (level === "warn") {
+      return 1;
+    }
+    if (level === "info") {
+      return 2;
+    }
+    return 3;
+  };
+
+  if (configured === "silent") {
+    return false;
+  }
+  if (configured === "error") {
+    return eventLevel === "error";
+  }
+  if (configured === "warn") {
+    return rank(eventLevel) <= rank("warn");
+  }
+  if (configured === "info") {
+    return rank(eventLevel) <= rank("info");
+  }
+  return rank(eventLevel) <= rank("debug");
+}
+
+function formatRuntimeLog(event: JongodbRuntimeLogEvent): string {
+  const suffixes = [
+    event.attempt !== undefined ? `attempt=${event.attempt}` : "",
+    event.mode !== undefined ? `mode=${event.mode}` : "",
+    event.source !== undefined ? `source=${event.source}` : "",
+    event.port !== undefined ? `port=${event.port}` : "",
+    event.stream !== undefined ? `stream=${event.stream}` : "",
+  ].filter((token) => token.length > 0);
+
+  const base = `[jongodb:${event.level}] ${event.event} ${event.message}`;
+  if (suffixes.length === 0) {
+    return base;
+  }
+  return `${base} (${suffixes.join(" ")})`;
 }
 
 function appendLine(lines: string[], line: string): void {
