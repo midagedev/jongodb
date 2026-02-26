@@ -325,6 +325,15 @@ Run Node adapter contract tests:
 npm run --workspace @jongodb/memory-server test
 ```
 
+Run strict API type coverage report:
+
+```bash
+npm run node:type:report
+```
+
+Report output:
+- `packages/memory-server/reports/type-api-coverage.md`
+
 Scoped env example:
 
 ```ts
