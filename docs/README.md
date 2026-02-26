@@ -13,6 +13,7 @@ Runtime and compatibility:
 - `docs/NODE_COMPAT_SMOKE.md`
 - `docs/NODE_MIGRATION_FROM_MONGODB_MEMORY_SERVER.md`
 - `docs/NODE_SEMVER_POLICY.md`
+- `docs/NODE_TROUBLESHOOTING_PLAYBOOK.md`
 - `docs/SUPPORT_MATRIX.md`
 - `docs/RELEASE_CHECKLIST.md`
 - `docs/ROADMAP.md`

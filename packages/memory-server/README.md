@@ -254,6 +254,11 @@ Launcher contract:
 - process stays alive until termination signal
 - runtime validates URI topology sync (requested `topologyProfile` vs emitted `replicaSet` query)
 
+## Troubleshooting
+
+Signature-based troubleshooting playbook:
+- [`docs/NODE_TROUBLESHOOTING_PLAYBOOK.md`](../../docs/NODE_TROUBLESHOOTING_PLAYBOOK.md)
+
 ## API Surface
 
 Main export (`@jongodb/memory-server`):
