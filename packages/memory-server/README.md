@@ -46,6 +46,12 @@ Node adapter compatibility smoke runs in CI across:
 npm i -D @jongodb/memory-server
 ```
 
+Canary channel:
+
+```bash
+npm i -D @jongodb/memory-server@canary
+```
+
 ## Module Format
 
 This package supports both:
