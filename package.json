@@ -9,6 +9,7 @@
     "node:build": "npm run --workspace @jongodb/memory-server build",
     "node:test": "npm run --workspace @jongodb/memory-server test",
     "node:typecheck": "npm run --workspace @jongodb/memory-server typecheck",
+    "node:type:report": "npm run --workspace @jongodb/memory-server type:report",
     "node:release:check": "npm run --workspace @jongodb/memory-server release:check",
     "node:sync-bin-optional-deps": "node ./scripts/node/sync-memory-server-optional-bins.mjs",
     "node:benchmark:native-profiles": "node ./scripts/node/benchmark-native-image-profiles.mjs"
