@@ -168,6 +168,127 @@ test(
 );
 
 test(
+  "startJongodbMemoryServer auto mode falls back to classpath auto-discovery after binary failure",
+  { concurrency: false },
+  async () => {
+    await withFakeLaunchersWithClasspathProbe(
+      async ({ brokenBinaryPath, fakeJavaPath, fakeGradlePath, workingDirectory }) => {
+        const events: Array<{
+          attempt: number;
+          mode: "binary" | "java";
+          source: string;
+          startupDurationMs: number;
+          success: boolean;
+          errorMessage?: string;
+        }> = [];
+
+        const server = await startJongodbMemoryServer({
+          launchMode: "auto",
+          binaryPath: brokenBinaryPath,
+          javaPath: fakeJavaPath,
+          classpathDiscoveryCommand: fakeGradlePath,
+          classpathDiscoveryWorkingDirectory: workingDirectory,
+          host: "127.0.0.1",
+          port: 0,
+          databaseName: "auto_probe_fallback",
+          onStartupTelemetry(event) {
+            events.push(event);
+          },
+        });
+
+        try {
+          assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/auto_probe_fallback$/u);
+          assert.equal(events.length, 2);
+          assert.equal(events[0].mode, "binary");
+          assert.equal(events[0].success, false);
+          assert.equal(events[1].mode, "java");
+          assert.equal(events[1].success, true);
+          assert.equal(events[1].source, "classpath-auto-discovery");
+        } finally {
+          await server.stop();
+        }
+      }
+    );
+  }
+);
+
+test(
+  "startJongodbMemoryServer java mode resolves classpath via auto-discovery",
+  { concurrency: false },
+  async () => {
+    await withFakeJavaAndClasspathProbe(async ({ fakeJavaPath, fakeGradlePath, workingDirectory }) => {
+      const server = await startJongodbMemoryServer({
+        launchMode: "java",
+        javaPath: fakeJavaPath,
+        classpathDiscoveryCommand: fakeGradlePath,
+        classpathDiscoveryWorkingDirectory: workingDirectory,
+        host: "127.0.0.1",
+        port: 0,
+        databaseName: "java_auto_probe",
+      });
+
+      try {
+        assert.match(server.uri, /^mongodb:\/\/127\.0\.0\.1:\d+\/java_auto_probe$/u);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer java mode reports auto-discovery diagnostics when probe fails",
+  { concurrency: false },
+  async () => {
+    await withFakeLaunchers(async ({ fakeJavaPath }) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "java",
+            javaPath: fakeJavaPath,
+            classpathDiscoveryCommand: "command-that-does-not-exist",
+            classpathDiscoveryWorkingDirectory: "/tmp",
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "java_probe_fail",
+          });
+        },
+        (error: unknown) => {
+          if (!(error instanceof Error)) {
+            return false;
+          }
+          assert.match(error.message, /Classpath auto-discovery probe failed/u);
+          assert.match(error.message, /JONGODB_CLASSPATH/u);
+          return true;
+        }
+      );
+    });
+  }
+);
+
+test(
+  "startJongodbMemoryServer java mode fails fast when classpath discovery is off",
+  { concurrency: false },
+  async () => {
+    await withFakeLaunchers(async ({ fakeJavaPath }) => {
+      await assert.rejects(
+        async () => {
+          await startJongodbMemoryServer({
+            launchMode: "java",
+            javaPath: fakeJavaPath,
+            classpathDiscovery: "off",
+            host: "127.0.0.1",
+            port: 0,
+            databaseName: "java_probe_off",
+          });
+        },
+        /Java launch mode requested but Java classpath is not configured/i
+      );
+    });
+  }
+);
+
+test(
   "startJongodbMemoryServer propagates replica-set profile args in java mode",
   { concurrency: false },
   async () => {
@@ -464,6 +585,58 @@ async function withFakeLaunchers(
   }
 }
 
+async function withFakeJavaAndClasspathProbe(
+  block: (paths: {
+    fakeJavaPath: string;
+    fakeGradlePath: string;
+    workingDirectory: string;
+  }) => Promise<void>
+): Promise<void> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "jongodb-java-probe-"));
+  const fakeJavaPath = path.join(tempDir, "fake-java");
+  const fakeGradlePath = path.join(tempDir, "fake-gradle");
+
+  try {
+    await writeFile(fakeJavaPath, fakeJavaLauncherScript(), "utf8");
+    await writeFile(fakeGradlePath, fakeGradleClasspathProbeScript(), "utf8");
+    await chmod(fakeJavaPath, 0o755);
+    await chmod(fakeGradlePath, 0o755);
+    await block({
+      fakeJavaPath,
+      fakeGradlePath,
+      workingDirectory: tempDir,
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function withFakeLaunchersWithClasspathProbe(
+  block: (paths: {
+    brokenBinaryPath: string;
+    fakeJavaPath: string;
+    fakeGradlePath: string;
+    workingDirectory: string;
+  }) => Promise<void>
+): Promise<void> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "jongodb-launchers-probe-"));
+  const brokenBinaryPath = path.join(tempDir, "broken-jongodb-binary");
+  const fakeJavaPath = path.join(tempDir, "fake-java");
+  const fakeGradlePath = path.join(tempDir, "fake-gradle");
+
+  try {
+    await writeFile(brokenBinaryPath, brokenBinaryScript(), "utf8");
+    await writeFile(fakeJavaPath, fakeJavaLauncherScript(), "utf8");
+    await writeFile(fakeGradlePath, fakeGradleClasspathProbeScript(), "utf8");
+    await chmod(brokenBinaryPath, 0o755);
+    await chmod(fakeJavaPath, 0o755);
+    await chmod(fakeGradlePath, 0o755);
+    await block({ brokenBinaryPath, fakeJavaPath, fakeGradlePath, workingDirectory: tempDir });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 function brokenBinaryScript(): string {
   return `#!/usr/bin/env sh
 echo "JONGODB_START_FAILURE=simulated binary startup failure" 1>&2
@@ -558,5 +731,12 @@ const shutdown = () => {
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+`;
+}
+
+function fakeGradleClasspathProbeScript(): string {
+  return `#!/usr/bin/env sh
+echo "> Task :printLauncherClasspath"
+echo "/tmp/jongodb/fake-launcher-classpath.jar"
 `;
 }

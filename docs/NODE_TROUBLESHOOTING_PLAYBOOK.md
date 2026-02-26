@@ -16,6 +16,7 @@ Use this playbook when `@jongodb/memory-server` startup or test-runtime integrat
 | `No launcher runtime configured` | neither binary nor Java classpath resolved | set `binaryPath` / `JONGODB_BINARY_PATH`, or set `classpath` / `JONGODB_CLASSPATH` |
 | `Binary launch mode requested but no binary was found` | `launchMode: "binary"` but executable is not resolvable | provide explicit `binaryPath` or set `JONGODB_BINARY_PATH` |
 | `Java launch mode requested but Java classpath is not configured` | `launchMode: "java"` without classpath | pass `classpath` option or export `JONGODB_CLASSPATH` |
+| `Classpath auto-discovery probe failed` | Gradle classpath probe command/cwd is invalid or unavailable | set explicit `classpath`/`JONGODB_CLASSPATH`, or fix `classpathDiscoveryCommand`/`classpathDiscoveryWorkingDirectory` |
 | `Failed to start jongodb with available launch configurations` | all launch candidates failed (binary/java) | inspect aggregated `[binary:...]` / `[java:...]` messages and fix per candidate |
 | `Launcher emitted empty JONGODB_URI line` | launcher started but did not emit valid URI contract | verify launcher command args/env; update runtime/binary to a compatible build |
 | `Requested topologyProfile=singleNodeReplicaSet but URI is missing replicaSet query` | topology profile and emitted URI are mismatched | ensure launcher emits `?replicaSet=<name>` or switch to `topologyProfile: "standalone"` |
@@ -34,6 +35,13 @@ Resolve Java classpath in repo:
 export JONGODB_CLASSPATH="$(./.tooling/gradle-8.10.2/bin/gradle --no-daemon -q printLauncherClasspath | tail -n 1)"
 ```
 
+Customize classpath auto-discovery probe:
+
+```bash
+export JONGODB_CLASSPATH_DISCOVERY_CMD="./.tooling/gradle-8.10.2/bin/gradle"
+export JONGODB_CLASSPATH_DISCOVERY_CWD="$PWD"
+```
+
 Run node compatibility smoke after fix:
 
 ```bash
@@ -50,6 +58,7 @@ rm -f .jongodb/jest-memory-server.json
 ## Configuration Sanity Checklist
 
 - `launchMode` is one of `auto`, `binary`, `java`.
+- `classpathDiscovery` is `auto` or `off` (`auto` default).
 - `host`, `port`, `databaseName` values are valid/non-empty.
 - `topologyProfile` and `replicaSetName` match expected URI contract.
 - `envVarName` / `envVarNames` are valid and unique for your test runtime.

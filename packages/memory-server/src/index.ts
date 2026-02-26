@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -16,6 +16,11 @@ const DEFAULT_DATABASE = "test";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 const DEFAULT_LAUNCHER_CLASS = "org.jongodb.server.TcpMongoServerLauncher";
+const DEFAULT_CLASSPATH_DISCOVERY_TASK_ARGS = [
+  "--no-daemon",
+  "-q",
+  "printLauncherClasspath",
+] as const;
 const MAX_LOG_LINES = 50;
 const REDACTED_PLACEHOLDER = "<redacted>";
 const URI_CREDENTIAL_PATTERN =
@@ -33,6 +38,7 @@ type LogLevel = "silent" | "info" | "debug";
 type LaunchMode = "auto" | "binary" | "java";
 type DatabaseNameStrategy = "static" | "worker";
 type TopologyProfile = "standalone" | "singleNodeReplicaSet";
+type ClasspathDiscoveryMode = "auto" | "off";
 
 export interface JongodbMemoryServerOptions {
   host?: string;
@@ -45,6 +51,9 @@ export interface JongodbMemoryServerOptions {
   javaPath?: string;
   launcherClass?: string;
   classpath?: string | string[];
+  classpathDiscovery?: ClasspathDiscoveryMode;
+  classpathDiscoveryCommand?: string;
+  classpathDiscoveryWorkingDirectory?: string;
   binaryPath?: string;
   launchMode?: LaunchMode;
   topologyProfile?: TopologyProfile;
@@ -84,6 +93,26 @@ interface SpawnLaunchConfig {
   replicaSetName: string;
 }
 
+interface LaunchResolution {
+  launchConfigs: SpawnLaunchConfig[];
+  deferredJavaFallback?: () => DeferredJavaFallbackResolution;
+}
+
+interface DeferredJavaFallbackResolution {
+  launchConfig: SpawnLaunchConfig | null;
+  diagnostics?: string;
+}
+
+interface JavaCandidateResolution {
+  candidate: {
+    javaPath: string;
+    classpath: string;
+    launcherClass: string;
+    source: string;
+  } | null;
+  diagnostics?: string;
+}
+
 export async function startJongodbMemoryServer(
   options: JongodbMemoryServerOptions = {}
 ): Promise<JongodbMemoryServer> {
@@ -104,19 +133,20 @@ export async function startJongodbMemoryServer(
   const replicaSetName = normalizeReplicaSetName(options.replicaSetName);
   const logLevel = options.logLevel ?? "silent";
   const onStartupTelemetry = options.onStartupTelemetry;
-  const launchConfigs = resolveLaunchConfigs(options, {
+  const launchResolution = resolveLaunchConfigs(options, {
     host,
     port,
     databaseName,
     topologyProfile,
     replicaSetName,
   });
+  const launchConfigs = launchResolution.launchConfigs;
   const launchErrors: string[] = [];
 
-  for (let index = 0; index < launchConfigs.length; index += 1) {
-    const launchConfig = launchConfigs[index];
+  let attempt = 0;
+  for (const launchConfig of launchConfigs) {
     const startupStartedAt = performance.now();
-    const attempt = index + 1;
+    attempt += 1;
     try {
       const server = await startWithLaunchConfig(launchConfig, {
         startupTimeoutMs,
@@ -145,6 +175,46 @@ export async function startJongodbMemoryServer(
       launchErrors.push(
         `[${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
       );
+    }
+  }
+
+  if (launchResolution.deferredJavaFallback !== undefined) {
+    const deferredAttempt = launchResolution.deferredJavaFallback();
+    if (deferredAttempt.launchConfig !== null) {
+      const launchConfig = deferredAttempt.launchConfig;
+      const startupStartedAt = performance.now();
+      attempt += 1;
+      try {
+        const server = await startWithLaunchConfig(launchConfig, {
+          startupTimeoutMs,
+          stopTimeoutMs,
+          logLevel,
+          env: options.env,
+        });
+        emitStartupTelemetry(onStartupTelemetry, {
+          attempt,
+          mode: launchConfig.mode,
+          source: launchConfig.source,
+          startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
+          success: true,
+        });
+        return server;
+      } catch (error: unknown) {
+        const normalized = wrapError(error);
+        emitStartupTelemetry(onStartupTelemetry, {
+          attempt,
+          mode: launchConfig.mode,
+          source: launchConfig.source,
+          startupDurationMs: roundDurationMs(performance.now() - startupStartedAt),
+          success: false,
+          errorMessage: normalized.message,
+        });
+        launchErrors.push(
+          `[${launchConfig.mode}:${launchConfig.source}] ${normalized.message}`
+        );
+      }
+    } else if (deferredAttempt.diagnostics !== undefined) {
+      launchErrors.push(`[java:classpath-auto-discovery] ${deferredAttempt.diagnostics}`);
     }
   }
 
@@ -283,14 +353,16 @@ function resolveLaunchConfigs(
     topologyProfile: TopologyProfile;
     replicaSetName: string;
   }
-): SpawnLaunchConfig[] {
+): LaunchResolution {
   const mode = options.launchMode ?? "auto";
   if (mode !== "auto" && mode !== "binary" && mode !== "java") {
     throw new Error(`launchMode must be one of: auto, binary, java (got: ${mode}).`);
   }
 
   const binary = resolveBinaryCandidate(options.binaryPath);
-  const java = resolveJavaCandidate(options);
+  const javaWithoutDiscovery = resolveJavaCandidate(options, {
+    allowClasspathDiscovery: false,
+  });
 
   if (mode === "binary") {
     if (binary === null) {
@@ -302,33 +374,73 @@ function resolveLaunchConfigs(
         ].join(" ")
       );
     }
-    return [toBinaryLaunchConfig(binary.path, binary.source, context)];
+    return {
+      launchConfigs: [toBinaryLaunchConfig(binary.path, binary.source, context)],
+    };
   }
 
   if (mode === "java") {
-    if (java === null) {
+    const javaWithDiscovery = resolveJavaCandidate(options, {
+      allowClasspathDiscovery: true,
+    });
+    if (javaWithDiscovery.candidate === null) {
       throw new Error(
         [
           "Java launch mode requested but Java classpath is not configured.",
           "Pass options.classpath or set JONGODB_CLASSPATH.",
-          "Example (repo-local): ./.tooling/gradle-8.10.2/bin/gradle -q printLauncherClasspath",
+          "Classpath auto-discovery uses Gradle task `printLauncherClasspath` by default.",
+          javaWithDiscovery.diagnostics ??
+            "Set options.classpathDiscovery='off' (or JONGODB_CLASSPATH_DISCOVERY=off) to skip probing.",
         ].join(" ")
       );
     }
-    return [toJavaLaunchConfig(java, context)];
+    return {
+      launchConfigs: [toJavaLaunchConfig(javaWithDiscovery.candidate, context)],
+    };
   }
 
-  if (binary !== null && java !== null) {
-    return [
-      toBinaryLaunchConfig(binary.path, binary.source, context),
-      toJavaLaunchConfig(java, context),
-    ];
+  if (binary !== null && javaWithoutDiscovery.candidate !== null) {
+    return {
+      launchConfigs: [
+        toBinaryLaunchConfig(binary.path, binary.source, context),
+        toJavaLaunchConfig(javaWithoutDiscovery.candidate, context),
+      ],
+    };
   }
+
   if (binary !== null) {
-    return [toBinaryLaunchConfig(binary.path, binary.source, context)];
+    return {
+      launchConfigs: [toBinaryLaunchConfig(binary.path, binary.source, context)],
+      deferredJavaFallback: () => {
+        const discoveredJava = resolveJavaCandidate(options, {
+          allowClasspathDiscovery: true,
+        });
+        if (discoveredJava.candidate === null) {
+          return {
+            launchConfig: null,
+            diagnostics: discoveredJava.diagnostics,
+          };
+        }
+        return {
+          launchConfig: toJavaLaunchConfig(discoveredJava.candidate, context),
+        };
+      },
+    };
   }
-  if (java !== null) {
-    return [toJavaLaunchConfig(java, context)];
+
+  if (javaWithoutDiscovery.candidate !== null) {
+    return {
+      launchConfigs: [toJavaLaunchConfig(javaWithoutDiscovery.candidate, context)],
+    };
+  }
+
+  const javaWithDiscovery = resolveJavaCandidate(options, {
+    allowClasspathDiscovery: true,
+  });
+  if (javaWithDiscovery.candidate !== null) {
+    return {
+      launchConfigs: [toJavaLaunchConfig(javaWithDiscovery.candidate, context)],
+    };
   }
 
   throw new Error(
@@ -337,6 +449,7 @@ function resolveLaunchConfigs(
       "Provide one of:",
       "1) options.binaryPath or JONGODB_BINARY_PATH",
       "2) options.classpath or JONGODB_CLASSPATH",
+      javaWithDiscovery.diagnostics ?? "",
       bundledBinaryHint(),
     ].join(" ")
   );
@@ -604,18 +717,175 @@ function bundledBinaryHint(): string {
 }
 
 function resolveJavaCandidate(
-  options: JongodbMemoryServerOptions
-): { javaPath: string; classpath: string; launcherClass: string; source: string } | null {
-  const classpath = resolveClasspathOrNull(options.classpath);
-  if (classpath === null) {
-    return null;
+  options: JongodbMemoryServerOptions,
+  context: { allowClasspathDiscovery: boolean }
+): JavaCandidateResolution {
+  const explicitClasspath = resolveExplicitClasspath(options.classpath);
+  if (explicitClasspath !== null) {
+    return {
+      candidate: {
+        javaPath: options.javaPath?.trim() || process.env.JONGODB_JAVA_PATH || "java",
+        classpath: explicitClasspath,
+        launcherClass: options.launcherClass?.trim() || DEFAULT_LAUNCHER_CLASS,
+        source: "options.classpath",
+      },
+    };
   }
+
+  const fromEnv = process.env.JONGODB_CLASSPATH?.trim();
+  if (fromEnv !== undefined && fromEnv.length > 0) {
+    return {
+      candidate: {
+        javaPath: options.javaPath?.trim() || process.env.JONGODB_JAVA_PATH || "java",
+        classpath: fromEnv,
+        launcherClass: options.launcherClass?.trim() || DEFAULT_LAUNCHER_CLASS,
+        source: "JONGODB_CLASSPATH",
+      },
+    };
+  }
+
+  if (!context.allowClasspathDiscovery) {
+    return {
+      candidate: null,
+    };
+  }
+
+  const discovered = resolveClasspathViaAutoDiscovery(options);
+  if (discovered.classpath === null) {
+    return {
+      candidate: null,
+      diagnostics: discovered.diagnostics,
+    };
+  }
+
   return {
-    javaPath: options.javaPath?.trim() || process.env.JONGODB_JAVA_PATH || "java",
-    classpath,
-    launcherClass: options.launcherClass?.trim() || DEFAULT_LAUNCHER_CLASS,
-    source: options.classpath !== undefined ? "options.classpath" : "JONGODB_CLASSPATH",
+    candidate: {
+      javaPath: options.javaPath?.trim() || process.env.JONGODB_JAVA_PATH || "java",
+      classpath: discovered.classpath,
+      launcherClass: options.launcherClass?.trim() || DEFAULT_LAUNCHER_CLASS,
+      source: "classpath-auto-discovery",
+    },
+    diagnostics: discovered.diagnostics,
   };
+}
+
+function resolveClasspathViaAutoDiscovery(options: JongodbMemoryServerOptions): {
+  classpath: string | null;
+  diagnostics: string;
+} {
+  if (!isClasspathDiscoveryEnabled(options.classpathDiscovery)) {
+    return {
+      classpath: null,
+      diagnostics:
+        "Classpath auto-discovery disabled (set classpathDiscovery='auto' or unset JONGODB_CLASSPATH_DISCOVERY=off).",
+    };
+  }
+
+  const command = resolveClasspathDiscoveryCommand(options);
+  const workingDirectory = resolveClasspathDiscoveryWorkingDirectory(options);
+  const commandDescription = `${command} ${DEFAULT_CLASSPATH_DISCOVERY_TASK_ARGS.join(" ")}`;
+
+  let output: string;
+  try {
+    output = execFileSync(command, [...DEFAULT_CLASSPATH_DISCOVERY_TASK_ARGS], {
+      cwd: workingDirectory,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      classpath: null,
+      diagnostics: [
+        "Classpath auto-discovery probe failed.",
+        `Attempted command: ${commandDescription}`,
+        `Working directory: ${workingDirectory}`,
+        `Cause: ${message}`,
+      ].join(" "),
+    };
+  }
+
+  const lines = output
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const classpath = lines.at(-1);
+  if (classpath === undefined || classpath.length === 0) {
+    return {
+      classpath: null,
+      diagnostics: [
+        "Classpath auto-discovery probe returned empty output.",
+        `Attempted command: ${commandDescription}`,
+        `Working directory: ${workingDirectory}`,
+      ].join(" "),
+    };
+  }
+
+  return {
+    classpath,
+    diagnostics: [
+      "Classpath auto-discovery succeeded.",
+      `Attempted command: ${commandDescription}`,
+      `Working directory: ${workingDirectory}`,
+    ].join(" "),
+  };
+}
+
+function isClasspathDiscoveryEnabled(
+  mode: JongodbMemoryServerOptions["classpathDiscovery"]
+): boolean {
+  const candidate = mode ?? process.env.JONGODB_CLASSPATH_DISCOVERY ?? "auto";
+  const normalized = candidate.trim().toLowerCase();
+  if (normalized === "auto" || normalized === "on" || normalized === "enabled") {
+    return true;
+  }
+  if (
+    normalized === "off" ||
+    normalized === "disabled" ||
+    normalized === "false" ||
+    normalized === "0"
+  ) {
+    return false;
+  }
+  throw new Error(
+    `classpathDiscovery must be 'auto' or 'off' (received: ${String(candidate)}).`
+  );
+}
+
+function resolveClasspathDiscoveryCommand(options: JongodbMemoryServerOptions): string {
+  const explicit = options.classpathDiscoveryCommand?.trim();
+  if (explicit !== undefined && explicit.length > 0) {
+    return explicit;
+  }
+
+  const fromEnv = process.env.JONGODB_CLASSPATH_DISCOVERY_CMD?.trim();
+  if (fromEnv !== undefined && fromEnv.length > 0) {
+    return fromEnv;
+  }
+
+  const cwd = resolveClasspathDiscoveryWorkingDirectory(options);
+  const repoLocalGradle = resolve(cwd, ".tooling", "gradle-8.10.2", "bin", "gradle");
+  if (existsSync(repoLocalGradle)) {
+    return repoLocalGradle;
+  }
+
+  return "gradle";
+}
+
+function resolveClasspathDiscoveryWorkingDirectory(
+  options: JongodbMemoryServerOptions
+): string {
+  const fromOption = options.classpathDiscoveryWorkingDirectory?.trim();
+  if (fromOption !== undefined && fromOption.length > 0) {
+    return fromOption;
+  }
+
+  const fromEnv = process.env.JONGODB_CLASSPATH_DISCOVERY_CWD?.trim();
+  if (fromEnv !== undefined && fromEnv.length > 0) {
+    return fromEnv;
+  }
+
+  return process.cwd();
 }
 
 function normalizeTimeout(
@@ -732,19 +1002,6 @@ function sanitizeDatabaseNameToken(token: string): string {
     return sanitized;
   }
   return "unknown";
-}
-
-function resolveClasspathOrNull(classpath: string | string[] | undefined): string | null {
-  const explicit = resolveExplicitClasspath(classpath);
-  if (explicit !== null) {
-    return explicit;
-  }
-
-  const fromEnv = process.env.JONGODB_CLASSPATH?.trim();
-  if (fromEnv !== undefined && fromEnv.length > 0) {
-    return fromEnv;
-  }
-  return null;
 }
 
 function resolveExplicitClasspath(
