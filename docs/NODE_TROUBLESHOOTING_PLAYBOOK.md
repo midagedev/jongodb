@@ -16,6 +16,7 @@ Use this playbook when `@jongodb/memory-server` startup or test-runtime integrat
 | `No launcher runtime configured` | neither binary nor Java classpath resolved | set `binaryPath` / `JONGODB_BINARY_PATH`, or set `classpath` / `JONGODB_CLASSPATH` |
 | `Binary launch mode requested but no binary was found` | `launchMode: "binary"` but executable is not resolvable | provide explicit `binaryPath` or set `JONGODB_BINARY_PATH` |
 | `Binary checksum verification failed` | configured checksum does not match local binary bytes | verify binary provenance and align `binaryChecksum`/`JONGODB_BINARY_CHECKSUM` |
+| `EADDRINUSE` / `address already in use` | requested port is occupied by another process/test | use `port: 0` or tune `portRetryAttempts`/`portRetryBackoffMs` for fixed-port mode |
 | `Java launch mode requested but Java classpath is not configured` | `launchMode: "java"` without classpath | pass `classpath` option or export `JONGODB_CLASSPATH` |
 | `Classpath auto-discovery probe failed` | Gradle classpath probe command/cwd is invalid or unavailable | set explicit `classpath`/`JONGODB_CLASSPATH`, or fix `classpathDiscoveryCommand`/`classpathDiscoveryWorkingDirectory` |
 | `Failed to start jongodb with available launch configurations` | all launch candidates failed (binary/java) | inspect aggregated `[binary:...]` / `[java:...]` messages and fix per candidate |
@@ -69,6 +70,7 @@ rm -f .jongodb/jest-memory-server.json
 - `classpathDiscovery` is `auto` or `off` (`auto` default).
 - `artifactCacheMaxEntries` / `artifactCacheMaxBytes` / `artifactCacheTtlMs` are positive values.
 - `cleanupOnProcessExit` is enabled unless you intentionally want detached/orphaned lifecycle behavior.
+- `portRetryAttempts` / `portRetryBackoffMs` are non-negative values for fixed-port collision handling.
 - `host`, `port`, `databaseName` values are valid/non-empty.
 - `topologyProfile` and `replicaSetName` match expected URI contract.
 - `envVarName` / `envVarNames` are valid and unique for your test runtime.

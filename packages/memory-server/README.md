@@ -242,6 +242,10 @@ Common patterns:
 - `binary`: binary only
 - `java`: Java only
 
+Port collision retry (fixed `port > 0`):
+- when launcher failures include port-in-use signatures, runtime retries on the next port number
+- defaults: `portRetryAttempts=3`, `portRetryBackoffMs=100` (linear backoff by retry index)
+
 Binary resolution order:
 1. `options.binaryPath`
 2. `JONGODB_BINARY_PATH`
@@ -321,6 +325,8 @@ Core:
 - `databaseNameStrategy`: `static` | `worker` (default: `static`)
 - `host`: bind host (default: `127.0.0.1`)
 - `port`: bind port (`0` means ephemeral)
+- `portRetryAttempts`: retry count for port-collision failures when `port > 0` (default: `3`)
+- `portRetryBackoffMs`: base backoff per retry for port collisions (default: `100`)
 - `startupTimeoutMs`: startup timeout (default: `15000`)
 - `stopTimeoutMs`: stop timeout before forced kill (default: `5000`)
 - `cleanupOnProcessExit`: send `SIGTERM` to non-detached launcher on parent process exit (default: `true`)
@@ -377,6 +383,7 @@ const runtime = createJongodbEnvRuntime({
 - `No launcher runtime configured`: set `binaryPath` / `JONGODB_BINARY_PATH` / `classpath` / `JONGODB_CLASSPATH`
 - `Binary launch mode requested but no binary was found`: provide `binaryPath` or `JONGODB_BINARY_PATH`
 - `Binary checksum verification failed`: validate `binaryChecksum` / `JONGODB_BINARY_CHECKSUM` and binary file provenance
+- `EADDRINUSE` / `address already in use`: increase base `port`, tune `portRetryAttempts`, or use `port: 0`
 - `Java launch mode requested but Java classpath is not configured`: provide `classpath` or `JONGODB_CLASSPATH`
 - `Classpath auto-discovery probe failed`: set explicit `classpath` / `JONGODB_CLASSPATH`, or fix Gradle probe command/cwd
 - stale cache concerns: tune `artifactCache*` options or remove `.jongodb/cache` to force fresh probe
