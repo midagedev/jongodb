@@ -211,6 +211,72 @@ class AggregateCommandE2ETest {
     }
 
     @Test
+    void aggregateCommandSupportsTerminalMergeStageSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "users",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "alice", "active": true},
+                    {"_id": 2, "name": "bob", "active": false},
+                    {"_id": 3, "name": "carol", "active": true}
+                  ]
+                }
+                """));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "insert": "archive",
+                  "$db": "app",
+                  "documents": [
+                    {"_id": 1, "name": "legacy", "legacy": true},
+                    {"_id": 100, "name": "keep", "legacy": true}
+                  ]
+                }
+                """));
+
+        final BsonDocument aggregateResponse = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "aggregate": "users",
+                  "$db": "app",
+                  "pipeline": [
+                    {"$match": {"active": true}},
+                    {"$project": {"_id": 1, "name": 1, "active": 1}},
+                    {"$merge": "archive"}
+                  ],
+                  "cursor": {}
+                }
+                """));
+        assertEquals(1.0, aggregateResponse.get("ok").asNumber().doubleValue());
+        assertEquals(0, aggregateResponse.getDocument("cursor").getArray("firstBatch").size());
+
+        final BsonDocument archiveFindResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"archive\",\"$db\":\"app\",\"filter\":{},\"sort\":{\"_id\":1}}"));
+        assertEquals(1.0, archiveFindResponse.get("ok").asNumber().doubleValue());
+        final BsonArray archiveDocuments = archiveFindResponse.getDocument("cursor").getArray("firstBatch");
+        assertEquals(3, archiveDocuments.size());
+
+        final BsonDocument first = archiveDocuments.get(0).asDocument();
+        assertEquals(1, first.getInt32("_id").getValue());
+        assertEquals("alice", first.getString("name").getValue());
+        assertTrue(first.getBoolean("legacy").getValue());
+        assertTrue(first.getBoolean("active").getValue());
+
+        final BsonDocument second = archiveDocuments.get(1).asDocument();
+        assertEquals(3, second.getInt32("_id").getValue());
+        assertEquals("carol", second.getString("name").getValue());
+        assertTrue(second.getBoolean("active").getValue());
+
+        final BsonDocument third = archiveDocuments.get(2).asDocument();
+        assertEquals(100, third.getInt32("_id").getValue());
+        assertEquals("keep", third.getString("name").getValue());
+        assertTrue(third.getBoolean("legacy").getValue());
+    }
+
+    @Test
     void aggregateCommandRejectsNonTerminalOutStage() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(
@@ -223,6 +289,27 @@ class AggregateCommandE2ETest {
                   "$db": "app",
                   "pipeline": [
                     {"$out": "archive"},
+                    {"$match": {"_id": 1}}
+                  ],
+                  "cursor": {}
+                }
+                """));
+        assertCommandError(response, 238, "NotImplemented");
+    }
+
+    @Test
+    void aggregateCommandRejectsNonTerminalMergeStage() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"name\":\"alpha\"}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "aggregate": "users",
+                  "$db": "app",
+                  "pipeline": [
+                    {"$merge": "archive"},
                     {"$match": {"_id": 1}}
                   ],
                   "cursor": {}

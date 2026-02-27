@@ -407,7 +407,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void importsOutStageButKeepsMergeAndBypassValidationUnsupported() throws IOException {
+    void importsOutAndMergeStagesAndBypassValidationFalse() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-aggregation.json"),
                 """
@@ -444,6 +444,18 @@ class UnifiedSpecImporterTest {
                           "name": "aggregate",
                           "arguments": {
                             "pipeline": [{"$match": {"_id": 1}}],
+                            "bypassDocumentValidation": false
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "description": "aggregate with bypass validation true",
+                      "operations": [
+                        {
+                          "name": "aggregate",
+                          "arguments": {
+                            "pipeline": [{"$match": {"_id": 1}}],
                             "bypassDocumentValidation": true
                           }
                         }
@@ -456,13 +468,30 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(1, result.importedCount());
-        assertEquals(2, result.unsupportedCount());
-        final Scenario outScenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        final Scenario outScenario = result.importedScenarios().stream()
+                .map(UnifiedSpecImporter.ImportedScenario::scenario)
+                .filter(scenario -> scenario.description().equals("aggregate with out"))
+                .findFirst()
+                .orElseThrow();
+        final Scenario mergeScenario = result.importedScenarios().stream()
+                .map(UnifiedSpecImporter.ImportedScenario::scenario)
+                .filter(scenario -> scenario.description().equals("aggregate with merge"))
+                .findFirst()
+                .orElseThrow();
+        final Scenario bypassFalseScenario = result.importedScenarios().stream()
+                .map(UnifiedSpecImporter.ImportedScenario::scenario)
+                .filter(scenario -> scenario.description().equals("aggregate with bypass validation"))
+                .findFirst()
+                .orElseThrow();
         assertEquals(1, outScenario.commands().size());
         assertEquals("aggregate", outScenario.commands().get(0).commandName());
+        assertEquals("aggregate", mergeScenario.commands().get(0).commandName());
+        assertEquals(Boolean.FALSE, bypassFalseScenario.commands().get(0).payload().get("bypassDocumentValidation"));
         assertTrue(result.skippedCases().stream().allMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF aggregate option: bypassDocumentValidation")));
     }
 
     @Test
