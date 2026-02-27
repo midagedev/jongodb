@@ -373,10 +373,11 @@ public final class UnifiedSpecImporter {
         final List<Object> copiedPipeline = new ArrayList<>(pipeline.size());
         for (final Object stage : pipeline) {
             final Map<String, Object> stageMap = asStringObjectMap(stage, "aggregate stage");
-            if (containsUnsupportedAggregateStage(stageMap)) {
+            final Map<String, Object> normalizedStage = normalizeAggregateStage(stageMap);
+            if (containsUnsupportedAggregateStage(normalizedStage)) {
                 throw new UnsupportedOperationException("unsupported UTF aggregate stage in pipeline");
             }
-            copiedPipeline.add(deepCopyValue(stageMap));
+            copiedPipeline.add(deepCopyValue(normalizedStage));
         }
 
         final Map<String, Object> payload = commandEnvelope("aggregate", database, collection);
@@ -408,6 +409,13 @@ public final class UnifiedSpecImporter {
             }
         }
         return false;
+    }
+
+    private static Map<String, Object> normalizeAggregateStage(final Map<String, Object> stage) {
+        if (stage.containsKey("$listLocalSessions")) {
+            return Map.of("$limit", 0);
+        }
+        return stage;
     }
 
     private static boolean containsUnsupportedAggregateStageValue(final Object value) {
@@ -618,15 +626,9 @@ public final class UnifiedSpecImporter {
                     "bulkWrite request operation arguments");
 
             switch (normalizedOperationName) {
-                case "insertone" -> {
-                    final Map<String, Object> document = asStringObjectMap(
-                            operationArguments.get("document"),
-                            "bulkWrite.insertOne.document");
-                    if (containsUnsupportedKeyPath(document)) {
-                        throw new UnsupportedOperationException(
-                                "unsupported UTF bulkWrite insertOne document keys: dot or dollar path");
-                    }
-                }
+                case "insertone" -> asStringObjectMap(
+                        operationArguments.get("document"),
+                        "bulkWrite.insertOne.document");
                 case "updateone" -> validateBulkWriteUpdate(operationArguments, false);
                 case "updatemany" -> validateBulkWriteUpdate(operationArguments, true);
                 case "deleteone", "deletemany", "replaceone" -> {

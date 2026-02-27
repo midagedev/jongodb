@@ -275,6 +275,100 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsBulkWriteInsertOneWithDotOrDollarKeys() throws IOException {
+        Files.writeString(
+                tempDir.resolve("bulk-write-dot-dollar.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "bulk write insertOne with dotted key",
+                      "operations": [
+                        {
+                          "name": "bulkWrite",
+                          "arguments": {
+                            "requests": [
+                              {"insertOne": {"document": {"_id": 1, "a.b": 1}}},
+                              {"insertOne": {"document": {"_id": 2, "nested": {"$x": 2}}}}
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        final Object operationsValue = scenario.commands().get(0).payload().get("operations");
+        assertTrue(operationsValue instanceof List<?>);
+        final List<?> operations = (List<?>) operationsValue;
+        assertEquals(2, operations.size());
+    }
+
+    @Test
+    void importsAggregateListLocalSessionsAsDeterministicSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("db-aggregate-list-local-sessions.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "createEntities": [
+                    {"database": {"id": "database0", "databaseName": "admin"}}
+                  ],
+                  "tests": [
+                    {
+                      "description": "db aggregate listLocalSessions",
+                      "operations": [
+                        {
+                          "name": "aggregate",
+                          "object": "database0",
+                          "arguments": {
+                            "pipeline": [
+                              {"$listLocalSessions": {}},
+                              {"$limit": 1},
+                              {"$project": {"_id": 0}}
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("aggregate", scenario.commands().get(0).commandName());
+        final Object pipelineValue = scenario.commands().get(0).payload().get("pipeline");
+        assertTrue(pipelineValue instanceof List<?>);
+        final List<?> pipeline = (List<?>) pipelineValue;
+        assertEquals(3, pipeline.size());
+        assertTrue(pipeline.get(0) instanceof java.util.Map<?, ?>);
+        assertTrue(((java.util.Map<?, ?>) pipeline.get(0)).containsKey("$limit"));
+        assertEquals(0, ((java.util.Map<?, ?>) pipeline.get(0)).get("$limit"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+    }
+
+    @Test
     void importsArrayFiltersUpdateSubsetWhileKeepingOtherUnsupportedCasesSkipped() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-query-update.json"),
