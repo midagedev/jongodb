@@ -2,7 +2,9 @@ package org.jongodb.command;
 
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.bson.BsonBoolean;
 import org.bson.BsonDateTime;
@@ -143,18 +145,17 @@ public final class EngineBackedCommandStore implements CommandStore {
         for (final BsonDocument stage : pipeline) {
             convertedPipeline.add(toDocument(Objects.requireNonNull(stage, "pipeline entries must not be null")));
         }
-        final OutStagePlan outStagePlan = resolveOutStagePlan(List.copyOf(convertedPipeline));
+        final TerminalWriteStagePlan writeStagePlan = resolveTerminalWriteStagePlan(List.copyOf(convertedPipeline));
 
         final Iterable<Document> sourceDocuments = collectionStore.scanAll();
         final List<Document> aggregatedDocuments = AggregationPipeline.execute(
                 sourceDocuments,
-                outStagePlan.pipelineWithoutOut(),
+                writeStagePlan.pipelineWithoutTerminalWrite(),
                 foreignCollectionName -> engineStore.collection(database, foreignCollectionName).scanAll(),
                 collation);
-        if (outStagePlan.outputCollection() != null) {
-            final CollectionStore outputCollection = engineStore.collection(database, outStagePlan.outputCollection());
-            outputCollection.deleteMany(new Document());
-            outputCollection.insertMany(aggregatedDocuments);
+        if (writeStagePlan.outputCollection() != null) {
+            final CollectionStore outputCollection = engineStore.collection(database, writeStagePlan.outputCollection());
+            persistTerminalWrite(outputCollection, aggregatedDocuments, writeStagePlan.mode());
             return List.of();
         }
         final List<BsonDocument> converted = new ArrayList<>(aggregatedDocuments.size());
@@ -332,12 +333,82 @@ public final class EngineBackedCommandStore implements CommandStore {
         return toDocument(toBsonDocument(document));
     }
 
-    private static OutStagePlan resolveOutStagePlan(final List<Document> pipeline) {
+    private static void persistTerminalWrite(
+            final CollectionStore outputCollection,
+            final List<Document> aggregatedDocuments,
+            final TerminalWriteMode mode) {
+        if (mode == TerminalWriteMode.MERGE) {
+            mergeIntoCollectionById(outputCollection, aggregatedDocuments);
+            return;
+        }
+        outputCollection.deleteMany(new Document());
+        if (!aggregatedDocuments.isEmpty()) {
+            outputCollection.insertMany(aggregatedDocuments);
+        }
+    }
+
+    private static void mergeIntoCollectionById(
+            final CollectionStore outputCollection, final List<Document> aggregatedDocuments) {
+        final List<Document> existingDocuments = outputCollection.find(new Document());
+        final List<Document> mergedDocuments = new ArrayList<>(existingDocuments.size() + aggregatedDocuments.size());
+        final Map<Object, Integer> indexById = new HashMap<>();
+
+        for (final Document existingDocument : existingDocuments) {
+            final Document copied = deepCopyDocument(existingDocument);
+            mergedDocuments.add(copied);
+            if (copied.containsKey("_id")) {
+                indexById.putIfAbsent(copied.get("_id"), mergedDocuments.size() - 1);
+            }
+        }
+
+        for (final Document aggregatedDocument : aggregatedDocuments) {
+            final Document copied = deepCopyDocument(aggregatedDocument);
+            final Object id = copied.get("_id");
+            if (id == null) {
+                mergedDocuments.add(copied);
+                continue;
+            }
+
+            final Integer existingIndex = indexById.get(id);
+            if (existingIndex == null) {
+                indexById.put(id, mergedDocuments.size());
+                mergedDocuments.add(copied);
+                continue;
+            }
+
+            final Document merged = deepCopyDocument(mergedDocuments.get(existingIndex));
+            for (final Map.Entry<String, Object> entry : copied.entrySet()) {
+                merged.put(entry.getKey(), deepCopyAny(entry.getValue()));
+            }
+            mergedDocuments.set(existingIndex, merged);
+        }
+
+        outputCollection.deleteMany(new Document());
+        if (!mergedDocuments.isEmpty()) {
+            outputCollection.insertMany(mergedDocuments);
+        }
+    }
+
+    private static Document deepCopyDocument(final Document document) {
+        return toDocument(toBsonDocument(document));
+    }
+
+    private static Object deepCopyAny(final Object value) {
+        if (value == null) {
+            return null;
+        }
+        return toDocument(toBsonDocument(new Document("value", value))).get("value");
+    }
+
+    private static TerminalWriteStagePlan resolveTerminalWriteStagePlan(final List<Document> pipeline) {
         String outputCollection = null;
-        List<Document> pipelineWithoutOut = pipeline;
+        TerminalWriteMode mode = TerminalWriteMode.NONE;
+        List<Document> pipelineWithoutTerminalWrite = pipeline;
         for (int index = 0; index < pipeline.size(); index++) {
             final Document stage = pipeline.get(index);
-            if (!stage.containsKey("$out")) {
+            final boolean hasOut = stage.containsKey("$out");
+            final boolean hasMerge = stage.containsKey("$merge");
+            if (!hasOut && !hasMerge) {
                 continue;
             }
             if (stage.size() != 1) {
@@ -345,26 +416,76 @@ public final class EngineBackedCommandStore implements CommandStore {
             }
             if (index != pipeline.size() - 1) {
                 throw new UnsupportedFeatureException(
-                        "aggregation.stage.$out.position",
-                        "$out stage must be the final pipeline stage");
+                        hasOut ? "aggregation.stage.$out.position" : "aggregation.stage.$merge.position",
+                        hasOut
+                                ? "$out stage must be the final pipeline stage"
+                                : "$merge stage must be the final pipeline stage");
             }
             if (outputCollection != null) {
                 throw new UnsupportedFeatureException(
-                        "aggregation.stage.$out.multiple",
-                        "multiple $out stages are not supported");
+                        hasOut ? "aggregation.stage.$out.multiple" : "aggregation.stage.$merge.multiple",
+                        hasOut
+                                ? "multiple $out stages are not supported"
+                                : "multiple $merge stages are not supported");
             }
-            final Object outDefinition = stage.get("$out");
-            if (!(outDefinition instanceof String outCollectionName) || outCollectionName.isBlank()) {
-                throw new UnsupportedFeatureException(
-                        "aggregation.stage.$out.form",
-                        "$out stage currently supports string collection targets only");
+            if (hasOut) {
+                final Object outDefinition = stage.get("$out");
+                if (!(outDefinition instanceof String outCollectionName) || outCollectionName.isBlank()) {
+                    throw new UnsupportedFeatureException(
+                            "aggregation.stage.$out.form",
+                            "$out stage currently supports string collection targets only");
+                }
+                outputCollection = outCollectionName.trim();
+                mode = TerminalWriteMode.OUT;
+            } else {
+                outputCollection = parseMergeTargetCollection(stage.get("$merge"));
+                mode = TerminalWriteMode.MERGE;
             }
-            outputCollection = outCollectionName.trim();
-            pipelineWithoutOut = List.copyOf(pipeline.subList(0, index));
+            pipelineWithoutTerminalWrite = List.copyOf(pipeline.subList(0, index));
         }
-        return new OutStagePlan(pipelineWithoutOut, outputCollection);
+        return new TerminalWriteStagePlan(pipelineWithoutTerminalWrite, outputCollection, mode);
     }
 
-    private record OutStagePlan(List<Document> pipelineWithoutOut, String outputCollection) {}
+    private static String parseMergeTargetCollection(final Object mergeDefinition) {
+        if (mergeDefinition instanceof String collectionName && !collectionName.isBlank()) {
+            return collectionName.trim();
+        }
+        if (!(mergeDefinition instanceof Document mergeDocument)) {
+            throw new UnsupportedFeatureException(
+                    "aggregation.stage.$merge.form",
+                    "$merge stage currently supports string targets or {into: <collection>} form only");
+        }
+
+        final Object intoDefinition = mergeDocument.get("into");
+        if (intoDefinition instanceof String collectionName && !collectionName.isBlank()) {
+            return collectionName.trim();
+        }
+        if (intoDefinition instanceof Document intoDocument) {
+            final Object db = intoDocument.get("db");
+            if (db instanceof String dbName && !dbName.isBlank()) {
+                throw new UnsupportedFeatureException(
+                        "aggregation.stage.$merge.into.db",
+                        "$merge into.db targets are not supported");
+            }
+            final Object coll = intoDocument.get("coll");
+            if (coll instanceof String collectionName && !collectionName.isBlank()) {
+                return collectionName.trim();
+            }
+        }
+        throw new UnsupportedFeatureException(
+                "aggregation.stage.$merge.form",
+                "$merge stage currently supports string targets or {into: <collection>} form only");
+    }
+
+    private record TerminalWriteStagePlan(
+            List<Document> pipelineWithoutTerminalWrite,
+            String outputCollection,
+            TerminalWriteMode mode) {}
+
+    private enum TerminalWriteMode {
+        NONE,
+        OUT,
+        MERGE
+    }
 
 }

@@ -378,12 +378,15 @@ public final class UnifiedSpecImporter {
             }
             copiedPipeline.add(deepCopyValue(stageMap));
         }
-        if (arguments.containsKey("bypassDocumentValidation")) {
-            throw new UnsupportedOperationException("unsupported UTF aggregate option: bypassDocumentValidation");
-        }
 
         final Map<String, Object> payload = commandEnvelope("aggregate", database, collection);
         payload.put("pipeline", List.copyOf(copiedPipeline));
+        if (arguments.containsKey("bypassDocumentValidation")) {
+            if (!Boolean.FALSE.equals(arguments.get("bypassDocumentValidation"))) {
+                throw new UnsupportedOperationException("unsupported UTF aggregate option: bypassDocumentValidation");
+            }
+            payload.put("bypassDocumentValidation", false);
+        }
         final Map<String, Object> cursor = new LinkedHashMap<>();
         if (arguments.containsKey("batchSize")) {
             cursor.put("batchSize", deepCopyValue(arguments.get("batchSize")));
@@ -396,7 +399,7 @@ public final class UnifiedSpecImporter {
     }
 
     private static boolean containsUnsupportedAggregateStage(final Map<String, Object> stage) {
-        if (stage.containsKey("$merge") || stage.containsKey("$listLocalSessions")) {
+        if (stage.containsKey("$listLocalSessions")) {
             return true;
         }
         for (final Object value : stage.values()) {
@@ -411,7 +414,7 @@ public final class UnifiedSpecImporter {
         if (value instanceof Map<?, ?> mapValue) {
             for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
                 final String key = String.valueOf(entry.getKey());
-                if ("$merge".equals(key) || "$listLocalSessions".equals(key)) {
+                if ("$listLocalSessions".equals(key)) {
                     return true;
                 }
                 if (containsUnsupportedAggregateStageValue(entry.getValue())) {
