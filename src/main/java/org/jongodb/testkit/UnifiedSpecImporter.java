@@ -603,9 +603,7 @@ public final class UnifiedSpecImporter {
         if (orderedValue != null && !(orderedValue instanceof Boolean)) {
             throw new IllegalArgumentException("bulkWrite.arguments.ordered must be a boolean");
         }
-        if (Boolean.FALSE.equals(orderedValue)) {
-            throw new UnsupportedOperationException("unsupported UTF bulkWrite option: ordered=false");
-        }
+        final boolean ordered = orderedValue == null || Boolean.TRUE.equals(orderedValue);
 
         final List<Object> requests = asList(arguments.get("requests"), "bulkWrite.arguments.requests");
         if (requests.isEmpty()) {
@@ -642,7 +640,7 @@ public final class UnifiedSpecImporter {
         }
 
         final Map<String, Object> payload = commandEnvelope("bulkWrite", database, collection);
-        payload.put("ordered", true);
+        payload.put("ordered", ordered);
         payload.put("operations", List.copyOf(operations));
         return new ScenarioCommand("bulkWrite", immutableMap(payload));
     }
@@ -786,9 +784,7 @@ public final class UnifiedSpecImporter {
         if (orderedValue != null && !(orderedValue instanceof Boolean)) {
             throw new IllegalArgumentException("clientBulkWrite.arguments.ordered must be a boolean");
         }
-        if (Boolean.FALSE.equals(orderedValue)) {
-            throw new UnsupportedOperationException("unsupported UTF clientBulkWrite option: ordered=false");
-        }
+        final boolean ordered = orderedValue == null || Boolean.TRUE.equals(orderedValue);
         if (Boolean.TRUE.equals(arguments.get("verboseResults"))) {
             throw new UnsupportedOperationException("unsupported UTF clientBulkWrite option: verboseResults=true");
         }
@@ -836,7 +832,7 @@ public final class UnifiedSpecImporter {
                 ? new CollectionTarget(defaultDatabase, defaultCollection)
                 : namespace;
         final Map<String, Object> bulkWriteArguments = new LinkedHashMap<>();
-        bulkWriteArguments.put("ordered", true);
+        bulkWriteArguments.put("ordered", ordered);
         bulkWriteArguments.put("requests", List.copyOf(requests));
         return bulkWrite(bulkWriteArguments, resolved.database(), resolved.collection());
     }
