@@ -238,7 +238,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksBulkWriteOrderedFalseAsUnsupported() throws IOException {
+    void importsBulkWriteOrderedFalseForExecutionParity() throws IOException {
         Files.writeString(
                 tempDir.resolve("bulk-write-unsupported.json"),
                 """
@@ -267,11 +267,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("bulkWrite option: ordered=false")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        assertEquals(Boolean.FALSE, scenario.commands().get(0).payload().get("ordered"));
     }
 
     @Test
@@ -765,7 +765,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksClientBulkWriteOrderedFalseAsUnsupported() throws IOException {
+    void importsClientBulkWriteOrderedFalseForExecutionParity() throws IOException {
         Files.writeString(
                 tempDir.resolve("client-bulk-write-unordered.json"),
                 """
@@ -788,11 +788,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF clientBulkWrite option: ordered=false")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        assertEquals(Boolean.FALSE, scenario.commands().get(0).payload().get("ordered"));
     }
 
     @Test
