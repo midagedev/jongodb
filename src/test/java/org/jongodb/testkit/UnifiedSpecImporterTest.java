@@ -318,6 +318,134 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void appliesMongosTopologyLaneOverrideForPinMongosSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("pin-mongos.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "pin mongos topology lane",
+                      "runOnRequirements": [{"minServerVersion": "4.1.8", "topologies": ["sharded", "load-balanced"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void appliesMongosTopologyLaneOverrideForMongosUnpinSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-unpin.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "mongos unpin topology lane",
+                      "runOnRequirements": [{"minServerVersion": "4.2", "topologies": ["sharded"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void appliesMongosTopologyLaneOverrideForMongosRecoveryTokenSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-recovery-token.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "mongos recovery token topology lane",
+                      "runOnRequirements": [{"minServerVersion": "4.1.8", "topologies": ["sharded", "load-balanced"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void keepsRunOnTopologyChecksForNonMongosTopologyLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("pin-mongoses.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "non lane mongos topology",
+                      "runOnRequirements": [{"minServerVersion": "4.1.8", "topologies": ["sharded", "load-balanced"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
     void appliesHintLegacyServerVersionLaneOverride() throws IOException {
         final Path suiteRoot = tempDir.resolve("crud/tests/unified");
         Files.createDirectories(suiteRoot);
