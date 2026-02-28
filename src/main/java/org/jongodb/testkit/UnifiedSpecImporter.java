@@ -410,7 +410,8 @@ public final class UnifiedSpecImporter {
 
     private static Map<String, Object> normalizeAggregateStage(final Map<String, Object> stage) {
         if (stage.containsKey("$listLocalSessions")) {
-            return Map.of("$limit", 0);
+            // Keep deterministic subset behavior while preserving valid aggregate semantics for real mongod.
+            return Map.of("$limit", 1);
         }
         return stage;
     }
