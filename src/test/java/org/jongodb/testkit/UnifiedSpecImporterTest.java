@@ -736,6 +736,52 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsFindOneAsFindLimitOneSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("find-one-subset.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "findOne subset",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [
+                          {"_id": 1, "name": "alpha"},
+                          {"_id": 2, "name": "beta"}
+                        ]}},
+                        {"name": "findOne", "arguments": {"filter": {}, "sort": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(1).commandName());
+        assertEquals(1, scenario.commands().get(1).payload().get("limit"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> findResult = outcome.commandResults().get(1);
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> cursor = (Map<String, Object>) findResult.get("cursor");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> firstBatch = (List<Map<String, Object>>) cursor.get("firstBatch");
+        assertEquals(1, firstBatch.size());
+    }
+
+    @Test
     void importsEstimatedDocumentCountAsCountCommandSubset() throws IOException {
         Files.writeString(
                 tempDir.resolve("estimated-document-count.json"),
@@ -821,6 +867,130 @@ class UnifiedSpecImporterTest {
         assertEquals(1L, ((Number) countResult.get("count")).longValue());
         final Map<String, Object> pingResult = outcome.commandResults().get(2);
         assertEquals(1.0, ((Number) pingResult.get("ok")).doubleValue());
+    }
+
+    @Test
+    void importsRunCommandInsertAndFindSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-command-insert-find.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "runCommand insert and find subset",
+                      "operations": [
+                        {"name": "runCommand", "arguments": {"command": {"insert": "users", "documents": [{"_id": 1, "name": "alpha"}]}}},
+                        {"name": "runCommand", "arguments": {"command": {"find": "users", "filter": {"_id": 1}}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("insert", scenario.commands().get(0).commandName());
+        assertEquals("find", scenario.commands().get(1).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> findResult = outcome.commandResults().get(1);
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> cursor = (Map<String, Object>) findResult.get("cursor");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> firstBatch = (List<Map<String, Object>>) cursor.get("firstBatch");
+        assertEquals(1, firstBatch.size());
+        assertEquals("alpha", firstBatch.get(0).get("name"));
+    }
+
+    @Test
+    void importsControlOperationsAsNoOpSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("control-ops-noop-subset.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "createEntities": [
+                    {"session": {"id": "session0"}}
+                  ],
+                  "tests": [
+                    {
+                      "description": "control operations no-op subset",
+                      "operations": [
+                        {"name": "insertOne", "arguments": {"document": {"_id": 1, "name": "alpha"}}},
+                        {"name": "getSnapshotTime", "object": "session0", "saveResultAsEntity": "savedSnapshotTime"},
+                        {"name": "assertSessionTransactionState", "object": "session0", "arguments": {"state": "none"}},
+                        {"name": "assertSessionNotDirty", "object": "session0"},
+                        {"name": "assertSameLsidOnLastTwoCommands", "object": "session0"},
+                        {"name": "endSession", "object": "session0"},
+                        {"name": "modifyCollection"},
+                        {"name": "listCollections"},
+                        {"name": "listDatabases"},
+                        {"name": "dropCollection"},
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("insert", scenario.commands().get(0).commandName());
+        assertEquals("find", scenario.commands().get(1).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+    }
+
+    @Test
+    void importsRunCommandListCollectionsAsDeterministicPingSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-command-listcollections-subset.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "runCommand listCollections deterministic subset",
+                      "operations": [
+                        {"name": "runCommand", "arguments": {"command": {"listCollections": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
     }
 
     @Test
