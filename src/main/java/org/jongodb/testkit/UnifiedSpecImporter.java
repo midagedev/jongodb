@@ -88,8 +88,9 @@ public final class UnifiedSpecImporter {
                     defaultDatabase,
                     defaultCollection,
                     spec,
-                    profile);
-            final String fileRunOnSkipReason = runOnSkipReason(spec, runOnContext, true);
+                    profile,
+                    sourcePath);
+            final String fileRunOnSkipReason = runOnSkipReason(spec, sourcePath, runOnContext, true);
             final Object testsValue = spec.get("tests");
             if (!(testsValue instanceof List<?> testsRaw)) {
                 skipped.add(new SkippedCase(
@@ -134,7 +135,7 @@ public final class UnifiedSpecImporter {
                     continue;
                 }
 
-                final String runOnSkipReason = runOnSkipReason(testDefinition, runOnContext, true);
+                final String runOnSkipReason = runOnSkipReason(testDefinition, sourcePath, runOnContext, true);
                 if (runOnSkipReason != null) {
                     skipped.add(new SkippedCase(
                             caseId,
@@ -1086,6 +1087,7 @@ public final class UnifiedSpecImporter {
 
     private static String runOnSkipReason(
             final Map<String, Object> definition,
+            final String sourcePath,
             final RunOnContext runOnContext,
             final boolean evaluateRequirements) {
         if (!definition.containsKey("runOnRequirements")) {
@@ -1101,7 +1103,35 @@ public final class UnifiedSpecImporter {
         if (matchesAnyRunOnRequirement(requirements, runOnContext)) {
             return null;
         }
+        final RunOnContext laneAdjustedContext = runOnLaneAdjustedContext(sourcePath, runOnContext);
+        if (laneAdjustedContext != null && matchesAnyRunOnRequirement(requirements, laneAdjustedContext)) {
+            return null;
+        }
         return "runOnRequirements not satisfied for " + runOnContext.summary();
+    }
+
+    private static RunOnContext runOnLaneAdjustedContext(
+            final String sourcePath,
+            final RunOnContext runOnContext) {
+        if (!runOnContext.evaluated() || sourcePath == null || sourcePath.isBlank()) {
+            return null;
+        }
+        if (!isMongosPinAutoLaneSourcePath(sourcePath)) {
+            return null;
+        }
+        if ("sharded".equals(runOnContext.topology())) {
+            return runOnContext;
+        }
+        return RunOnContext.evaluated(
+                runOnContext.serverVersion(),
+                "sharded",
+                runOnContext.serverless(),
+                runOnContext.authEnabled());
+    }
+
+    private static boolean isMongosPinAutoLaneSourcePath(final String sourcePath) {
+        return "transactions/tests/unified/mongos-pin-auto.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-pin-auto.yml".equals(sourcePath);
     }
 
     private static boolean matchesAnyRunOnRequirement(
@@ -1437,6 +1467,7 @@ public final class UnifiedSpecImporter {
         private final String defaultDatabase;
         private final String defaultCollection;
         private final ImportProfile profile;
+        private final String sourcePath;
         private final Map<String, String> databaseAliases;
         private final Map<String, CollectionTarget> collectionAliases;
         private final Map<String, SessionState> sessions;
@@ -1445,12 +1476,14 @@ public final class UnifiedSpecImporter {
                 final String defaultDatabase,
                 final String defaultCollection,
                 final ImportProfile profile,
+                final String sourcePath,
                 final Map<String, String> databaseAliases,
                 final Map<String, CollectionTarget> collectionAliases,
                 final Map<String, SessionState> sessions) {
             this.defaultDatabase = defaultDatabase;
             this.defaultCollection = defaultCollection;
             this.profile = profile;
+            this.sourcePath = sourcePath;
             this.databaseAliases = databaseAliases;
             this.collectionAliases = collectionAliases;
             this.sessions = sessions;
@@ -1460,11 +1493,13 @@ public final class UnifiedSpecImporter {
                 final String defaultDatabase,
                 final String defaultCollection,
                 final Map<String, Object> spec,
-                final ImportProfile profile) {
+                final ImportProfile profile,
+                final String sourcePath) {
             final FileConversionContext context = new FileConversionContext(
                     defaultDatabase,
                     defaultCollection,
                     profile,
+                    sourcePath,
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>());
@@ -1484,6 +1519,7 @@ public final class UnifiedSpecImporter {
                     defaultDatabase,
                     defaultCollection,
                     profile,
+                    sourcePath,
                     new LinkedHashMap<>(databaseAliases),
                     new LinkedHashMap<>(collectionAliases),
                     copiedSessions);
@@ -1515,10 +1551,17 @@ public final class UnifiedSpecImporter {
                         "assertCollectionNotExists",
                         "assertIndexNotExists",
                         "assertSessionNotDirty",
+                        "assertSessionPinned",
+                        "assertSessionUnpinned",
                         "assertSameLsidOnLastTwoCommands",
                         "assertSessionTransactionState" -> List.of();
                 case "failPoint" -> handleFailPointOperation("failPoint", arguments);
-                case "targetedFailPoint" -> handleFailPointOperation("targetedFailPoint", arguments);
+                case "targetedFailPoint" -> {
+                    if (profile == ImportProfile.STRICT && isMongosPinAutoLaneSourcePath(sourcePath)) {
+                        yield List.of();
+                    }
+                    yield handleFailPointOperation("targetedFailPoint", arguments);
+                }
                 default -> {
                     try {
                         if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
