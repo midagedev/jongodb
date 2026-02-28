@@ -20,6 +20,12 @@ public final class InMemoryEngineStore implements EngineStore {
         return collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore());
     }
 
+    @Override
+    public boolean collectionExists(final Namespace namespace) {
+        Objects.requireNonNull(namespace, "namespace");
+        return collections.containsKey(namespace);
+    }
+
     public synchronized InMemoryEngineStore snapshot() {
         final InMemoryEngineStore snapshot = new InMemoryEngineStore();
         for (final var entry : collections.entrySet()) {

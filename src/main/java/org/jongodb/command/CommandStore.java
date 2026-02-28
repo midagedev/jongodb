@@ -108,7 +108,11 @@ public interface CommandStore {
         }
     }
 
-    record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter) {}
+    record CreateIndexesResult(int numIndexesBefore, int numIndexesAfter, boolean createdCollectionAutomatically) {
+        public CreateIndexesResult(final int numIndexesBefore, final int numIndexesAfter) {
+            this(numIndexesBefore, numIndexesAfter, false);
+        }
+    }
 
     record IndexMetadata(
             String name,

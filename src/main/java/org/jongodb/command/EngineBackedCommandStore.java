@@ -174,6 +174,7 @@ public final class EngineBackedCommandStore implements CommandStore {
     public CreateIndexesResult createIndexes(
             final String database, final String collection, final List<IndexRequest> indexes) {
         Objects.requireNonNull(indexes, "indexes");
+        final boolean existedBefore = engineStore.collectionExists(database, collection);
         final CollectionStore collectionStore = engineStore.collection(database, collection);
 
         final List<CollectionStore.IndexDefinition> converted = new ArrayList<>(indexes.size());
@@ -190,7 +191,7 @@ public final class EngineBackedCommandStore implements CommandStore {
         }
 
         final CollectionStore.CreateIndexesResult result = collectionStore.createIndexes(List.copyOf(converted));
-        return new CreateIndexesResult(result.numIndexesBefore(), result.numIndexesAfter());
+        return new CreateIndexesResult(result.numIndexesBefore(), result.numIndexesAfter(), !existedBefore);
     }
 
     @Override

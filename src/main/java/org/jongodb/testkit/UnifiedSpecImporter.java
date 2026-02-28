@@ -130,7 +130,7 @@ public final class UnifiedSpecImporter {
                     continue;
                 }
 
-                final String runOnSkipReason = runOnSkipReason(testDefinition, runOnContext, false);
+                final String runOnSkipReason = runOnSkipReason(testDefinition, runOnContext, true);
                 if (runOnSkipReason != null) {
                     skipped.add(new SkippedCase(
                             caseId,
@@ -306,6 +306,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("find", arguments);
         final Map<String, Object> payload = commandEnvelope("find", database, collection);
         payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
         copyIfPresent(arguments, payload, "projection");
@@ -322,6 +323,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("countDocuments", arguments);
         final Map<String, Object> payload = commandEnvelope("countDocuments", database, collection);
         if (arguments.containsKey("filter")) {
             payload.put("filter", deepCopyValue(arguments.get("filter")));
@@ -341,6 +343,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("distinct", arguments);
         final Map<String, Object> payload = commandEnvelope("distinct", database, collection);
         final String key = firstNonBlank(
                 trimToEmpty(arguments.get("key")),
@@ -366,6 +369,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("aggregate", arguments);
         final List<Object> pipeline = asList(arguments.getOrDefault("pipeline", List.of()), "aggregate.arguments.pipeline");
         final List<Object> copiedPipeline = new ArrayList<>(pipeline.size());
         for (final Object stage : pipeline) {
@@ -397,7 +401,7 @@ public final class UnifiedSpecImporter {
     }
 
     private static boolean containsUnsupportedAggregateStage(final Map<String, Object> stage) {
-        if (stage.containsKey("$listLocalSessions")) {
+        if (stage.containsKey("$listLocalSessions") || stage.containsKey("$merge")) {
             return true;
         }
         for (final Object value : stage.values()) {
@@ -420,7 +424,7 @@ public final class UnifiedSpecImporter {
         if (value instanceof Map<?, ?> mapValue) {
             for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
                 final String key = String.valueOf(entry.getKey());
-                if ("$listLocalSessions".equals(key)) {
+                if ("$listLocalSessions".equals(key) || "$merge".equals(key)) {
                     return true;
                 }
                 if (containsUnsupportedAggregateStageValue(entry.getValue())) {
@@ -444,6 +448,7 @@ public final class UnifiedSpecImporter {
             final String database,
             final String collection,
             final boolean multi) {
+        rejectUnsupportedLetOption(multi ? "updateMany" : "updateOne", arguments);
         final Object rawUpdate = arguments.containsKey("update")
                 ? arguments.get("update")
                 : arguments.get("replacement");
@@ -473,6 +478,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("replaceOne", arguments);
         final Map<String, Object> replacement = asStringObjectMap(
                 arguments.get("replacement"),
                 "replaceOne.arguments.replacement");
@@ -525,6 +531,7 @@ public final class UnifiedSpecImporter {
             final String database,
             final String collection,
             final int limit) {
+        rejectUnsupportedLetOption(limit == 1 ? "deleteOne" : "deleteMany", arguments);
         final Map<String, Object> deleteEntry = new LinkedHashMap<>();
         deleteEntry.put("q", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
         deleteEntry.put("limit", limit);
@@ -540,6 +547,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("findOneAndUpdate", arguments);
         final Object updateValue = arguments.get("update");
         if (updateValue == null) {
             throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
@@ -562,6 +570,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("findOneAndDelete", arguments);
         final Map<String, Object> payload = commandEnvelope("findAndModify", database, collection);
         payload.put("query", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
         payload.put("remove", true);
@@ -578,6 +587,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("findOneAndReplace", arguments);
         final Map<String, Object> replacement = asStringObjectMap(
                 arguments.get("replacement"),
                 "findOneAndReplace.arguments.replacement");
@@ -597,6 +607,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("bulkWrite", arguments);
         final Object orderedValue = arguments.get("ordered");
         if (orderedValue != null && !(orderedValue instanceof Boolean)) {
             throw new IllegalArgumentException("bulkWrite.arguments.ordered must be a boolean");
@@ -723,6 +734,7 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
+        rejectUnsupportedLetOption("createIndex", arguments);
         final Object keyValue = arguments.containsKey("key") ? arguments.get("key") : arguments.get("keys");
         final Map<String, Object> key = asStringObjectMap(keyValue, "createIndex.arguments.key");
         final Map<String, Object> indexEntry = new LinkedHashMap<>();
@@ -738,7 +750,19 @@ public final class UnifiedSpecImporter {
 
         final Map<String, Object> payload = commandEnvelope("createIndexes", database, collection);
         payload.put("indexes", List.of(immutableMap(indexEntry)));
+        copyIfPresent(arguments, payload, "commitQuorum");
+        if (!payload.containsKey("commitQuorum")) {
+            payload.put("commitQuorum", "votingMembers");
+        }
         return new ScenarioCommand("createIndexes", immutableMap(payload));
+    }
+
+    private static void rejectUnsupportedLetOption(
+            final String operationName,
+            final Map<String, Object> arguments) {
+        if (arguments.containsKey("let")) {
+            throw new UnsupportedOperationException("unsupported UTF " + operationName + " option: let");
+        }
     }
 
     private static ScenarioCommand runCommand(final Map<String, Object> arguments, final String database) {
