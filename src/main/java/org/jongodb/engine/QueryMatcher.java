@@ -256,13 +256,9 @@ final class QueryMatcher {
                 current = mapValue.get(segment);
                 continue;
             }
-            if (current instanceof List<?> listValue) {
-                final Integer index = parseArrayIndexSegment(segment);
-                if (index == null || index < 0 || index >= listValue.size()) {
-                    return null;
-                }
-                current = listValue.get(index);
-                continue;
+            if (current instanceof List<?>) {
+                // $expr paths follow aggregation-style traversal and do not support direct array index segments.
+                return null;
             }
             return null;
         }
