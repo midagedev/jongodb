@@ -358,6 +358,39 @@ tasks.register<JavaExec>("fixtureExtract") {
     }
 }
 
+tasks.register<JavaExec>("fixtureSanitize") {
+    group = "verification"
+    description = "Runs deterministic fixture sanitization + pii lint + normalization pipeline."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureSanitizationTool")
+
+    val inputDir = (findProperty("fixtureSanitizeInputDir") as String?)?.trim().orEmpty()
+    val outputDir = (findProperty("fixtureSanitizeOutputDir") as String?)?.trim().orEmpty()
+    val policyFile = (findProperty("fixtureSanitizePolicyFile") as String?)?.trim().orEmpty()
+    val seed = (findProperty("fixtureSanitizeSeed") as String?)?.trim().orEmpty().ifBlank { "fixture-sanitize-v1" }
+    val failOnPii = (findProperty("fixtureSanitizeFailOnPii") as String?)?.toBoolean() ?: true
+
+    doFirst {
+        if (inputDir.isBlank()) {
+            throw GradleException("fixtureSanitizeInputDir property is required")
+        }
+        if (outputDir.isBlank()) {
+            throw GradleException("fixtureSanitizeOutputDir property is required")
+        }
+        if (policyFile.isBlank()) {
+            throw GradleException("fixtureSanitizePolicyFile property is required")
+        }
+    }
+
+    args(
+        "--input-dir=$inputDir",
+        "--output-dir=$outputDir",
+        "--policy-file=$policyFile",
+        "--seed=$seed"
+    )
+    args(if (failOnPii) "--fail-on-pii" else "--no-fail-on-pii")
+}
+
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {
     group = "verification"
     description = "Runs canonical complex-query certification pack and enforces gate policy."
