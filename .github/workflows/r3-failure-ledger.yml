@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  issues: write
 
 jobs:
   generate-ledger:
@@ -103,8 +105,200 @@ jobs:
           else:
               lines.append("- none")
 
+          lines.append("")
+          lines.append("## failureIds")
+          entries = data.get("entries", [])
+          if entries:
+              for entry in entries[:20]:
+                  first_diff_path = entry.get("firstDiffPath") or "<none>"
+                  lines.append(f"- {entry.get('failureId', '<missing-id>')} | firstDiffPath={first_diff_path}")
+          else:
+              lines.append("- none")
+
           out.write_text("\n".join(lines) + "\n", encoding="utf-8")
           print(out.read_text(encoding="utf-8"))
+          PY
+
+      - name: Compare ledger failure IDs with latest official shard artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ.get("GH_TOKEN", "")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          output_path = Path("build/reports/r3-failure-ledger/r3-ledger-official-consistency.md")
+          ledger_path = Path("build/reports/r3-failure-ledger/r3-failure-ledger.json")
+
+          def request_json(url: str):
+              req = urllib.request.Request(url, headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "jongodb-r3-ledger-consistency-check",
+              })
+              with urllib.request.urlopen(req, timeout=30) as res:
+                  return json.loads(res.read().decode("utf-8"))
+
+          def request_bytes(url: str) -> bytes:
+              req = urllib.request.Request(url, headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "jongodb-r3-ledger-consistency-check",
+              })
+              with urllib.request.urlopen(req, timeout=60) as res:
+                  return res.read()
+
+          lines = ["# R3 vs Official Shard Consistency", ""]
+          if not ledger_path.exists():
+              lines.append("- status: skipped")
+              lines.append(f"- reason: missing ledger report at {ledger_path}")
+              output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              print(output_path.read_text(encoding="utf-8"))
+              raise SystemExit(0)
+
+          ledger_json = json.loads(ledger_path.read_text(encoding="utf-8"))
+          ledger_ids = sorted({
+              str(entry.get("failureId", "")).strip()
+              for entry in ledger_json.get("entries", [])
+              if str(entry.get("failureId", "")).strip()
+          })
+          lines.append(f"- ledgerFailureCount: {len(ledger_ids)}")
+
+          try:
+              runs = request_json(
+                  f"https://api.github.com/repos/{repo}/actions/workflows/official-suite-sharded.yml/runs"
+                  "?branch=main&status=completed&per_page=20"
+              )
+              target_run = None
+              for run in runs.get("workflow_runs", []):
+                  if run.get("conclusion") in {"success", "failure"}:
+                      target_run = run
+                      break
+
+              if target_run is None:
+                  lines.append("- status: skipped")
+                  lines.append("- reason: no completed official-suite-sharded runs found on main")
+              else:
+                  run_id = target_run.get("id")
+                  run_url = target_run.get("html_url", "")
+                  lines.append(f"- officialRunId: {run_id}")
+                  lines.append(f"- officialRunUrl: {run_url}")
+
+                  artifacts = request_json(
+                      f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100"
+                  )
+                  official_ids = set()
+                  for artifact in artifacts.get("artifacts", []):
+                      name = artifact.get("name", "")
+                      if artifact.get("expired"):
+                          continue
+                      if not name.startswith("utf-shard-") or name == "utf-shard-summary":
+                          continue
+                      archive_bytes = request_bytes(artifact["archive_download_url"])
+                      with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+                          for member in archive.namelist():
+                              if not member.endswith("failure-replay-bundles/manifest.json"):
+                                  continue
+                              manifest = json.loads(archive.read(member).decode("utf-8"))
+                              for failure in manifest.get("failures", []):
+                                  failure_id = str(failure.get("failureId", "")).strip()
+                                  if failure_id:
+                                      official_ids.add(failure_id)
+
+                  official_ids = sorted(official_ids)
+                  lines.append(f"- officialFailureCount: {len(official_ids)}")
+
+                  missing_in_official = sorted(set(ledger_ids) - set(official_ids))
+                  missing_in_ledger = sorted(set(official_ids) - set(ledger_ids))
+                  if not missing_in_official and not missing_in_ledger:
+                      lines.append("- consistency: aligned")
+                  else:
+                      lines.append("- consistency: diverged")
+                      lines.append("- missingInOfficial:")
+                      if missing_in_official:
+                          for failure_id in missing_in_official[:20]:
+                              lines.append(f"  - {failure_id}")
+                      else:
+                          lines.append("  - none")
+                      lines.append("- missingInLedger:")
+                      if missing_in_ledger:
+                          for failure_id in missing_in_ledger[:20]:
+                              lines.append(f"  - {failure_id}")
+                      else:
+                          lines.append("  - none")
+                      print("::warning::R3 ledger and latest official shard failure IDs diverged")
+          except Exception as exc:  # pragma: no cover - workflow-only best effort path
+              lines.append("- status: warning")
+              lines.append(f"- reason: consistency check failed ({exc})")
+              print(f"::warning::consistency check failed: {exc}")
+
+          output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(output_path.read_text(encoding="utf-8"))
+          if summary_path:
+              with Path(summary_path).open("a", encoding="utf-8") as handle:
+                  handle.write("\n")
+                  handle.write(output_path.read_text(encoding="utf-8"))
+          PY
+
+      - name: Post triage breadcrumb on schedule failure
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIAGE_ISSUE_NUMBER: "378"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          ledger_path = Path("build/reports/r3-failure-ledger/r3-failure-ledger.json")
+          if not ledger_path.exists():
+              print("ledger report missing; skip triage comment")
+              raise SystemExit(0)
+
+          payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+          failure_count = int(payload.get("failureCount", 0))
+          if failure_count == 0:
+              print("failureCount=0; skip triage comment")
+              raise SystemExit(0)
+
+          entries = payload.get("entries", [])
+          lines = [
+              "R3 Failure Ledger scheduled run detected non-zero failures.",
+              "",
+              f"- run: {os.environ.get('RUN_URL', '')}",
+              f"- failureCount: {failure_count}",
+              f"- byTrack: {json.dumps(payload.get('byTrack', {}), ensure_ascii=False)}",
+              f"- byStatus: {json.dumps(payload.get('byStatus', {}), ensure_ascii=False)}",
+              "",
+              "Top failure IDs (up to 10):",
+          ]
+          for entry in entries[:10]:
+              failure_id = entry.get("failureId", "<missing-id>")
+              first_diff_path = entry.get("firstDiffPath") or "<none>"
+              lines.append(f"- `{failure_id}` (`firstDiffPath={first_diff_path}`)")
+
+          consistency_path = Path("build/reports/r3-failure-ledger/r3-ledger-official-consistency.md")
+          if consistency_path.exists():
+              lines.append("")
+              lines.append("Consistency snapshot:")
+              lines.append("")
+              lines.extend(consistency_path.read_text(encoding="utf-8").strip().splitlines()[:30])
+
+          body = "\n".join(lines)
+          issue = os.environ.get("TRIAGE_ISSUE_NUMBER", "378")
+          subprocess.run(["gh", "issue", "comment", issue, "--body", body], check=True)
+          print(f"posted triage comment to issue #{issue}")
           PY
 
       - name: Collect replica set diagnostics

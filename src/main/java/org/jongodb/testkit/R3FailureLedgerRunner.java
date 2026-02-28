@@ -402,14 +402,22 @@ public final class R3FailureLedgerRunner {
             markdown.append("- none\n");
         } else {
             for (final FailureLedgerEntry entry : result.entries()) {
-                markdown.append("- ").append(entry.failureId())
-                        .append(" [track=").append(entry.track())
-                        .append(", status=").append(entry.status().name())
-                        .append("] ").append(entry.message())
+                markdown.append("- failureId=").append(entry.failureId())
+                        .append(" firstDiffPath=").append(emptyToPlaceholder(entry.firstDiffPath()))
+                        .append(" track=").append(entry.track())
+                        .append(" status=").append(entry.status().name())
+                        .append(" primaryCommand=").append(entry.primaryCommand())
+                        .append(" errorKey=").append(entry.errorKey())
+                        .append(" message=").append(entry.message())
                         .append('\n');
             }
         }
         return markdown.toString();
+    }
+
+    private static String emptyToPlaceholder(final String value) {
+        final String normalized = value == null ? "" : value.trim();
+        return normalized.isEmpty() ? "<none>" : normalized;
     }
 
     private static boolean containsHelpFlag(final String[] args) {

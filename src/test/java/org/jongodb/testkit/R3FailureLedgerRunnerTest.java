@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class R3FailureLedgerRunnerTest {
+    private static final String UNREACHABLE_MONGO_URI =
+            "mongodb://example:27017/?serverSelectionTimeoutMS=100&connectTimeoutMS=100&socketTimeoutMS=100";
+
     @TempDir
     Path tempDir;
 
@@ -46,7 +49,7 @@ class R3FailureLedgerRunnerTest {
                 specRepoRoot,
                 tempDir.resolve("out"),
                 "seed-r3",
-                "mongodb://example",
+                UNREACHABLE_MONGO_URI,
                 10,
                 UnifiedSpecImporter.ImportProfile.STRICT,
                 false,
@@ -77,6 +80,8 @@ class R3FailureLedgerRunnerTest {
         final String markdown = Files.readString(artifactPaths.markdownArtifact());
         assertTrue(markdown.contains("distinct: 1"));
         assertTrue(markdown.contains("importProfile: strict"));
+        assertTrue(markdown.contains("failureId="));
+        assertTrue(markdown.contains("firstDiffPath="));
         assertTrue(R3FailureLedgerRunner.hasGateFailure(first));
     }
 
@@ -96,7 +101,7 @@ class R3FailureLedgerRunnerTest {
                 specRepoRoot,
                 tempDir.resolve("out-pass"),
                 "seed-r3-pass",
-                "mongodb://example",
+                UNREACHABLE_MONGO_URI,
                 10,
                 UnifiedSpecImporter.ImportProfile.STRICT,
                 true,
@@ -123,7 +128,7 @@ class R3FailureLedgerRunnerTest {
                 tempDir.resolve("missing-spec-root"),
                 tempDir.resolve("out-missing"),
                 "seed-r3-missing",
-                "mongodb://example",
+                UNREACHABLE_MONGO_URI,
                 10,
                 UnifiedSpecImporter.ImportProfile.STRICT,
                 true,
