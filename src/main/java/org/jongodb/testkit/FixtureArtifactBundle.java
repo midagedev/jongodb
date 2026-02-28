@@ -39,6 +39,7 @@ final class FixtureArtifactBundle {
     static final String PORTABLE_FILE = "fixture-portable.ejsonl.gz";
     static final String FAST_FILE = "fixture-fast-snapshot.bin";
     static final String SCHEMA_VERSION = "fixture-artifact.v1";
+    static final String ARTIFACT_FORMAT_VERSION = "dual-artifact.v1";
     static final String PORTABLE_FORMAT_VERSION = "portable-ejsonl-gzip.v1";
     static final String FAST_FORMAT_VERSION = "fast-snapshot.v1";
 
@@ -51,7 +52,9 @@ final class FixtureArtifactBundle {
     static WriteResult writeBundleFromNdjson(
             final Path inputDir,
             final Path outputDir,
-            final String engineVersion) throws IOException {
+            final String engineVersion,
+            final String fixtureVersion,
+            final Path previousManifestPath) throws IOException {
         final Map<String, List<Document>> collections = loadNdjsonCollections(inputDir);
         if (collections.isEmpty()) {
             throw new IllegalArgumentException("no ndjson files found in input dir: " + inputDir);
@@ -67,10 +70,19 @@ final class FixtureArtifactBundle {
 
         final String portableSha = sha256Hex(portablePath);
         final String fastSha = sha256Hex(fastPath);
+        final String dataSchemaHash = dataSchemaHash(collections);
 
         writeManifest(
                 outputDir.resolve(MANIFEST_FILE),
-                manifestDocument(collections, totalDocuments, engineVersion, portableSha, fastSha));
+                manifestDocument(
+                        collections,
+                        totalDocuments,
+                        engineVersion,
+                        fixtureVersion,
+                        dataSchemaHash,
+                        portableSha,
+                        fastSha,
+                        buildChangelog(previousManifestPath, collections, totalDocuments)));
 
         return new WriteResult(
                 outputDir.resolve(MANIFEST_FILE),
@@ -80,13 +92,16 @@ final class FixtureArtifactBundle {
                 totalDocuments,
                 portableSha,
                 fastSha,
-                engineVersion);
+                engineVersion,
+                fixtureVersion,
+                dataSchemaHash);
     }
 
     static LoadResult tryLoadBundle(
             final Path inputDir,
             final boolean regenerateFastCache,
             final String currentEngineVersion,
+            final String requiredFixtureVersion,
             final PrintStream out) throws IOException {
         final Path manifestPath = inputDir.resolve(MANIFEST_FILE);
         if (!Files.exists(manifestPath)) {
@@ -99,6 +114,18 @@ final class FixtureArtifactBundle {
         if (!SCHEMA_VERSION.equals(schemaVersion)) {
             diagnostics.add("artifact manifest schemaVersion is unsupported: " + schemaVersion);
             return new LoadResult(SourceFormat.NDJSON, Map.of(), List.copyOf(diagnostics));
+        }
+        enforceRequiredFixtureVersion(manifest, requiredFixtureVersion);
+
+        final String artifactFormatVersion = manifest.getString("artifactFormatVersion");
+        if (artifactFormatVersion != null && !artifactFormatVersion.isBlank()
+                && !ARTIFACT_FORMAT_VERSION.equals(artifactFormatVersion)) {
+            throw new IllegalArgumentException(
+                    "unsupported artifactFormatVersion="
+                            + artifactFormatVersion
+                            + " (supported="
+                            + ARTIFACT_FORMAT_VERSION
+                            + ")");
         }
 
         final String manifestFastVersion = manifest.getString("fastFormatVersion");
@@ -320,13 +347,19 @@ final class FixtureArtifactBundle {
             final Map<String, List<Document>> collections,
             final int totalDocuments,
             final String engineVersion,
+            final String fixtureVersion,
+            final String dataSchemaHash,
             final String portableSha,
-            final String fastSha) {
+            final String fastSha,
+            final List<String> changelog) {
         final Document root = new Document();
         root.put("schemaVersion", SCHEMA_VERSION);
+        root.put("artifactFormatVersion", ARTIFACT_FORMAT_VERSION);
         root.put("portableFormatVersion", PORTABLE_FORMAT_VERSION);
         root.put("fastFormatVersion", FAST_FORMAT_VERSION);
         root.put("engineVersion", engineVersion);
+        root.put("fixtureVersion", fixtureVersion);
+        root.put("dataSchemaHash", dataSchemaHash);
         root.put("createdAt", Instant.now().toString());
 
         root.put(
@@ -350,6 +383,7 @@ final class FixtureArtifactBundle {
         root.put("collections", collectionSummaries);
 
         root.put("totals", new Document("collections", collectionSummaries.size()).append("documents", totalDocuments));
+        root.put("changelog", changelog);
         return root;
     }
 
@@ -374,6 +408,122 @@ final class FixtureArtifactBundle {
                 : entry.getString("file");
         final String sha256 = entry.getString("sha256") == null ? "" : entry.getString("sha256");
         return new ManifestEntry(file, sha256);
+    }
+
+    private static void enforceRequiredFixtureVersion(
+            final Document manifest,
+            final String requiredFixtureVersion) {
+        if (requiredFixtureVersion == null || requiredFixtureVersion.isBlank()) {
+            return;
+        }
+        final String actualVersion = manifest.getString("fixtureVersion");
+        if (actualVersion == null || actualVersion.isBlank()) {
+            throw new IllegalArgumentException(
+                    "incompatible fixture version: manifest does not declare fixtureVersion (required="
+                            + requiredFixtureVersion
+                            + ")");
+        }
+        if (!requiredFixtureVersion.trim().equals(actualVersion.trim())) {
+            throw new IllegalArgumentException(
+                    "incompatible fixture version: required="
+                            + requiredFixtureVersion
+                            + ", actual="
+                            + actualVersion
+                            + ". Use matching artifact version or regenerate fixture bundle.");
+        }
+    }
+
+    private static String dataSchemaHash(final Map<String, List<Document>> collections) {
+        final MessageDigest digest = sha256();
+        final List<String> namespaces = new ArrayList<>(collections.keySet());
+        namespaces.sort(String::compareTo);
+        for (final String namespace : namespaces) {
+            digest.update(namespace.getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) '\n');
+
+            final List<Document> documents = collections.getOrDefault(namespace, List.of());
+            final List<String> fields = new ArrayList<>();
+            for (final Document document : documents) {
+                fields.addAll(document.keySet());
+            }
+            fields.stream().distinct().sorted().forEach(field -> {
+                digest.update(field.getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) '\n');
+            });
+            digest.update(("docs=" + documents.size()).getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) '\n');
+        }
+        return toHex(digest.digest());
+    }
+
+    private static List<String> buildChangelog(
+            final Path previousManifestPath,
+            final Map<String, List<Document>> collections,
+            final int totalDocuments) throws IOException {
+        if (previousManifestPath == null || !Files.exists(previousManifestPath)) {
+            return List.of("initial artifact publication");
+        }
+
+        final Document previous = Document.parse(Files.readString(previousManifestPath, StandardCharsets.UTF_8));
+        final Document previousTotals = previous.get("totals", Document.class);
+        final int previousCollectionCount = previousTotals == null ? 0 : previousTotals.getInteger("collections", 0);
+        final int previousDocumentCount = previousTotals == null ? 0 : previousTotals.getInteger("documents", 0);
+        final Map<String, Integer> previousCollectionDocs = collectionCountMap(previous.get("collections"));
+
+        final List<String> changes = new ArrayList<>();
+        if (previousCollectionCount != collections.size()) {
+            changes.add("collections: " + previousCollectionCount + " -> " + collections.size());
+        }
+        if (previousDocumentCount != totalDocuments) {
+            changes.add("documents: " + previousDocumentCount + " -> " + totalDocuments);
+        }
+
+        final Map<String, Integer> currentCollectionDocs = new LinkedHashMap<>();
+        final List<String> currentNamespaces = new ArrayList<>(collections.keySet());
+        currentNamespaces.sort(String::compareTo);
+        for (final String namespace : currentNamespaces) {
+            currentCollectionDocs.put(namespace, collections.getOrDefault(namespace, List.of()).size());
+        }
+
+        final List<String> unionNamespaces = new ArrayList<>();
+        unionNamespaces.addAll(previousCollectionDocs.keySet());
+        for (final String namespace : currentCollectionDocs.keySet()) {
+            if (!unionNamespaces.contains(namespace)) {
+                unionNamespaces.add(namespace);
+            }
+        }
+        unionNamespaces.sort(String::compareTo);
+        for (final String namespace : unionNamespaces) {
+            final int before = previousCollectionDocs.getOrDefault(namespace, 0);
+            final int after = currentCollectionDocs.getOrDefault(namespace, 0);
+            if (before != after) {
+                changes.add("namespace " + namespace + ": " + before + " -> " + after);
+            }
+        }
+
+        if (changes.isEmpty()) {
+            changes.add("no collection-level delta");
+        }
+        return List.copyOf(changes);
+    }
+
+    private static Map<String, Integer> collectionCountMap(final Object rawCollections) {
+        if (!(rawCollections instanceof List<?> list)) {
+            return Map.of();
+        }
+        final Map<String, Integer> counts = new LinkedHashMap<>();
+        for (final Object item : list) {
+            if (!(item instanceof Document document)) {
+                continue;
+            }
+            final String namespace = document.getString("namespace");
+            final Integer count = document.getInteger("documents");
+            if (namespace == null || namespace.isBlank() || count == null) {
+                continue;
+            }
+            counts.put(namespace, count);
+        }
+        return Map.copyOf(counts);
     }
 
     private static void verifyChecksum(
@@ -485,7 +635,9 @@ final class FixtureArtifactBundle {
             int documents,
             String portableSha256,
             String fastSha256,
-            String engineVersion) {}
+            String engineVersion,
+            String fixtureVersion,
+            String dataSchemaHash) {}
 
     record LoadResult(
             SourceFormat sourceFormat,

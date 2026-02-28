@@ -400,6 +400,8 @@ tasks.register<JavaExec>("fixtureArtifactPack") {
     val inputDir = (findProperty("fixtureArtifactInputDir") as String?)?.trim().orEmpty()
     val outputDir = (findProperty("fixtureArtifactOutputDir") as String?)?.trim().orEmpty()
     val engineVersion = (findProperty("fixtureArtifactEngineVersion") as String?)?.trim().orEmpty()
+    val fixtureVersion = (findProperty("fixtureArtifactVersion") as String?)?.trim().orEmpty().ifBlank { "0.1.0" }
+    val previousManifest = (findProperty("fixtureArtifactPreviousManifest") as String?)?.trim().orEmpty()
 
     doFirst {
         if (inputDir.isBlank()) {
@@ -412,10 +414,59 @@ tasks.register<JavaExec>("fixtureArtifactPack") {
 
     args(
         "--input-dir=$inputDir",
-        "--output-dir=$outputDir"
+        "--output-dir=$outputDir",
+        "--fixture-version=$fixtureVersion"
     )
     if (engineVersion.isNotBlank()) {
         args("--engine-version=$engineVersion")
+    }
+    if (previousManifest.isNotBlank()) {
+        args("--previous-manifest=$previousManifest")
+    }
+}
+
+tasks.register<JavaExec>("fixtureArtifactGovernance") {
+    group = "verification"
+    description = "Applies fixture artifact retention/version governance and renders reports."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureArtifactGovernanceTool")
+
+    val artifactRoot = (findProperty("fixtureArtifactRoot") as String?)?.trim().orEmpty()
+    val retain = (findProperty("fixtureArtifactRetain") as String?)?.trim().orEmpty().ifBlank { "5" }
+    val freezeVersion = (findProperty("fixtureArtifactFreezeVersion") as String?)?.trim().orEmpty()
+    val usageIndex = (findProperty("fixtureArtifactUsageIndex") as String?)?.trim().orEmpty()
+    val registerConsumer = (findProperty("fixtureArtifactRegisterConsumer") as String?)?.trim().orEmpty()
+    val registerVersion = (findProperty("fixtureArtifactRegisterVersion") as String?)?.trim().orEmpty()
+    val reportDir = (findProperty("fixtureArtifactReportDir") as String?)?.trim().orEmpty()
+    val dryRun = (findProperty("fixtureArtifactDryRun") as String?)?.toBoolean() ?: false
+
+    doFirst {
+        if (artifactRoot.isBlank()) {
+            throw GradleException("fixtureArtifactRoot property is required")
+        }
+    }
+
+    args(
+        "--artifact-root=$artifactRoot",
+        "--retain=$retain"
+    )
+    if (freezeVersion.isNotBlank()) {
+        args("--freeze-version=$freezeVersion")
+    }
+    if (usageIndex.isNotBlank()) {
+        args("--usage-index=$usageIndex")
+    }
+    if (registerConsumer.isNotBlank()) {
+        args("--register-consumer=$registerConsumer")
+    }
+    if (registerVersion.isNotBlank()) {
+        args("--register-version=$registerVersion")
+    }
+    if (reportDir.isNotBlank()) {
+        args("--report-dir=$reportDir")
+    }
+    if (dryRun) {
+        args("--dry-run")
     }
 }
 
@@ -476,6 +527,7 @@ tasks.register<JavaExec>("fixtureRestore") {
     val database = (findProperty("fixtureRestoreDatabase") as String?)?.trim().orEmpty()
     val namespace = (findProperty("fixtureRestoreNamespace") as String?)?.trim().orEmpty()
     val reportDir = (findProperty("fixtureRestoreReportDir") as String?)?.trim().orEmpty()
+    val requiredFixtureVersion = (findProperty("fixtureRestoreRequiredFixtureVersion") as String?)?.trim().orEmpty()
     val regenerateFastCache = (findProperty("fixtureRestoreRegenerateFastCache") as String?)?.toBoolean() ?: true
 
     doFirst {
@@ -500,6 +552,9 @@ tasks.register<JavaExec>("fixtureRestore") {
     }
     if (reportDir.isNotBlank()) {
         args("--report-dir=$reportDir")
+    }
+    if (requiredFixtureVersion.isNotBlank()) {
+        args("--required-fixture-version=$requiredFixtureVersion")
     }
     args(if (regenerateFastCache) "--regenerate-fast-cache" else "--no-regenerate-fast-cache")
 }

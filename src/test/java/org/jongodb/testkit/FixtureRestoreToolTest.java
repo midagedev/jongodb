@@ -202,4 +202,41 @@ class FixtureRestoreToolTest {
             assertTrue(Files.exists(artifactDir.resolve("fixture-fast-snapshot.bin")));
         }
     }
+
+    @Test
+    void failsWhenRequiredFixtureVersionDoesNotMatch(@TempDir final Path tempDir) throws Exception {
+        final Path fixtureDir = tempDir.resolve("fixture");
+        final Path artifactDir = tempDir.resolve("artifact");
+        Files.createDirectories(fixtureDir);
+        Files.writeString(
+                fixtureDir.resolve("app.users.ndjson"),
+                "{\"_id\":1,\"name\":\"alpha\"}\n",
+                StandardCharsets.UTF_8);
+
+        assertEquals(0, FixtureArtifactTool.run(
+                new String[] {
+                    "--input-dir=" + fixtureDir,
+                    "--output-dir=" + artifactDir,
+                    "--fixture-version=1.2.0"
+                },
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(new ByteArrayOutputStream())));
+
+        try (TcpMongoServer server = TcpMongoServer.inMemory()) {
+            server.start();
+            final String uri = server.connectionString("app");
+            final ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+            final int exitCode = FixtureRestoreTool.run(
+                    new String[] {
+                        "--input-dir=" + artifactDir,
+                        "--mongo-uri=" + uri,
+                        "--mode=replace",
+                        "--required-fixture-version=2.0.0"
+                    },
+                    new PrintStream(new ByteArrayOutputStream()),
+                    new PrintStream(errBytes));
+            assertEquals(1, exitCode);
+            assertTrue(errBytes.toString().contains("incompatible fixture version"));
+        }
+    }
 }

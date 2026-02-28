@@ -16,20 +16,25 @@
 
 manifest에는 다음이 포함됩니다.
 - `schemaVersion`, `portableFormatVersion`, `fastFormatVersion`
+- `fixtureVersion`, `dataSchemaHash`, `artifactFormatVersion`
 - `engineVersion`
 - 각 아티팩트의 `sha256`
 - 컬렉션별 문서 수
+- `changelog`
 
 ## 실행
 
 ```bash
 .tooling/gradle-8.10.2/bin/gradle fixtureArtifactPack \
   -PfixtureArtifactInputDir=build/reports/fixture-sanitized \
-  -PfixtureArtifactOutputDir=build/reports/fixture-artifacts
+  -PfixtureArtifactOutputDir=build/reports/fixture-artifacts \
+  -PfixtureArtifactVersion=1.2.0
 ```
 
 옵션:
 - `-PfixtureArtifactEngineVersion=<version>`
+- `-PfixtureArtifactVersion=<semver>`
+- `-PfixtureArtifactPreviousManifest=<path>`
 
 ## 복원 시 호환성 정책
 `fixtureRestore`는 기본적으로 아래 순서로 입력을 선택합니다.
@@ -42,3 +47,5 @@ manifest에는 다음이 포함됩니다.
 체크섬 불일치가 감지되면 즉시 실패합니다.
 
 `fixtureRestore` 리포트(`fixture-restore-report.json`)의 `sourceFormat`으로 실제 경로를 확인할 수 있습니다.
+
+버전/보관/사용처 추적 정책은 `docs/FIXTURE_GOVERNANCE.md`를 참고하세요.
