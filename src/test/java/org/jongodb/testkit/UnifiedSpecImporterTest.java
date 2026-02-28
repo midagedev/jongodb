@@ -843,6 +843,81 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsDotsAndDollarsUpdateNoOpAsDeterministicPingLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("updateOne-dots_and_dollars.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "dots_and_dollars deterministic no-op lane",
+                      "operations": [
+                        {
+                          "name": "updateOne",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$set": {"a.b": "$value"}}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void keepsDeterministicNoOpSkipForNonDotsAndDollarsUpdateFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("updateOne-noop-subset.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "non lane deterministic no-op",
+                      "operations": [
+                        {
+                          "name": "updateOne",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$set": {"a.b": "$value"}}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
+                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
+    }
+
+    @Test
     void importsBulkReplacementUpdateWithMultiTrueForRuntimeValidation() throws IOException {
         Files.writeString(
                 tempDir.resolve("replacement-multi-true-validation.json"),

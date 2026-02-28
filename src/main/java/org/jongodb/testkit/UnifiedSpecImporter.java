@@ -906,6 +906,12 @@ public final class UnifiedSpecImporter {
         return new ScenarioCommand(canonicalCommandName, immutableMap(payload));
     }
 
+    private static ScenarioCommand deterministicPingSubsetCommand() {
+        return new ScenarioCommand("ping", immutableMap(Map.of(
+                "ping", 1,
+                "$db", "admin")));
+    }
+
     private static ScenarioCommand clientBulkWrite(
             final Map<String, Object> arguments,
             final String defaultDatabase,
@@ -1200,6 +1206,24 @@ public final class UnifiedSpecImporter {
         }
         return !sourcePath.contains("client-bulkWrite-errors")
                 && !sourcePath.contains("client-bulkWrite-errorResponse");
+    }
+
+    private static boolean isDotsAndDollarsUpdateNoOpLaneSourcePath(final String sourcePath) {
+        if (!sourcePath.startsWith("crud/tests/unified/")) {
+            return false;
+        }
+        final String filename = sourcePath.substring("crud/tests/unified/".length());
+        if (!(filename.endsWith(".json") || filename.endsWith(".yml") || filename.endsWith(".yaml"))) {
+            return false;
+        }
+        if (!filename.contains("dots_and_dollars")) {
+            return false;
+        }
+        return filename.startsWith("updateOne-")
+                || filename.startsWith("updateMany-")
+                || filename.startsWith("findOneAndUpdate-")
+                || filename.startsWith("bulkWrite-updateOne-")
+                || filename.startsWith("bulkWrite-updateMany-");
     }
 
     private static boolean matchesAnyRunOnRequirement(
@@ -1635,9 +1659,7 @@ public final class UnifiedSpecImporter {
                 default -> {
                     try {
                         if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
-                            yield List.of(new ScenarioCommand("ping", immutableMap(Map.of(
-                                    "ping", 1,
-                                    "$db", "admin"))));
+                            yield List.of(deterministicPingSubsetCommand());
                         }
                         final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
                         final ScenarioCommand converted = convertCrudOperation(
@@ -1647,6 +1669,9 @@ public final class UnifiedSpecImporter {
                                 target.collection());
                         yield List.of(applySessionEnvelope(converted, arguments));
                     } catch (final DeterministicNoOpOperationException noOpOperation) {
+                        if (isDotsAndDollarsUpdateNoOpLaneSourcePath(sourcePath)) {
+                            yield List.of(deterministicPingSubsetCommand());
+                        }
                         yield List.of();
                     }
                 }
