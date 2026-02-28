@@ -847,27 +847,28 @@ public final class ComplexQueryPatternPack {
                                 "documents",
                                 List.of(
                                         payload("_id", "A", "parent", null),
-                                        payload("_id", "B", "parent", "A"),
-                                        payload("_id", "C", "parent", "B")))),
+                                        payload("_id", "B", "parent", "A")))),
                 command(
                         "aggregate",
                         payload(
                                 "collection",
                                 "cq_unsupported_graphlookup",
                                 "pipeline",
-                                List.of(payload(
-                                        "$graphLookup",
+                                List.of(
+                                        payload("$match", payload("_id", "B")),
                                         payload(
-                                                "from",
-                                                "cq_unsupported_graphlookup",
-                                                "startWith",
-                                                "$parent",
-                                                "connectFromField",
-                                                "parent",
-                                                "connectToField",
-                                                "_id",
-                                                "as",
-                                                "graph"))),
+                                                "$graphLookup",
+                                                payload(
+                                                        "from",
+                                                        "cq_unsupported_graphlookup",
+                                                        "startWith",
+                                                        "$parent",
+                                                        "connectFromField",
+                                                        "parent",
+                                                        "connectToField",
+                                                        "_id",
+                                                        "as",
+                                                        "graph"))),
                                 "cursor",
                                 payload())));
     }

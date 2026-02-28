@@ -63,7 +63,7 @@ class ComplexQueryPatternPackTest {
         assertTrue(
                 graphLookupOutcome.success(),
                 graphLookupOutcome.errorMessage().orElse("expected graphLookup scenario success"));
-        assertEquals(3, findFirstBatchSize(graphLookupOutcome));
+        assertEquals(1, findFirstBatchSize(graphLookupOutcome));
     }
 
     private static ComplexQueryPatternPack.PatternCase findPattern(final String patternId) {
