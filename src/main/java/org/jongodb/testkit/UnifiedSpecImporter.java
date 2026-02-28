@@ -1198,6 +1198,19 @@ public final class UnifiedSpecImporter {
                     runOnContext.serverless(),
                     runOnContext.authEnabled()));
         }
+        if (isDotsAndDollarsReplaceRunOnLaneSourcePath(sourcePath)) {
+            final List<String> replaceLegacyVersions = List.of("3.4.99", "4.99");
+            for (final String laneVersion : replaceLegacyVersions) {
+                if (laneVersion.equals(runOnContext.serverVersion())) {
+                    continue;
+                }
+                laneContexts.add(RunOnContext.evaluated(
+                        laneVersion,
+                        runOnContext.topology(),
+                        runOnContext.serverless(),
+                        runOnContext.authEnabled()));
+            }
+        }
         return List.copyOf(laneContexts);
     }
 
@@ -1239,6 +1252,22 @@ public final class UnifiedSpecImporter {
         return "sessions/tests/snapshot-sessions-not-supported-server-error.json".equals(sourcePath)
                 || "sessions/tests/snapshot-sessions-not-supported-server-error.yml".equals(sourcePath)
                 || "sessions/tests/snapshot-sessions-not-supported-server-error.yaml".equals(sourcePath);
+    }
+
+    private static boolean isDotsAndDollarsReplaceRunOnLaneSourcePath(final String sourcePath) {
+        if (!sourcePath.startsWith("crud/tests/unified/")) {
+            return false;
+        }
+        final String filename = sourcePath.substring("crud/tests/unified/".length());
+        return "replaceOne-dots_and_dollars.json".equals(filename)
+                || "replaceOne-dots_and_dollars.yml".equals(filename)
+                || "replaceOne-dots_and_dollars.yaml".equals(filename)
+                || "findOneAndReplace-dots_and_dollars.json".equals(filename)
+                || "findOneAndReplace-dots_and_dollars.yml".equals(filename)
+                || "findOneAndReplace-dots_and_dollars.yaml".equals(filename)
+                || "bulkWrite-replaceOne-dots_and_dollars.json".equals(filename)
+                || "bulkWrite-replaceOne-dots_and_dollars.yml".equals(filename)
+                || "bulkWrite-replaceOne-dots_and_dollars.yaml".equals(filename);
     }
 
     private static boolean isDotsAndDollarsUpdateNoOpLaneSourcePath(final String sourcePath) {
