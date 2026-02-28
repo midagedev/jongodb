@@ -538,6 +538,50 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsBulkReplacementUpdateWithMultiTrueForRuntimeValidation() throws IOException {
+        Files.writeString(
+                tempDir.resolve("replacement-multi-true-validation.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "bulk replacement update with multi=true",
+                      "operations": [
+                        {
+                          "name": "bulkWrite",
+                          "arguments": {
+                            "requests": [
+                              {
+                                "updateMany": {
+                                  "filter": {"_id": 1},
+                                  "update": {"name": "next"}
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        final Object operationsValue = scenario.commands().get(0).payload().get("operations");
+        assertTrue(operationsValue instanceof List<?>);
+        assertEquals(1, ((List<?>) operationsValue).size());
+    }
+
+    @Test
     void marksMergeStageAndBypassValidationTrueAsUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-aggregation.json"),
