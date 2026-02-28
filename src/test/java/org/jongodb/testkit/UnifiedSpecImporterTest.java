@@ -444,12 +444,14 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(1, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().allMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED));
+        assertEquals(2, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
 
-        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        final Scenario scenario = result.importedScenarios().stream()
+                .map(UnifiedSpecImporter.ImportedScenario::scenario)
+                .filter(candidate -> candidate.description().equals("update with arrayFilters"))
+                .findFirst()
+                .orElseThrow();
         assertEquals("update", scenario.commands().get(0).commandName());
         final Object updatesValue = scenario.commands().get(0).payload().get("updates");
         assertTrue(updatesValue instanceof List<?>);
@@ -1320,6 +1322,46 @@ class UnifiedSpecImporterTest {
         final Object documentsValue = scenario.commands().get(0).payload().get("documents");
         assertTrue(documentsValue instanceof List<?>);
         assertEquals(2, ((List<?>) documentsValue).size());
+    }
+
+    @Test
+    void importsInsertManyOrderedFalseForExecutionParity() throws IOException {
+        Files.writeString(
+                tempDir.resolve("insert-many-ordered-false.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "insertMany ordered false subset",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"ordered": false, "documents": [
+                          {"_id": 1, "name": "alpha"},
+                          {"_id": 2, "name": "beta"}
+                        ]}},
+                        {"name": "countDocuments", "arguments": {"filter": {}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("insert", scenario.commands().get(0).commandName());
+        assertEquals(Boolean.FALSE, scenario.commands().get(0).payload().get("ordered"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+        final Map<String, Object> countResult = outcome.commandResults().get(1);
+        assertEquals(2L, ((Number) countResult.get("n")).longValue());
+        assertEquals(2L, ((Number) countResult.get("count")).longValue());
     }
 
     @Test

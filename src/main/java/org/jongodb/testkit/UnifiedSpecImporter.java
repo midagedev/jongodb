@@ -294,9 +294,6 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        if (Boolean.FALSE.equals(arguments.get("ordered"))) {
-            throw new UnsupportedOperationException("unsupported UTF insertMany option: ordered=false");
-        }
         final List<Object> documents = asList(arguments.get("documents"), "insertMany.arguments.documents");
         final List<Object> copied = new ArrayList<>(documents.size());
         for (final Object document : documents) {
@@ -305,6 +302,7 @@ public final class UnifiedSpecImporter {
         }
         final Map<String, Object> payload = commandEnvelope("insert", database, collection);
         payload.put("documents", List.copyOf(copied));
+        copyIfPresent(arguments, payload, "ordered");
         return new ScenarioCommand("insert", immutableMap(payload));
     }
 
