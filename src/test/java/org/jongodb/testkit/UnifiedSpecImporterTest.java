@@ -1336,6 +1336,7 @@ class UnifiedSpecImporterTest {
                         {"name": "listIndexes", "arguments": {"databaseName": "app", "collectionName": "users"}},
                         {"name": "createCollection", "arguments": {"collection": "users_view", "viewOn": "users", "pipeline": [{"$match": {"_id": {"$gt": 0}}}]}},
                         {"name": "assertCollectionExists", "arguments": {"databaseName": "app", "collectionName": "users"}},
+                        {"name": "assertIndexExists", "arguments": {"databaseName": "app", "collectionName": "users", "indexName": "_id_"}},
                         {"name": "assertCollectionNotExists", "arguments": {"databaseName": "app", "collectionName": "users_shadow"}},
                         {"name": "assertIndexNotExists", "arguments": {"databaseName": "app", "collectionName": "users", "indexName": "ix_missing"}},
                         {"name": "dropCollection"},
@@ -1390,6 +1391,38 @@ class UnifiedSpecImporterTest {
         final Scenario scenario = result.importedScenarios().get(0).scenario();
         assertEquals(1, scenario.commands().size());
         assertEquals("insert", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void importsAssertIndexExistsAsNoOpSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("assert-index-exists-noop-subset.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "assertIndexExists no-op subset",
+                      "operations": [
+                        {"name": "createIndex", "arguments": {"name": "name_1", "key": {"name": 1}}},
+                        {"name": "assertIndexExists", "arguments": {"databaseName": "app", "collectionName": "users", "indexName": "name_1"}},
+                        {"name": "insertOne", "arguments": {"document": {"_id": 1, "name": "alpha"}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("createIndexes", scenario.commands().get(0).commandName());
+        assertEquals("insert", scenario.commands().get(1).commandName());
     }
 
     @Test

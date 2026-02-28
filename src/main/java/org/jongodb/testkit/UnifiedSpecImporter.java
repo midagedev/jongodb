@@ -1656,6 +1656,7 @@ public final class UnifiedSpecImporter {
                         "listIndexes",
                         "assertCollectionExists",
                         "assertCollectionNotExists",
+                        "assertIndexExists",
                         "assertIndexNotExists",
                         "assertSessionNotDirty",
                         "assertSessionPinned",
