@@ -6,7 +6,9 @@ on:
       canary_input_json:
         description: "Path to canary project result JSON"
         required: false
-        default: "testkit/canary/r3/projects.sample.json"
+        default: "testkit/canary/r3/projects.mainline.json"
+  schedule:
+    - cron: "30 3 * * *"
 
 permissions:
   contents: read
@@ -16,6 +18,9 @@ jobs:
     name: Generate R3 canary certification
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      R3_CANARY_INPUT_JSON: testkit/canary/r3/projects.mainline.json
+      R3_CANARY_OUTPUT_DIR: build/reports/r3-canary
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,12 +39,88 @@ jobs:
       - name: Run R3 canary certification
         run: |
           gradle --no-daemon --stacktrace \
-            -Pr3CanaryInputJson="${{ github.event.inputs.canary_input_json || 'testkit/canary/r3/projects.sample.json' }}" \
-            -Pr3CanaryOutputDir="build/reports/r3-canary" \
+            -Pr3CanaryInputJson="${{ github.event.inputs.canary_input_json || env.R3_CANARY_INPUT_JSON }}" \
+            -Pr3CanaryOutputDir="${R3_CANARY_OUTPUT_DIR}" \
             -Pr3CanaryFailOnGate=true \
             r3CanaryCertificationEvidence
 
+      - name: Publish R3 canary gate summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          cert_json = Path("build/reports/r3-canary/r2-canary-certification.json")
+          summary_md = Path("build/reports/r3-canary/r3-canary-gate-summary.md")
+          input_json = "${{ github.event.inputs.canary_input_json || env.R3_CANARY_INPUT_JSON }}"
+
+          if not cert_json.exists():
+              lines = [
+                  "# R3 Canary Gate Summary",
+                  "",
+                  "- gate: MISSING",
+                  f"- inputJson: {input_json}",
+                  "- diagnostics: certification artifact missing",
+                  "",
+                  "## Reproduce",
+                  "```bash",
+                  "gradle r3CanaryCertificationEvidence \\",
+                  f"  -Pr3CanaryInputJson=\"{input_json}\" \\",
+                  "  -Pr3CanaryOutputDir=\"build/reports/r3-canary\" \\",
+                  "  -Pr3CanaryFailOnGate=true",
+                  "```",
+                  "",
+              ]
+              summary_md.parent.mkdir(parents=True, exist_ok=True)
+              summary_md.write_text("\n".join(lines), encoding="utf-8")
+              if step_summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+                  with open(step_summary, "a", encoding="utf-8") as fp:
+                      fp.write(summary_md.read_text(encoding="utf-8"))
+              raise SystemExit(0)
+
+          payload = json.loads(cert_json.read_text(encoding="utf-8"))
+          metrics = payload.get("metrics", {})
+          diagnostics = payload.get("diagnostics", [])
+          lines = [
+              "# R3 Canary Gate Summary",
+              "",
+              f"- gate: {payload.get('overallStatus', 'UNKNOWN')}",
+              f"- inputJson: {input_json}",
+              f"- projects: {metrics.get('projectCount', 0)}",
+              f"- canaryPass: {metrics.get('canaryPass', 0)}",
+              f"- canaryFail: {metrics.get('canaryFail', 0)}",
+              f"- rollbackSuccess: {metrics.get('rollbackSuccess', 0)}",
+              f"- maxRecoverySeconds: {metrics.get('maxRecoverySeconds', 0)}",
+              "",
+              "## Diagnostics",
+          ]
+          if diagnostics:
+              for diagnostic in diagnostics:
+                  lines.append(f"- {diagnostic}")
+          else:
+              lines.append("- none")
+          lines.extend([
+              "",
+              "## Reproduce",
+              "```bash",
+              "gradle r3CanaryCertificationEvidence \\",
+              f"  -Pr3CanaryInputJson=\"{input_json}\" \\",
+              "  -Pr3CanaryOutputDir=\"build/reports/r3-canary\" \\",
+              "  -Pr3CanaryFailOnGate=true",
+              "```",
+              "",
+          ])
+          summary_md.parent.mkdir(parents=True, exist_ok=True)
+          summary_md.write_text("\n".join(lines), encoding="utf-8")
+          if step_summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+              with open(step_summary, "a", encoding="utf-8") as fp:
+                  fp.write(summary_md.read_text(encoding="utf-8"))
+          PY
+
       - name: Upload R3 canary artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: r3-canary-certification
