@@ -391,6 +391,44 @@ tasks.register<JavaExec>("fixtureSanitize") {
     args(if (failOnPii) "--fail-on-pii" else "--no-fail-on-pii")
 }
 
+tasks.register<JavaExec>("fixtureRestore") {
+    group = "verification"
+    description = "Restores fixture ndjson into target MongoDB using replace/merge mode with diagnostics report."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureRestoreTool")
+
+    val inputDir = (findProperty("fixtureRestoreInputDir") as String?)?.trim().orEmpty()
+    val mongoUri = (findProperty("fixtureRestoreMongoUri") as String?)?.trim().orEmpty()
+    val mode = (findProperty("fixtureRestoreMode") as String?)?.trim().orEmpty().ifBlank { "replace" }
+    val database = (findProperty("fixtureRestoreDatabase") as String?)?.trim().orEmpty()
+    val namespace = (findProperty("fixtureRestoreNamespace") as String?)?.trim().orEmpty()
+    val reportDir = (findProperty("fixtureRestoreReportDir") as String?)?.trim().orEmpty()
+
+    doFirst {
+        if (inputDir.isBlank()) {
+            throw GradleException("fixtureRestoreInputDir property is required")
+        }
+        if (mongoUri.isBlank()) {
+            throw GradleException("fixtureRestoreMongoUri property is required")
+        }
+    }
+
+    args(
+        "--input-dir=$inputDir",
+        "--mongo-uri=$mongoUri",
+        "--mode=$mode"
+    )
+    if (database.isNotBlank()) {
+        args("--database=$database")
+    }
+    if (namespace.isNotBlank()) {
+        args("--namespace=$namespace")
+    }
+    if (reportDir.isNotBlank()) {
+        args("--report-dir=$reportDir")
+    }
+}
+
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {
     group = "verification"
     description = "Runs canonical complex-query certification pack and enforces gate policy."
