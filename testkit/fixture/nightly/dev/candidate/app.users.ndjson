@@ -1,0 +1,4 @@
+{"_id":1,"name":"alpha","tier":"free","updatedAt":"2026-02-28T00:00:00Z"}
+{"_id":2,"name":"beta","tier":"pro","updatedAt":"2026-02-28T00:00:00Z"}
+{"_id":3,"name":"gamma-v2","tier":"free","updatedAt":"2026-02-28T00:00:00Z"}
+{"_id":4,"name":"delta","tier":"pro","updatedAt":"2026-02-28T00:00:00Z"}

@@ -1,0 +1,131 @@
+name: Fixture Nightly Refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: fixture-nightly-refresh
+  cancel-in-progress: false
+
+jobs:
+  nightly-refresh:
+    name: fixture-nightly-refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Run nightly fixture refresh with retry
+        run: |
+          set -euo pipefail
+          mkdir -p build/reports/fixture-nightly-refresh
+          retry() {
+            local tries=0
+            local max=3
+            until "$@"; do
+              tries=$((tries + 1))
+              if [ "$tries" -ge "$max" ]; then
+                return 1
+              fi
+              echo "Retry $tries/$max: $*"
+              sleep 10
+            done
+          }
+
+          retry gradle --no-daemon --stacktrace fixtureRefresh \
+            -PfixtureRefreshBaselineDir=testkit/fixture/nightly/dev/baseline \
+            -PfixtureRefreshCandidateDir=testkit/fixture/nightly/dev/candidate \
+            -PfixtureRefreshOutputDir=build/reports/fixture-nightly-refresh \
+            -PfixtureRefreshMode=incremental \
+            -PfixtureRefreshWarnThreshold=0.25 \
+            -PfixtureRefreshFailThreshold=0.60 \
+            -PfixtureRefreshFailOnThreshold=true
+
+      - name: Build nightly summary
+        if: always()
+        run: |
+          set -euo pipefail
+          summary_file="build/reports/fixture-nightly-refresh/summary.md"
+          report_json="build/reports/fixture-nightly-refresh/fixture-refresh-report.json"
+          drift_json="build/reports/fixture-nightly-refresh/fixture-drift-report.json"
+
+          {
+            echo "## Fixture Nightly Refresh Summary"
+            echo "- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            if [ -f "$report_json" ]; then
+              echo "- changedCollections: $(jq -r '.changedCollections' "$report_json")"
+              echo "- requiresApproval: $(jq -r '.requiresApproval' "$report_json")"
+            else
+              echo "- refresh report missing"
+            fi
+            if [ -f "$drift_json" ]; then
+              echo "- driftWarningCollections: $(jq -r '.warningCollections' "$drift_json")"
+              echo "- driftFailingCollections: $(jq -r '.failingCollections' "$drift_json")"
+            else
+              echo "- drift report missing"
+            fi
+          } > "$summary_file"
+
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-nightly-refresh-reports
+          path: build/reports/fixture-nightly-refresh
+
+      - name: Append failure reproduction commands
+        if: failure()
+        run: |
+          {
+            echo ""
+            echo "### Reproduction"
+            echo "```bash"
+            echo "gradle --no-daemon --stacktrace fixtureRefresh -PfixtureRefreshBaselineDir=testkit/fixture/nightly/dev/baseline -PfixtureRefreshCandidateDir=testkit/fixture/nightly/dev/candidate -PfixtureRefreshOutputDir=build/reports/fixture-nightly-refresh -PfixtureRefreshMode=incremental -PfixtureRefreshWarnThreshold=0.25 -PfixtureRefreshFailThreshold=0.60 -PfixtureRefreshFailOnThreshold=true"
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post nightly summary comment
+        if: always() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'build/reports/fixture-nightly-refresh/summary.md';
+            if (!fs.existsSync(path)) {
+              core.info('nightly summary not found; skipping issue comment');
+              return;
+            }
+            let body = fs.readFileSync(path, 'utf8');
+            if (process.env.JOB_STATUS !== 'success') {
+              body += '\n\n- status: failure\n- repro: `gradle --no-daemon --stacktrace fixtureRefresh -PfixtureRefreshBaselineDir=testkit/fixture/nightly/dev/baseline -PfixtureRefreshCandidateDir=testkit/fixture/nightly/dev/candidate -PfixtureRefreshOutputDir=build/reports/fixture-nightly-refresh -PfixtureRefreshMode=incremental -PfixtureRefreshWarnThreshold=0.25 -PfixtureRefreshFailThreshold=0.60 -PfixtureRefreshFailOnThreshold=true`';
+            } else {
+              body += '\n\n- status: success';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 257,
+              body
+            });
+        env:
+          JOB_STATUS: ${{ job.status }}
