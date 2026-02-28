@@ -582,7 +582,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksMergeStageAndBypassValidationTrueAsUnsupported() throws IOException {
+    void skipsMergeStageAsDeterministicNoOpSubsetAndKeepsBypassValidationTrueUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-aggregation.json"),
                 """
@@ -644,7 +644,7 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
         assertEquals(2, result.importedCount());
-        assertEquals(2, result.unsupportedCount());
+        assertEquals(1, result.unsupportedCount());
         final Scenario outScenario = result.importedScenarios().stream()
                 .map(UnifiedSpecImporter.ImportedScenario::scenario)
                 .filter(scenario -> scenario.description().equals("aggregate with out"))
@@ -659,8 +659,8 @@ class UnifiedSpecImporterTest {
         assertEquals("aggregate", outScenario.commands().get(0).commandName());
         assertEquals(Boolean.FALSE, bypassFalseScenario.commands().get(0).payload().get("bypassDocumentValidation"));
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF aggregate stage in pipeline")));
+                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
+                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
                         && skipped.reason().contains("unsupported UTF aggregate option: bypassDocumentValidation")));

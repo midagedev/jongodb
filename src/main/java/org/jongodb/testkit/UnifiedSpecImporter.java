@@ -757,6 +757,42 @@ public final class UnifiedSpecImporter {
         return false;
     }
 
+    private static boolean containsMergeStageInPipeline(final Map<String, Object> arguments) {
+        final Object pipelineValue = arguments.get("pipeline");
+        if (!(pipelineValue instanceof List<?> pipeline)) {
+            return false;
+        }
+        for (final Object stageValue : pipeline) {
+            if (containsMergeStageValue(stageValue)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsMergeStageValue(final Object value) {
+        if (value instanceof Map<?, ?> mapValue) {
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                final String key = String.valueOf(entry.getKey());
+                if ("$merge".equals(key)) {
+                    return true;
+                }
+                if (containsMergeStageValue(entry.getValue())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (containsMergeStageValue(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static ScenarioCommand createIndex(
             final Map<String, Object> arguments,
             final String database,
@@ -1456,6 +1492,9 @@ public final class UnifiedSpecImporter {
                 case "failPoint" -> handleFailPointOperation("failPoint", arguments);
                 case "targetedFailPoint" -> handleFailPointOperation("targetedFailPoint", arguments);
                 default -> {
+                    if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
+                        yield List.of();
+                    }
                     final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
                     final ScenarioCommand converted = convertCrudOperation(
                             operationName,
