@@ -11,7 +11,7 @@ It complements the broad scorecard/failure-ledger view with a focused complex-qu
 
 ## Pack Metadata
 
-- pack version: `complex-query-pack-v1`
+- pack version: `complex-query-pack-v2`
 - canonical pattern count: `24`
 - support classes:
   - `supported`
@@ -55,6 +55,9 @@ The above metadata is published in artifact JSON under:
 - `cq.exists-null-in`
 - `cq.type-and-size`
 - `cq.nested.array-branch-composition`
+- `cq.unsupported.query-mod`
+- `cq.unsupported.expr-add`
+- `cq.unsupported.query-bitsallset`
 
 ### Partial
 
@@ -67,10 +70,7 @@ The above metadata is published in artifact JSON under:
 
 ### Explicitly Unsupported
 
-- `cq.unsupported.query-mod`
-- `cq.unsupported.expr-add`
 - `cq.unsupported.aggregate-graphlookup`
-- `cq.unsupported.query-bitsallset`
 
 ## Runner
 

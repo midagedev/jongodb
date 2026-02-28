@@ -34,7 +34,7 @@ class ComplexQueryPatternPackTest {
             }
         }
 
-        assertTrue(explicitlyUnsupportedCount >= 2, "expected explicit unsupported coverage in pattern pack");
+        assertTrue(explicitlyUnsupportedCount >= 1, "expected explicit unsupported coverage in pattern pack");
     }
 
     @Test

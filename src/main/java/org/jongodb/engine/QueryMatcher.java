@@ -144,6 +144,7 @@ final class QueryMatcher {
             case "$gte" -> evaluateExpressionComparison(document, operand, ComparisonOperator.GTE);
             case "$lt" -> evaluateExpressionComparison(document, operand, ComparisonOperator.LT);
             case "$lte" -> evaluateExpressionComparison(document, operand, ComparisonOperator.LTE);
+            case "$add" -> evaluateExpressionAdd(document, operand);
             case "$and" -> evaluateExpressionAnd(document, operand);
             case "$or" -> evaluateExpressionOr(document, operand);
             case "$not" -> evaluateExpressionNot(document, operand);
@@ -157,7 +158,7 @@ final class QueryMatcher {
     private static boolean evaluateExpressionEquality(
             final Document document, final Object operand, final boolean expectedEqual) {
         final List<Object> values = evaluateExpressionArguments(document, operand, 2, 2, "comparison");
-        final boolean equals = valueEquals(values.get(0), values.get(1));
+        final boolean equals = expressionValueEquals(values.get(0), values.get(1));
         return expectedEqual ? equals : !equals;
     }
 
@@ -174,6 +175,28 @@ final class QueryMatcher {
             case LT -> compared < 0;
             case LTE -> compared <= 0;
         };
+    }
+
+    private static Object evaluateExpressionAdd(final Document document, final Object operand) {
+        final List<Object> values = evaluateExpressionArguments(document, operand, 1, null, "$add");
+        BigDecimal sum = BigDecimal.ZERO;
+        boolean hasFloatingOperand = false;
+        for (final Object value : values) {
+            if (value == null) {
+                return null;
+            }
+            if (!(value instanceof Number numberValue)) {
+                throw new IllegalArgumentException("$expr $add supports numeric operands only");
+            }
+            if (isSpecialFloating(numberValue)) {
+                throw new IllegalArgumentException("$expr $add does not support NaN or infinite operands");
+            }
+            if (numberValue instanceof Float || numberValue instanceof Double) {
+                hasFloatingOperand = true;
+            }
+            sum = sum.add(toBigDecimal(numberValue));
+        }
+        return normalizeExpressionNumber(sum, hasFloatingOperand);
     }
 
     private static boolean evaluateExpressionAnd(final Document document, final Object operand) {
@@ -239,6 +262,24 @@ final class QueryMatcher {
             return charSequence.length() > 0;
         }
         return true;
+    }
+
+    private static boolean expressionValueEquals(final Object left, final Object right) {
+        if (left instanceof Number leftNumber && right instanceof Number rightNumber) {
+            return compareNumbers(leftNumber, rightNumber) == 0;
+        }
+        return valueEquals(left, right);
+    }
+
+    private static Number normalizeExpressionNumber(final BigDecimal value, final boolean floating) {
+        if (floating) {
+            return value.doubleValue();
+        }
+        try {
+            return value.longValueExact();
+        } catch (ArithmeticException exception) {
+            return value;
+        }
     }
 
     private static Object resolveExpressionPath(final Document document, final String path) {
