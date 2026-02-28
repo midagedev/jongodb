@@ -24,6 +24,7 @@ Usage: run-utf-shard.sh \
   --mongo-uri <uri> \
   [--suite-root <relative-path>]... \
   [--replay-limit <int>] \
+  [--runon-lanes <enabled|disabled>] \
   [--gradle-cmd <command>]
 EOF
 }
@@ -35,6 +36,7 @@ OUTPUT_DIR=""
 SEED=""
 MONGO_URI=""
 REPLAY_LIMIT="20"
+RUNON_LANES_MODE="enabled"
 GRADLE_CMD="gradle"
 SUITE_ROOTS=()
 
@@ -104,6 +106,14 @@ while (($# > 0)); do
       REPLAY_LIMIT="${2:-}"
       shift 2
       ;;
+    --runon-lanes=*)
+      RUNON_LANES_MODE="${1#*=}"
+      shift
+      ;;
+    --runon-lanes)
+      RUNON_LANES_MODE="${2:-}"
+      shift 2
+      ;;
     --gradle-cmd=*)
       GRADLE_CMD="${1#*=}"
       shift
@@ -139,6 +149,15 @@ if [ "$SHARD_COUNT" -le 0 ] || [ "$SHARD_INDEX" -ge "$SHARD_COUNT" ]; then
   log "Invalid shard configuration: index=${SHARD_INDEX}, count=${SHARD_COUNT}"
   exit 1
 fi
+
+case "${RUNON_LANES_MODE}" in
+  enabled|disabled)
+    ;;
+  *)
+    log "runon-lanes must be one of: enabled | disabled"
+    exit 1
+    ;;
+esac
 
 if [ "${#SUITE_ROOTS[@]}" -eq 0 ]; then
   SUITE_ROOTS=(
@@ -209,9 +228,9 @@ if [ "$selected_count" -le 0 ]; then
 fi
 
 SHARD_SEED="${SEED}-shard-${SHARD_INDEX}-of-${SHARD_COUNT}"
-log "Running shard ${SHARD_INDEX}/${SHARD_COUNT} with ${selected_count} files and seed=${SHARD_SEED}."
+log "Running shard ${SHARD_INDEX}/${SHARD_COUNT} with ${selected_count} files and seed=${SHARD_SEED} (runon-lanes=${RUNON_LANES_MODE})."
 
-"$GRADLE_CMD" --no-daemon \
+JONGODB_UTF_RUNON_LANES="${RUNON_LANES_MODE}" "$GRADLE_CMD" --no-daemon \
   -PutfSpecRoot="${TEMP_SHARD_ROOT}/source" \
   -PutfOutputDir="$OUTPUT_DIR" \
   -PutfSeed="$SHARD_SEED" \

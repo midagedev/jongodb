@@ -2,120 +2,111 @@
 
 Status date: 2026-02-28
 
-This scorecard tracks integration-test compatibility against MongoDB official specs.
-It is not a production MongoDB parity claim.
+This scorecard tracks MongoDB UTF compatibility progress with a focus on `runOnRequirements not satisfied` reduction while preserving differential stability (`mismatch=0`, `error=0`).
 
-## Scope
+## Lane model
 
-- Historical baseline: Official Suite Sharded run `22339640229`.
-- Current target: `origin/main` commit `d2ba61b`.
-- Primary objective: increase imported differential coverage while keeping mismatch/error at zero.
+- Strict lane (baseline): runOn lane overrides disabled.
+  - Control: `JONGODB_UTF_RUNON_LANES=disabled`
+  - Purpose: keep topology/version gate behavior fully strict.
+- Extended lane (compatibility expansion): runOn lane overrides enabled (default).
+  - Control: `JONGODB_UTF_RUNON_LANES=enabled`
+  - Purpose: admit deterministic subsets that are blocked only by non-actionable runOn constraints.
 
-## Evidence Sources
+Current lane buckets:
 
-| Evidence | Source run / artifact | Result |
-| --- | --- | --- |
-| Official UTF sharded differential (current) | GitHub Actions `Official Suite Sharded` run `22516323868`, artifact `utf-shard-summary/utf-shard-summary.md` | PASS (`total=508`, `match=508`, `mismatch=0`, `error=0`) |
-| R3 failure ledger (current) | GitHub Actions `R3 Failure Ledger` run `22516324202`, artifact `r3-failure-ledger/r3-failure-ledger.json` | PASS (`failureCount=0`) |
-| Complex-query certification (canonical pack) | GitHub Actions `Complex Query Certification` run `22516137734`, artifact `complex-query-certification/complex-query-certification.json` | PASS (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`) |
-| External canary certification (latest success) | GitHub Actions `R3 External Canary Certification` run `22378993613` | PASS (3-project canary set) |
-| Release-readiness streak | `r3-release-readiness-streak.json` from run `22516324202` | Not yet satisfied (`minStreak=3`, counters `0/1`) |
+- `mongos-pin-auto` topology lane (`transactions/tests/unified/mongos-pin-auto.{json,yml}`)
+- hint legacy version lane (`crud/tests/unified/*-hint-*` + `unacknowledged|clientError|serverError`)
+- `client-bulkWrite` version lane (excluding `client-bulkWrite-errors*` / `client-bulkWrite-errorResponse*`)
 
-## Baseline vs Current
+## Latest local progression (strict profile, shard 0-of-1)
 
-| Metric | Baseline (`22339640229`) | Current (`22516324202`) | Delta |
-| --- | --- | --- | --- |
-| imported | 200 | 508 | +308 |
-| skipped | 567 | 851 | +284 |
-| unsupported | 814 | 222 | -592 |
-| total differential cases | 200 | 508 | +308 |
-| match | 146 | 508 | +362 |
-| mismatch | 54 | 0 | -54 |
-| error | 0 | 0 | 0 |
+Evidence files:
 
-## Current R3 Ledger Snapshot
+- `build/reports/utf-shard-issue406b/utf-differential-report.json`
+- `build/reports/utf-shard-issue422c/utf-differential-report.json`
+- `build/reports/utf-shard-issue424/utf-differential-report.json`
+- `build/reports/utf-shard-issue423c/utf-differential-report.json`
 
-| Suite | Imported | Skipped | Unsupported | Mismatch | Error |
-| --- | --- | --- | --- | --- | --- |
-| `crud-unified` | 328 | 700 | 44 | 0 | 0 |
-| `transactions-unified` | 164 | 127 | 140 | 0 | 0 |
-| `sessions` | 16 | 24 | 38 | 0 | 0 |
+| Checkpoint | imported | skipped | unsupported | mismatch | error | runOn total | mongos lane | hint lane | client-bulkWrite lane | runOn remaining |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| issue406b (baseline) | 810 | 605 | 166 | 0 | 0 | 519 | 59 | 128 | 104 | 228 |
+| issue422c | 866 | 549 | 166 | 0 | 0 | 463 | 3 | 128 | 104 | 228 |
+| issue424 | 994 | 421 | 166 | 0 | 0 | 335 | 3 | 0 | 104 | 228 |
+| issue423c (latest) | 1072 | 343 | 166 | 0 | 0 | 251 | 3 | 0 | 20 | 228 |
 
-Current ledger gate status:
+Delta (issue406b -> issue423c):
 
-- `failureCount=0`
-- `byTrack={}`
-- `byStatus={}`
+- imported: `+262` (`810 -> 1072`)
+- skipped: `-262` (`605 -> 343`)
+- runOn not satisfied: `-268` (`519 -> 251`, `-51.64%`)
+- mismatch/error: unchanged (`0/0 -> 0/0`)
 
-## Complex Query Snapshot
+## Pilot workflow (#408)
 
-From run `22516137734`:
+Workflow: `.github/workflows/runon-lane-pilot.yml`
 
-| Metric | Value |
-| --- | --- |
-| packVersion | `complex-query-pack-v3` |
-| totalPatterns | 24 |
-| supportedPatterns | 17 |
-| supportedPass | 17 |
-| supportedPassRate | 1.0 |
-| mismatchCount | 0 |
-| errorCount | 0 |
-| unsupportedByPolicyCount | 0 |
-| unsupportedDeltaCount | 0 |
+Execution model:
 
-Recent subset closures reflected in this snapshot:
-- `#396`: `$expr.$add` certification subset.
-- `#397`: minimal `$graphLookup` certification subset.
+- Trigger: `workflow_dispatch` + daily `schedule`
+- Matrix: `shard_index=[0,1,2]`
+- Per shard, run both lanes on identical spec selection:
+  - strict: `run-utf-shard.sh --runon-lanes disabled`
+  - extended: `run-utf-shard.sh --runon-lanes enabled`
+- Summaries generated via `scripts/ci/summarize-runon-lanes.sh`
 
-## Release-Readiness Streak Snapshot
+Gates:
 
-From run `22516324202` artifact `r3-release-readiness-streak.json`:
+- strict lane stability: strict `mismatch=0` and `error=0`
+- extended no-regression: extended mismatch/error cannot exceed strict
+- runOn reduction: extended `runOnNotSatisfied` must be `<=` strict
+- coverage non-regression: extended imported must be `>=` strict
 
-- `threshold.minStreak=3`
-- `officialZeroMismatchStreak=0`
-- `r3LedgerZeroFailureStreak=1`
-- `readiness.satisfied=false`
+Artifacts:
 
-Note:
-- Streak history parsing currently reports `artifact-read-error: HTTP Error 401` for some schedule-history artifact reads, which keeps `officialZeroMismatchStreak` conservative.
+- shard artifacts: `runon-lane-pilot-shard-{0,1,2}`
+- aggregate artifact: `runon-lane-pilot-summary` (`.md` + `.json`)
 
-## Policy Exclusions
+## Current open track
 
-- `failPoint` is a policy exclusion in strict profile for deterministic in-process execution.
-- Compat profile allows only failpoint-disable subset and keeps other modes explicit unsupported.
-- Scorecard accounting distinguishes strict-profile policy exclusions as `unsupported-by-policy UTF operation: failPoint`.
-
-## Gap-to-Issue Mapping
-
-Completed compatibility-expansion issues:
-
-- `#395`: listLocalSessions regression pack and importer normalization - completed.
-- `#396`: `$expr.$add` certification subset - completed.
-- `#397`: `$graphLookup` minimal subset for certification - completed.
-- `#398`: release-readiness streak tracking and summary artifacts - completed.
-- `#100`, `#101`, `#229`, `#231`, `#232`, `#233`, `#234`, `#235`, `#236`, `#238`, `#239`, `#240`, `#241`, `#242`, `#243`, `#245`, `#265`, `#266`, `#267`, `#269` - completed.
-
-Remaining track:
-
-- `#104`: aggregate-stage unsupported reduction (remaining focus: `$merge` and advanced non-alias stages).
+- `#408` `[phase:r4] Reduce runOn-not-satisfied skips via fixture/profile strategy`
+- `#374` `[EPIC][suite] MongoDB 공식+추가 스위트 100% 달성 프로그램`
 
 ## Reproduction
 
-Run the same ledger locally:
+Run strict lane shard locally:
 
 ```bash
-./.tooling/gradle-8.10.2/bin/gradle --no-daemon \
-  -Pr3SpecRepoRoot="<path-to-mongodb-specifications>" \
-  -Pr3FailureLedgerMongoUri="<replica-set-uri>" \
-  -Pr3FailureLedgerFailOnFailures=true \
-  r3FailureLedger
+./scripts/ci/run-utf-shard.sh \
+  --spec-repo-root "<path-to-mongodb-specifications>" \
+  --shard-index 0 \
+  --shard-count 1 \
+  --output-dir build/reports/utf-shard-strict \
+  --seed local-runon-pilot \
+  --replay-limit 30 \
+  --mongo-uri "<replica-set-uri>" \
+  --runon-lanes disabled
 ```
 
-Run complex-query certification locally:
+Run extended lane shard locally:
 
 ```bash
-./.tooling/gradle-8.10.2/bin/gradle --no-daemon \
-  -PcomplexQueryMongoUri="<replica-set-uri>" \
-  -PcomplexQueryFailOnGate=true \
-  complexQueryCertificationEvidence
+./scripts/ci/run-utf-shard.sh \
+  --spec-repo-root "<path-to-mongodb-specifications>" \
+  --shard-index 0 \
+  --shard-count 1 \
+  --output-dir build/reports/utf-shard-extended \
+  --seed local-runon-pilot \
+  --replay-limit 30 \
+  --mongo-uri "<replica-set-uri>" \
+  --runon-lanes enabled
+```
+
+Summarize runOn buckets:
+
+```bash
+./scripts/ci/summarize-runon-lanes.sh \
+  --report build/reports/utf-shard-extended/utf-differential-report.json \
+  --output build/reports/utf-shard-extended/runon-lane-summary.md \
+  --output-json build/reports/utf-shard-extended/runon-lane-summary.json
 ```

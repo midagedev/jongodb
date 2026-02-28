@@ -1,0 +1,422 @@
+name: runOn Lane Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      official_specs_ref:
+        description: "Commit/tag/branch in mongodb/specifications"
+        required: false
+        default: "99704fa8860777da1d919ef765af1e41e75f5859"
+  schedule:
+    - cron: "20 5 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: runon-lane-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lane-compare:
+    name: runOn lane compare shard ${{ matrix.shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2]
+    env:
+      OFFICIAL_SPECS_REPO: https://github.com/mongodb/specifications.git
+      OFFICIAL_SPECS_REF: ${{ github.event.inputs.official_specs_ref || '99704fa8860777da1d919ef765af1e41e75f5859' }}
+      SHARD_COUNT: "3"
+      UTF_SEED: "runon-lane-pilot-v1"
+      UTF_REPLAY_LIMIT: "30"
+      REPLSET_DIAGNOSTICS_DIR: build/reports/replset-diagnostics/runon-lane-pilot-shard-${{ matrix.shard_index }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Make scripts executable
+        run: chmod +x scripts/ci/*.sh
+
+      - name: Bootstrap replica set fixture
+        run: ./scripts/ci/bootstrap-replset.sh
+
+      - name: Prepare official spec checkout
+        run: |
+          ./scripts/ci/prepare-official-specs.sh \
+            --repo "${OFFICIAL_SPECS_REPO}" \
+            --ref "${OFFICIAL_SPECS_REF}" \
+            --dest "${RUNNER_TEMP}/mongodb-specifications"
+
+      - name: Run strict lane (runOn lanes disabled)
+        run: |
+          ./scripts/ci/run-utf-shard.sh \
+            --spec-repo-root "${RUNNER_TEMP}/mongodb-specifications" \
+            --shard-index "${{ matrix.shard_index }}" \
+            --shard-count "${SHARD_COUNT}" \
+            --output-dir "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/strict" \
+            --seed "${UTF_SEED}" \
+            --replay-limit "${UTF_REPLAY_LIMIT}" \
+            --mongo-uri "${JONGODB_REAL_MONGOD_URI}" \
+            --runon-lanes disabled \
+            --gradle-cmd gradle
+
+      - name: Run extended lane (runOn lanes enabled)
+        run: |
+          ./scripts/ci/run-utf-shard.sh \
+            --spec-repo-root "${RUNNER_TEMP}/mongodb-specifications" \
+            --shard-index "${{ matrix.shard_index }}" \
+            --shard-count "${SHARD_COUNT}" \
+            --output-dir "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/extended" \
+            --seed "${UTF_SEED}" \
+            --replay-limit "${UTF_REPLAY_LIMIT}" \
+            --mongo-uri "${JONGODB_REAL_MONGOD_URI}" \
+            --runon-lanes enabled \
+            --gradle-cmd gradle
+
+      - name: Summarize strict lane runOn buckets
+        run: |
+          ./scripts/ci/summarize-runon-lanes.sh \
+            --report "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/strict/utf-differential-report.json" \
+            --label "strict-shard-${{ matrix.shard_index }}" \
+            --output "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/strict/runon-lane-summary.md" \
+            --output-json "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/strict/runon-lane-summary.json"
+
+      - name: Summarize extended lane runOn buckets
+        run: |
+          ./scripts/ci/summarize-runon-lanes.sh \
+            --report "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/extended/utf-differential-report.json" \
+            --label "extended-shard-${{ matrix.shard_index }}" \
+            --output "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/extended/runon-lane-summary.md" \
+            --output-json "build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/extended/runon-lane-summary.json"
+
+      - name: Compare strict vs extended lane
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          shard_index = "${{ matrix.shard_index }}"
+          root = Path(f"build/reports/runon-lane-pilot/shard-{shard_index}")
+          strict_path = root / "strict" / "runon-lane-summary.json"
+          extended_path = root / "extended" / "runon-lane-summary.json"
+          compare_json = root / "runon-lane-compare.json"
+          compare_md = root / "runon-lane-compare.md"
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+
+          strict = json.loads(strict_path.read_text(encoding="utf-8"))
+          extended = json.loads(extended_path.read_text(encoding="utf-8"))
+
+          strict_runon = int(strict["runOnNotSatisfied"]["total"])
+          extended_runon = int(extended["runOnNotSatisfied"]["total"])
+          strict_imported = int(strict["importSummary"]["imported"])
+          extended_imported = int(extended["importSummary"]["imported"])
+          strict_mismatch = int(strict["differentialSummary"]["mismatch"])
+          strict_error = int(strict["differentialSummary"]["error"])
+          extended_mismatch = int(extended["differentialSummary"]["mismatch"])
+          extended_error = int(extended["differentialSummary"]["error"])
+
+          runon_delta = extended_runon - strict_runon
+          imported_delta = extended_imported - strict_imported
+          runon_reduction_pct = 0.0
+          if strict_runon > 0:
+              runon_reduction_pct = ((strict_runon - extended_runon) / strict_runon) * 100.0
+
+          compare = {
+              "shardIndex": int(shard_index),
+              "strict": strict,
+              "extended": extended,
+              "delta": {
+                  "runOnNotSatisfied": runon_delta,
+                  "imported": imported_delta,
+                  "runOnReductionPercent": round(runon_reduction_pct, 2),
+                  "mismatch": extended_mismatch - strict_mismatch,
+                  "error": extended_error - strict_error,
+              },
+          }
+          compare_json.write_text(json.dumps(compare, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          lines = [
+              f"# runOn Lane Pilot Comparison (shard-{shard_index})",
+              "",
+              "## Strict lane (runOn OFF)",
+              f"- imported: {strict_imported}",
+              f"- skipped: {strict['importSummary']['skipped']}",
+              f"- unsupported: {strict['importSummary']['unsupported']}",
+              f"- mismatch: {strict_mismatch}",
+              f"- error: {strict_error}",
+              f"- runOn not satisfied: {strict_runon}",
+              "",
+              "## Extended lane (runOn ON)",
+              f"- imported: {extended_imported}",
+              f"- skipped: {extended['importSummary']['skipped']}",
+              f"- unsupported: {extended['importSummary']['unsupported']}",
+              f"- mismatch: {extended_mismatch}",
+              f"- error: {extended_error}",
+              f"- runOn not satisfied: {extended_runon}",
+              "",
+              "## Delta (extended - strict)",
+              f"- imported: {imported_delta:+d}",
+              f"- runOn not satisfied: {runon_delta:+d}",
+              f"- runOn reduction: {runon_reduction_pct:.2f}%",
+              f"- mismatch: {extended_mismatch - strict_mismatch:+d}",
+              f"- error: {extended_error - strict_error:+d}",
+          ]
+          markdown = "\n".join(lines) + "\n"
+          compare_md.write_text(markdown, encoding="utf-8")
+          print(markdown)
+
+          if step_summary:
+              with Path(step_summary).open("a", encoding="utf-8") as handle:
+                  handle.write("\n")
+                  handle.write(markdown)
+                  handle.write("\n")
+
+          failures = []
+          if strict_mismatch != 0 or strict_error != 0:
+              failures.append(
+                  f"strict lane stability gate failed: mismatch={strict_mismatch}, error={strict_error}"
+              )
+          if extended_mismatch > strict_mismatch or extended_error > strict_error:
+              failures.append(
+                  "extended lane regression gate failed: "
+                  f"strict(mismatch={strict_mismatch}, error={strict_error}) vs "
+                  f"extended(mismatch={extended_mismatch}, error={extended_error})"
+              )
+          if extended_runon > strict_runon:
+              failures.append(
+                  f"runOn gate failed: extended runOn={extended_runon} is greater than strict={strict_runon}"
+              )
+          if extended_imported < strict_imported:
+              failures.append(
+                  f"coverage gate failed: extended imported={extended_imported} is lower than strict={strict_imported}"
+              )
+
+          if failures:
+              for message in failures:
+                  print(f"::error::{message}")
+              raise SystemExit("runOn lane pilot gates failed")
+          PY
+
+      - name: Collect replica set diagnostics
+        if: always()
+        run: ./scripts/ci/collect-replset-diagnostics.sh "${REPLSET_DIAGNOSTICS_DIR}"
+
+      - name: Upload shard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runon-lane-pilot-shard-${{ matrix.shard_index }}
+          path: |
+            build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/**/*.json
+            build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/**/*.md
+            build/reports/runon-lane-pilot/shard-${{ matrix.shard_index }}/**/*.txt
+            build/reports/replset-diagnostics/runon-lane-pilot-shard-${{ matrix.shard_index }}/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Teardown replica set fixture
+        if: always()
+        run: ./scripts/ci/teardown-replset.sh
+
+  aggregate-summary:
+    name: runOn lane pilot aggregate summary
+    runs-on: ubuntu-latest
+    needs: [lane-compare]
+    if: always()
+    steps:
+      - name: Download shard 0 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runon-lane-pilot-shard-0
+          path: artifacts/shard-0
+
+      - name: Download shard 1 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runon-lane-pilot-shard-1
+          path: artifacts/shard-1
+
+      - name: Download shard 2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runon-lane-pilot-shard-2
+          path: artifacts/shard-2
+
+      - name: Build aggregate comparison summary
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          shard_roots = [Path("artifacts/shard-0"), Path("artifacts/shard-1"), Path("artifacts/shard-2")]
+          summary_json = Path("artifacts/runon-lane-pilot-summary.json")
+          summary_md = Path("artifacts/runon-lane-pilot-summary.md")
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+
+          strict_totals = {"imported": 0, "runOnNotSatisfied": 0, "mismatch": 0, "error": 0}
+          extended_totals = {"imported": 0, "runOnNotSatisfied": 0, "mismatch": 0, "error": 0}
+          shard_rows = []
+
+          for index, root in enumerate(shard_roots):
+              compare_path = next(root.glob("**/runon-lane-compare.json"), None)
+              if compare_path is None:
+                  raise SystemExit(f"missing runon-lane-compare.json for shard-{index}")
+              compare = json.loads(compare_path.read_text(encoding="utf-8"))
+              strict = compare["strict"]
+              extended = compare["extended"]
+
+              strict_imported = int(strict["importSummary"]["imported"])
+              strict_runon = int(strict["runOnNotSatisfied"]["total"])
+              strict_mismatch = int(strict["differentialSummary"]["mismatch"])
+              strict_error = int(strict["differentialSummary"]["error"])
+              extended_imported = int(extended["importSummary"]["imported"])
+              extended_runon = int(extended["runOnNotSatisfied"]["total"])
+              extended_mismatch = int(extended["differentialSummary"]["mismatch"])
+              extended_error = int(extended["differentialSummary"]["error"])
+
+              strict_totals["imported"] += strict_imported
+              strict_totals["runOnNotSatisfied"] += strict_runon
+              strict_totals["mismatch"] += strict_mismatch
+              strict_totals["error"] += strict_error
+              extended_totals["imported"] += extended_imported
+              extended_totals["runOnNotSatisfied"] += extended_runon
+              extended_totals["mismatch"] += extended_mismatch
+              extended_totals["error"] += extended_error
+
+              shard_rows.append({
+                  "shard": index,
+                  "strict": {
+                      "imported": strict_imported,
+                      "runOnNotSatisfied": strict_runon,
+                      "mismatch": strict_mismatch,
+                      "error": strict_error,
+                  },
+                  "extended": {
+                      "imported": extended_imported,
+                      "runOnNotSatisfied": extended_runon,
+                      "mismatch": extended_mismatch,
+                      "error": extended_error,
+                  },
+              })
+
+          runon_delta = extended_totals["runOnNotSatisfied"] - strict_totals["runOnNotSatisfied"]
+          imported_delta = extended_totals["imported"] - strict_totals["imported"]
+          runon_reduction_pct = 0.0
+          if strict_totals["runOnNotSatisfied"] > 0:
+              runon_reduction_pct = (
+                  (strict_totals["runOnNotSatisfied"] - extended_totals["runOnNotSatisfied"])
+                  / strict_totals["runOnNotSatisfied"]
+              ) * 100.0
+
+          failures = []
+          if strict_totals["mismatch"] != 0 or strict_totals["error"] != 0:
+              failures.append(
+                  "strict lane aggregate stability gate failed: "
+                  f"mismatch={strict_totals['mismatch']}, error={strict_totals['error']}"
+              )
+          if extended_totals["mismatch"] > strict_totals["mismatch"] or extended_totals["error"] > strict_totals["error"]:
+              failures.append(
+                  "extended lane aggregate regression gate failed: "
+                  f"strict(mismatch={strict_totals['mismatch']}, error={strict_totals['error']}) vs "
+                  f"extended(mismatch={extended_totals['mismatch']}, error={extended_totals['error']})"
+              )
+          if extended_totals["runOnNotSatisfied"] > strict_totals["runOnNotSatisfied"]:
+              failures.append(
+                  "aggregate runOn gate failed: "
+                  f"extended={extended_totals['runOnNotSatisfied']} > strict={strict_totals['runOnNotSatisfied']}"
+              )
+          if extended_totals["imported"] < strict_totals["imported"]:
+              failures.append(
+                  "aggregate coverage gate failed: "
+                  f"extended imported={extended_totals['imported']} < strict={strict_totals['imported']}"
+              )
+
+          summary = {
+              "strictTotals": strict_totals,
+              "extendedTotals": extended_totals,
+              "delta": {
+                  "imported": imported_delta,
+                  "runOnNotSatisfied": runon_delta,
+                  "runOnReductionPercent": round(runon_reduction_pct, 2),
+                  "mismatch": extended_totals["mismatch"] - strict_totals["mismatch"],
+                  "error": extended_totals["error"] - strict_totals["error"],
+              },
+              "shards": shard_rows,
+              "gatePassed": not failures,
+              "gateFailures": failures,
+          }
+          summary_json.parent.mkdir(parents=True, exist_ok=True)
+          summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          lines = [
+              "# runOn Lane Pilot Aggregate Summary",
+              "",
+              "## Aggregate",
+              f"- strict imported: {strict_totals['imported']}",
+              f"- extended imported: {extended_totals['imported']}",
+              f"- imported delta (extended - strict): {imported_delta:+d}",
+              f"- strict runOn not satisfied: {strict_totals['runOnNotSatisfied']}",
+              f"- extended runOn not satisfied: {extended_totals['runOnNotSatisfied']}",
+              f"- runOn delta (extended - strict): {runon_delta:+d}",
+              f"- runOn reduction: {runon_reduction_pct:.2f}%",
+              f"- strict mismatch/error: {strict_totals['mismatch']}/{strict_totals['error']}",
+              f"- extended mismatch/error: {extended_totals['mismatch']}/{extended_totals['error']}",
+              "",
+              "## Per shard",
+          ]
+          for row in shard_rows:
+              lines.append(
+                  f"- shard-{row['shard']}: strict(imported={row['strict']['imported']},"
+                  f"runOn={row['strict']['runOnNotSatisfied']},mismatch={row['strict']['mismatch']},error={row['strict']['error']}) "
+                  f"extended(imported={row['extended']['imported']},runOn={row['extended']['runOnNotSatisfied']},"
+                  f"mismatch={row['extended']['mismatch']},error={row['extended']['error']})"
+              )
+
+          if failures:
+              lines.append("")
+              lines.append("## Gate failures")
+              for failure in failures:
+                  lines.append(f"- {failure}")
+
+          markdown = "\n".join(lines) + "\n"
+          summary_md.write_text(markdown, encoding="utf-8")
+          print(markdown)
+
+          if step_summary:
+              with Path(step_summary).open("a", encoding="utf-8") as handle:
+                  handle.write("\n")
+                  handle.write(markdown)
+                  handle.write("\n")
+
+          if failures:
+              for failure in failures:
+                  print(f"::error::{failure}")
+              raise SystemExit("runOn lane pilot aggregate gates failed")
+          PY
+
+      - name: Upload aggregate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runon-lane-pilot-summary
+          path: |
+            artifacts/runon-lane-pilot-summary.json
+            artifacts/runon-lane-pilot-summary.md
+          if-no-files-found: error
+          retention-days: 14

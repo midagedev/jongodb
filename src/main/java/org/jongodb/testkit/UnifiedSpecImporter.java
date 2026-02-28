@@ -23,6 +23,8 @@ public final class UnifiedSpecImporter {
     private static final String EXT_JSON = ".json";
     private static final String EXT_YAML = ".yaml";
     private static final String EXT_YML = ".yml";
+    private static final String RUN_ON_LANES_PROPERTY = "jongodb.utf.runOnLanes";
+    private static final String RUN_ON_LANES_ENV = "JONGODB_UTF_RUNON_LANES";
     private static final Map<String, String> SUPPORTED_RUN_COMMANDS = Map.of(
             "ping", "ping",
             "buildinfo", "buildInfo",
@@ -35,14 +37,20 @@ public final class UnifiedSpecImporter {
 
     private final Yaml yaml;
     private final ImportProfile profile;
+    private final boolean runOnLaneAdjustmentsEnabled;
 
     public UnifiedSpecImporter() {
         this(ImportProfile.STRICT);
     }
 
     public UnifiedSpecImporter(final ImportProfile profile) {
+        this(profile, resolveRunOnLaneAdjustmentsEnabled());
+    }
+
+    public UnifiedSpecImporter(final ImportProfile profile, final boolean runOnLaneAdjustmentsEnabled) {
         this.yaml = new Yaml();
         this.profile = Objects.requireNonNull(profile, "profile");
+        this.runOnLaneAdjustmentsEnabled = runOnLaneAdjustmentsEnabled;
     }
 
     public ImportProfile profile() {
@@ -90,7 +98,8 @@ public final class UnifiedSpecImporter {
                     spec,
                     profile,
                     sourcePath);
-            final String fileRunOnSkipReason = runOnSkipReason(spec, sourcePath, runOnContext, true);
+            final String fileRunOnSkipReason =
+                    runOnSkipReason(spec, sourcePath, runOnContext, true, runOnLaneAdjustmentsEnabled);
             final Object testsValue = spec.get("tests");
             if (!(testsValue instanceof List<?> testsRaw)) {
                 skipped.add(new SkippedCase(
@@ -135,7 +144,8 @@ public final class UnifiedSpecImporter {
                     continue;
                 }
 
-                final String runOnSkipReason = runOnSkipReason(testDefinition, sourcePath, runOnContext, true);
+                final String runOnSkipReason =
+                        runOnSkipReason(testDefinition, sourcePath, runOnContext, true, runOnLaneAdjustmentsEnabled);
                 if (runOnSkipReason != null) {
                     skipped.add(new SkippedCase(
                             caseId,
@@ -1112,7 +1122,8 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> definition,
             final String sourcePath,
             final RunOnContext runOnContext,
-            final boolean evaluateRequirements) {
+            final boolean evaluateRequirements,
+            final boolean runOnLaneAdjustmentsEnabled) {
         if (!definition.containsKey("runOnRequirements")) {
             return null;
         }
@@ -1126,12 +1137,36 @@ public final class UnifiedSpecImporter {
         if (matchesAnyRunOnRequirement(requirements, runOnContext)) {
             return null;
         }
-        for (final RunOnContext laneAdjustedContext : runOnLaneAdjustedContexts(sourcePath, runOnContext)) {
-            if (matchesAnyRunOnRequirement(requirements, laneAdjustedContext)) {
-                return null;
+        if (runOnLaneAdjustmentsEnabled) {
+            for (final RunOnContext laneAdjustedContext : runOnLaneAdjustedContexts(sourcePath, runOnContext)) {
+                if (matchesAnyRunOnRequirement(requirements, laneAdjustedContext)) {
+                    return null;
+                }
             }
         }
         return "runOnRequirements not satisfied for " + runOnContext.summary();
+    }
+
+    private static boolean resolveRunOnLaneAdjustmentsEnabled() {
+        final String configuredValue = firstNonBlank(
+                trimToEmpty(System.getProperty(RUN_ON_LANES_PROPERTY)),
+                trimToEmpty(System.getenv(RUN_ON_LANES_ENV)));
+        if (configuredValue == null) {
+            return true;
+        }
+        return parseBooleanSwitch(configuredValue, true);
+    }
+
+    private static boolean parseBooleanSwitch(final String value, final boolean defaultValue) {
+        final String normalized = trimToEmpty(value).toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return defaultValue;
+        }
+        return switch (normalized) {
+            case "true", "1", "yes", "y", "on", "enabled" -> true;
+            case "false", "0", "no", "n", "off", "disabled" -> false;
+            default -> defaultValue;
+        };
     }
 
     private static List<RunOnContext> runOnLaneAdjustedContexts(
