@@ -306,6 +306,58 @@ tasks.register<JavaExec>("inProcessTemplatePocEvidence") {
     }
 }
 
+tasks.register<JavaExec>("fixtureExtract") {
+    group = "verification"
+    description = "Extracts fixture documents from MongoDB using manifest profile with resume/report guardrails."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureExtractionTool")
+
+    val manifestPath = (findProperty("fixtureManifestPath") as String?)?.trim().orEmpty()
+    val profile = (findProperty("fixtureProfile") as String?)?.trim().orEmpty().ifBlank { "dev" }
+    val outputDir = (findProperty("fixtureOutputDir") as String?)?.trim().orEmpty()
+    val mongoUri = (findProperty("fixtureMongoUri") as String?)?.trim().orEmpty()
+    val allowUriAlias = (findProperty("fixtureAllowUriAlias") as String?)?.trim().orEmpty()
+    val readPreference = (findProperty("fixtureReadPreference") as String?)?.trim().orEmpty().ifBlank { "secondaryPreferred" }
+    val timeoutMs = (findProperty("fixtureTimeoutMs") as String?)?.trim().orEmpty().ifBlank { "30000" }
+    val batchSize = (findProperty("fixtureBatchSize") as String?)?.trim().orEmpty().ifBlank { "500" }
+    val maxDocs = (findProperty("fixtureMaxDocs") as String?)?.trim().orEmpty()
+    val rateLimitMs = (findProperty("fixtureRateLimitMs") as String?)?.trim().orEmpty().ifBlank { "0" }
+    val resume = (findProperty("fixtureResume") as String?)?.toBoolean() ?: false
+    val readonlyCheck = (findProperty("fixtureReadonlyCheck") as String?)?.trim().orEmpty().ifBlank { "best-effort" }
+
+    doFirst {
+        if (manifestPath.isBlank()) {
+            throw GradleException("fixtureManifestPath property is required")
+        }
+        if (outputDir.isBlank()) {
+            throw GradleException("fixtureOutputDir property is required")
+        }
+    }
+
+    args(
+        "--manifest=$manifestPath",
+        "--profile=$profile",
+        "--output-dir=$outputDir",
+        "--read-preference=$readPreference",
+        "--timeout-ms=$timeoutMs",
+        "--batch-size=$batchSize",
+        "--rate-limit-ms=$rateLimitMs",
+        "--readonly-check=$readonlyCheck"
+    )
+    if (mongoUri.isNotBlank()) {
+        args("--mongo-uri=$mongoUri")
+    }
+    if (allowUriAlias.isNotBlank()) {
+        args("--allow-uri-alias=$allowUriAlias")
+    }
+    if (maxDocs.isNotBlank()) {
+        args("--max-docs=$maxDocs")
+    }
+    if (resume) {
+        args("--resume")
+    }
+}
+
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {
     group = "verification"
     description = "Runs canonical complex-query certification pack and enforces gate policy."
