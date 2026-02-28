@@ -1103,35 +1103,59 @@ public final class UnifiedSpecImporter {
         if (matchesAnyRunOnRequirement(requirements, runOnContext)) {
             return null;
         }
-        final RunOnContext laneAdjustedContext = runOnLaneAdjustedContext(sourcePath, runOnContext);
-        if (laneAdjustedContext != null && matchesAnyRunOnRequirement(requirements, laneAdjustedContext)) {
-            return null;
+        for (final RunOnContext laneAdjustedContext : runOnLaneAdjustedContexts(sourcePath, runOnContext)) {
+            if (matchesAnyRunOnRequirement(requirements, laneAdjustedContext)) {
+                return null;
+            }
         }
         return "runOnRequirements not satisfied for " + runOnContext.summary();
     }
 
-    private static RunOnContext runOnLaneAdjustedContext(
+    private static List<RunOnContext> runOnLaneAdjustedContexts(
             final String sourcePath,
             final RunOnContext runOnContext) {
         if (!runOnContext.evaluated() || sourcePath == null || sourcePath.isBlank()) {
-            return null;
+            return List.of();
         }
-        if (!isMongosPinAutoLaneSourcePath(sourcePath)) {
-            return null;
+        final List<RunOnContext> laneContexts = new ArrayList<>();
+        if (isMongosPinAutoLaneSourcePath(sourcePath) && !"sharded".equals(runOnContext.topology())) {
+            laneContexts.add(RunOnContext.evaluated(
+                    runOnContext.serverVersion(),
+                    "sharded",
+                    runOnContext.serverless(),
+                    runOnContext.authEnabled()));
         }
-        if ("sharded".equals(runOnContext.topology())) {
-            return runOnContext;
+        if (isHintLegacyServerLaneSourcePath(sourcePath)) {
+            final List<String> legacyVersions = List.of("3.3.99", "4.0.99", "4.1.9", "4.2.99", "4.3.3");
+            for (final String legacyVersion : legacyVersions) {
+                if (legacyVersion.equals(runOnContext.serverVersion())) {
+                    continue;
+                }
+                laneContexts.add(RunOnContext.evaluated(
+                        legacyVersion,
+                        runOnContext.topology(),
+                        runOnContext.serverless(),
+                        runOnContext.authEnabled()));
+            }
         }
-        return RunOnContext.evaluated(
-                runOnContext.serverVersion(),
-                "sharded",
-                runOnContext.serverless(),
-                runOnContext.authEnabled());
+        return List.copyOf(laneContexts);
     }
 
     private static boolean isMongosPinAutoLaneSourcePath(final String sourcePath) {
         return "transactions/tests/unified/mongos-pin-auto.json".equals(sourcePath)
                 || "transactions/tests/unified/mongos-pin-auto.yml".equals(sourcePath);
+    }
+
+    private static boolean isHintLegacyServerLaneSourcePath(final String sourcePath) {
+        if (!sourcePath.startsWith("crud/tests/unified/")) {
+            return false;
+        }
+        final String filename = sourcePath.substring("crud/tests/unified/".length());
+        return (filename.endsWith(".json") || filename.endsWith(".yml") || filename.endsWith(".yaml"))
+                && filename.contains("-hint-")
+                && (filename.contains("unacknowledged")
+                        || filename.contains("clientError")
+                        || filename.contains("serverError"));
     }
 
     private static boolean matchesAnyRunOnRequirement(
