@@ -141,6 +141,7 @@ Official Suite Sharded UTF gate modes:
 - `strict` (default for scheduled `main` run): fail workflow when aggregate mismatch/error is non-zero.
 - `off`: summary only, no mismatch/error gate.
 - Manual dispatch input: `utf_gate_mode` (`off | warn | strict`).
+- Workflow streak artifact: `utf-shard-streak.json/.md` exposing `officialZeroMismatchStreak` over recent schedule history.
 
 Run differential baseline against real MongoDB:
 
@@ -201,6 +202,11 @@ R3 Failure Ledger workflow (`.github/workflows/r3-failure-ledger.yml`) also:
 - emits top `failureId` + `firstDiffPath` summary in trend markdown.
 - compares ledger failure IDs with latest `Official Suite Sharded` shard artifacts.
 - posts a schedule-time triage comment to issue `#378` when `failureCount > 0`.
+- emits release-readiness streak summary (`r3-release-readiness-streak.json/.md`) with:
+  `officialZeroMismatchStreak`, `r3LedgerZeroFailureStreak`, and readiness verdict.
+- manual dispatch inputs:
+  - `readiness_min_streak` (default `3`)
+  - `fail_on_readiness` (`true|false`, default `false`)
 
 Run Spring compatibility matrix:
 
@@ -295,6 +301,8 @@ gradle \
   - `build/reports/r3-failure-ledger/r3-failure-ledger.json`
   - `build/reports/r3-failure-ledger/r3-failure-ledger.md`
   - `build/reports/r3-failure-ledger/r3-failure-ledger-trend.md`
+  - `build/reports/r3-failure-ledger/r3-release-readiness-streak.json`
+  - `build/reports/r3-failure-ledger/r3-release-readiness-streak.md`
 - Complex-query certification:
   - `build/reports/complex-query-certification/complex-query-certification.json`
   - `build/reports/complex-query-certification/complex-query-certification.md`

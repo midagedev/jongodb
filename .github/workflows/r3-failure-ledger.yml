@@ -7,6 +7,14 @@ on:
         description: "Commit/tag/branch in mongodb/specifications"
         required: false
         default: "99704fa8860777da1d919ef765af1e41e75f5859"
+      readiness_min_streak:
+        description: "Minimum consecutive zero-run streak required for readiness"
+        required: false
+        default: "3"
+      fail_on_readiness:
+        description: "Fail workflow when readiness streak threshold is not met (true|false)"
+        required: false
+        default: "false"
   schedule:
     - cron: "30 4 * * *"
 
@@ -23,6 +31,8 @@ jobs:
     env:
       OFFICIAL_SPECS_REPO: https://github.com/mongodb/specifications.git
       OFFICIAL_SPECS_REF: ${{ github.event.inputs.official_specs_ref || '99704fa8860777da1d919ef765af1e41e75f5859' }}
+      READINESS_MIN_STREAK: ${{ github.event.inputs.readiness_min_streak || '3' }}
+      FAIL_ON_READINESS: ${{ github.event.inputs.fail_on_readiness || 'false' }}
       MONGO_CONTAINER_NAME: jongodb-replset
       MONGO_REPLSET_NAME: rs0
       MONGO_PORT: "27017"
@@ -246,6 +256,263 @@ jobs:
               with Path(summary_path).open("a", encoding="utf-8") as handle:
                   handle.write("\n")
                   handle.write(output_path.read_text(encoding="utf-8"))
+          PY
+
+      - name: Build release-readiness streak summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import re
+          import urllib.request
+          import zipfile
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          WINDOW_SIZE = 10
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ.get("GH_TOKEN", "")
+          run_id = int(os.environ.get("GITHUB_RUN_ID", "0"))
+          run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{run_id}"
+          min_streak = int(os.environ.get("READINESS_MIN_STREAK", "3"))
+          fail_on_readiness = os.environ.get("FAIL_ON_READINESS", "false").strip().lower() == "true"
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+
+          ledger_path = Path("build/reports/r3-failure-ledger/r3-failure-ledger.json")
+          output_json = Path("build/reports/r3-failure-ledger/r3-release-readiness-streak.json")
+          output_md = Path("build/reports/r3-failure-ledger/r3-release-readiness-streak.md")
+          if not ledger_path.exists():
+              raise SystemExit(f"missing ledger report: {ledger_path}")
+          current_ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+          current_failure_count = int(current_ledger.get("failureCount", 0))
+
+          aggregate_pattern = re.compile(
+              r"## aggregate\s+"
+              r"- baseline: total=(?P<b_total>\d+) match=(?P<b_match>\d+) mismatch=(?P<b_mismatch>\d+) error=(?P<b_error>\d+).*?\n"
+              r"- rerun: total=(?P<r_total>\d+) match=(?P<r_match>\d+) mismatch=(?P<r_mismatch>\d+) error=(?P<r_error>\d+)",
+              re.S,
+          )
+
+          def parse_official_summary(text: str):
+              match = aggregate_pattern.search(text)
+              if not match:
+                  return None
+              metrics = {
+                  "baseline": {
+                      "total": int(match.group("b_total")),
+                      "match": int(match.group("b_match")),
+                      "mismatch": int(match.group("b_mismatch")),
+                      "error": int(match.group("b_error")),
+                  },
+                  "rerun": {
+                      "total": int(match.group("r_total")),
+                      "match": int(match.group("r_match")),
+                      "mismatch": int(match.group("r_mismatch")),
+                      "error": int(match.group("r_error")),
+                  },
+              }
+              metrics["zeroMismatchError"] = (
+                  metrics["baseline"]["mismatch"] == 0
+                  and metrics["baseline"]["error"] == 0
+                  and metrics["rerun"]["mismatch"] == 0
+                  and metrics["rerun"]["error"] == 0
+              )
+              return metrics
+
+          def request_json(url: str):
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "jongodb-r3-readiness-streak",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as res:
+                  return json.loads(res.read().decode("utf-8"))
+
+          def request_bytes(url: str) -> bytes:
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "jongodb-r3-readiness-streak",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=60) as res:
+                  return res.read()
+
+          def read_artifact_file(run_id_value: int, artifact_name: str, suffix: str):
+              artifacts = request_json(
+                  f"https://api.github.com/repos/{repo}/actions/runs/{run_id_value}/artifacts?per_page=100"
+              )
+              for artifact in artifacts.get("artifacts", []):
+                  if artifact.get("expired"):
+                      continue
+                  if artifact.get("name") != artifact_name:
+                      continue
+                  with zipfile.ZipFile(io.BytesIO(request_bytes(artifact["archive_download_url"]))) as archive:
+                      for member in archive.namelist():
+                          if member.endswith(suffix):
+                              return archive.read(member).decode("utf-8")
+              return None
+
+          official_history = []
+          official_runs = request_json(
+              f"https://api.github.com/repos/{repo}/actions/workflows/official-suite-sharded.yml/runs"
+              "?branch=main&event=schedule&status=completed&per_page=30"
+          ).get("workflow_runs", [])
+          for run in official_runs:
+              if len(official_history) >= WINDOW_SIZE:
+                  break
+              run_ref = int(run.get("id", 0))
+              entry = {
+                  "runId": run_ref,
+                  "event": run.get("event"),
+                  "conclusion": run.get("conclusion"),
+                  "url": run.get("html_url"),
+                  "createdAt": run.get("created_at"),
+                  "metrics": None,
+                  "zeroMismatchError": False,
+              }
+              try:
+                  summary_text = read_artifact_file(run_ref, "utf-shard-summary", "utf-shard-summary.md")
+                  if summary_text is not None:
+                      parsed = parse_official_summary(summary_text)
+                      if parsed is not None:
+                          entry["metrics"] = parsed
+                          entry["zeroMismatchError"] = parsed["zeroMismatchError"]
+                      else:
+                          entry["note"] = "summary-parse-failed"
+                  else:
+                      entry["note"] = "utf-shard-summary-artifact-missing"
+              except Exception as exc:
+                  entry["note"] = f"artifact-read-error: {exc}"
+              official_history.append(entry)
+
+          r3_history = [
+              {
+                  "runId": run_id,
+                  "event": os.environ.get("GITHUB_EVENT_NAME"),
+                  "conclusion": "in_progress",
+                  "url": run_url,
+                  "createdAt": datetime.now(timezone.utc).isoformat(),
+                  "failureCount": current_failure_count,
+                  "zeroFailure": current_failure_count == 0,
+                  "source": "current-run-artifact",
+              }
+          ]
+          r3_runs = request_json(
+              f"https://api.github.com/repos/{repo}/actions/workflows/r3-failure-ledger.yml/runs"
+              "?branch=main&event=schedule&status=completed&per_page=30"
+          ).get("workflow_runs", [])
+          for run in r3_runs:
+              if len(r3_history) >= WINDOW_SIZE:
+                  break
+              run_ref = int(run.get("id", 0))
+              if run_ref == run_id:
+                  continue
+              entry = {
+                  "runId": run_ref,
+                  "event": run.get("event"),
+                  "conclusion": run.get("conclusion"),
+                  "url": run.get("html_url"),
+                  "createdAt": run.get("created_at"),
+                  "failureCount": None,
+                  "zeroFailure": False,
+                  "source": "schedule-history",
+              }
+              try:
+                  ledger_text = read_artifact_file(run_ref, "r3-failure-ledger", "r3-failure-ledger.json")
+                  if ledger_text is not None:
+                      parsed = json.loads(ledger_text)
+                      entry["failureCount"] = int(parsed.get("failureCount", 0))
+                      entry["zeroFailure"] = entry["failureCount"] == 0
+                  else:
+                      entry["note"] = "r3-failure-ledger-artifact-missing"
+              except Exception as exc:
+                  entry["note"] = f"artifact-read-error: {exc}"
+              r3_history.append(entry)
+
+          def compute_streak(items, key):
+              streak_value = 0
+              for item in items:
+                  if item.get(key):
+                      streak_value += 1
+                      continue
+                  break
+              return streak_value
+
+          official_streak = compute_streak(official_history, "zeroMismatchError")
+          r3_streak = compute_streak(r3_history, "zeroFailure")
+          readiness_met = official_streak >= min_streak and r3_streak >= min_streak
+
+          result = {
+              "generatedAt": datetime.now(timezone.utc).isoformat(),
+              "windowSize": WINDOW_SIZE,
+              "thresholds": {"minStreak": min_streak},
+              "counters": {
+                  "officialZeroMismatchStreak": official_streak,
+                  "r3LedgerZeroFailureStreak": r3_streak,
+              },
+              "readiness": {
+                  "satisfied": readiness_met,
+                  "failOnReadiness": fail_on_readiness,
+              },
+              "officialHistory": official_history,
+              "r3History": r3_history,
+          }
+          output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          lines = [
+              "# R3 Release Readiness Streak Summary",
+              "",
+              f"- generatedAt: {result['generatedAt']}",
+              f"- minStreak: {min_streak}",
+              f"- officialZeroMismatchStreak: {official_streak}",
+              f"- r3LedgerZeroFailureStreak: {r3_streak}",
+              f"- readinessSatisfied: {readiness_met}",
+              f"- failOnReadiness: {fail_on_readiness}",
+              "",
+              "## official-schedule-history",
+          ]
+          for entry in official_history:
+              metrics = entry.get("metrics") or {}
+              baseline = metrics.get("baseline", {})
+              rerun = metrics.get("rerun", {})
+              lines.append(
+                  f"- runId={entry.get('runId')} conclusion={entry.get('conclusion')} "
+                  f"zeroMismatchError={entry.get('zeroMismatchError')} "
+                  f"baseline(mismatch={baseline.get('mismatch', 'n/a')},error={baseline.get('error', 'n/a')}) "
+                  f"rerun(mismatch={rerun.get('mismatch', 'n/a')},error={rerun.get('error', 'n/a')})"
+              )
+
+          lines.append("")
+          lines.append("## r3-ledger-history")
+          for entry in r3_history:
+              lines.append(
+                  f"- runId={entry.get('runId')} conclusion={entry.get('conclusion')} "
+                  f"failureCount={entry.get('failureCount', 'n/a')} zeroFailure={entry.get('zeroFailure')}"
+              )
+
+          output_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(output_md.read_text(encoding="utf-8"))
+          if step_summary:
+              with Path(step_summary).open("a", encoding="utf-8") as handle:
+                  handle.write("\n")
+                  handle.write(output_md.read_text(encoding="utf-8"))
+
+          if fail_on_readiness and not readiness_met:
+              print(
+                  "::error::readiness streak threshold not met "
+                  f"(officialZeroMismatchStreak={official_streak}, r3LedgerZeroFailureStreak={r3_streak}, minStreak={min_streak})"
+              )
+              raise SystemExit(1)
           PY
 
       - name: Post triage breadcrumb on schedule failure
