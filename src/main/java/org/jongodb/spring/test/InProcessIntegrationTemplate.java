@@ -1,4 +1,4 @@
-package org.jongodb.testkit;
+package org.jongodb.spring.test;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
