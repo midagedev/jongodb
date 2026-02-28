@@ -23,12 +23,18 @@ class SpringCompatibilityMatrixRunnerTest {
 
     @Test
     void defaultCatalogIncludesMultipleProjectTargetsAndScenarioCoverage() {
-        assertTrue(SpringCompatibilityMatrixRunner.defaultTargets().size() >= 4);
-        assertTrue(SpringCompatibilityMatrixRunner.defaultScenarios().size() >= 5);
+        assertTrue(SpringCompatibilityMatrixRunner.defaultTargets().size() >= 5);
+        assertTrue(SpringCompatibilityMatrixRunner.defaultScenarios().size() >= 15);
         assertTrue(
             SpringCompatibilityMatrixRunner.defaultScenarios().stream()
                 .anyMatch(SpringCompatibilityMatrixRunner.SpringScenario::isComplexQueryScenario),
             "expected at least one complex query scenario"
+        );
+        assertTrue(
+            SpringCompatibilityMatrixRunner.defaultScenarios().stream()
+                .filter(scenario -> scenario.certificationPatternId() != null)
+                .count() >= 8,
+            "expected expanded certification pattern mapping coverage"
         );
     }
 
@@ -108,18 +114,23 @@ class SpringCompatibilityMatrixRunnerTest {
         assertTrue(json.contains("\"surfaceSummary\""));
         assertTrue(json.contains("\"complexQuerySummary\""));
         assertTrue(json.contains("\"complexQueryScenarios\""));
+        assertTrue(json.contains("\"certificationPatternMapping\""));
         assertTrue(json.contains("\"certificationPatternId\""));
         assertTrue(json.contains("\"scenarioId\":\"spring.mongo-template.basic-crud\""));
         assertTrue(json.contains("\"scenarioId\":\"spring.transaction-template.multi-template.same-manager\""));
         assertTrue(json.contains("\"scenarioId\":\"spring.complex.aggregation.lookup-unwind-group\""));
+        assertTrue(json.contains("\"scenarioId\":\"spring.complex.query.array-index-comparison\""));
+        assertTrue(json.contains("\"scenarioId\":\"spring.complex.query.deep-array-document\""));
         assertTrue(json.contains("\"failureMinimization\":[]"));
 
         assertTrue(markdown.contains("# Spring Data Mongo Compatibility Matrix"));
         assertTrue(markdown.contains("## Matrix"));
         assertTrue(markdown.contains("## Complex Query Matrix"));
+        assertTrue(markdown.contains("## Certification Pattern Mapping"));
         assertTrue(markdown.contains("## Failure Minimization"));
         assertTrue(markdown.contains("spring.transaction-template.out-of-scope.same-namespace-interleaving"));
         assertTrue(markdown.contains("spring.complex.query.nested-criteria"));
+        assertTrue(markdown.contains("spring.complex.query.expr-array-index-comparison"));
         assertTrue(markdown.contains("| spring.transaction-template.commit | TransactionTemplate | PASS | PASS |"));
 
         assertEquals(0, report.failCount());

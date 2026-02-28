@@ -274,6 +274,31 @@ public final class SpringCompatibilityMatrixRunner {
             sb.append('\n');
         }
 
+        sb.append("## Certification Pattern Mapping\n");
+        List<SpringScenario> mappedScenarios = scenariosWithCertificationPattern(report.scenarios());
+        if (mappedScenarios.isEmpty()) {
+            sb.append("- none\n\n");
+        } else {
+            sb.append("- mappedScenarioCount: ").append(mappedScenarios.size()).append('\n');
+            sb.append("| scenarioId | certPatternId | surface | complexQuery |");
+            sb.append('\n');
+            sb.append("| --- | --- | --- | --- |");
+            sb.append('\n');
+            for (SpringScenario scenario : mappedScenarios) {
+                sb.append("| ")
+                    .append(scenario.id())
+                    .append(" | ")
+                    .append(scenario.certificationPatternId())
+                    .append(" | ")
+                    .append(scenario.surface().label())
+                    .append(" | ")
+                    .append(scenario.isComplexQueryScenario() ? "YES" : "NO")
+                    .append(" |");
+                sb.append('\n');
+            }
+            sb.append('\n');
+        }
+
         sb.append("## Target Summary\n");
         for (TargetSummary summary : report.targetSummaries()) {
             sb.append("- ")
@@ -385,6 +410,17 @@ public final class SpringCompatibilityMatrixRunner {
         }
         root.put("complexQueryScenarios", complexQueryScenarios);
 
+        List<Map<String, Object>> certificationPatternMapping = new ArrayList<>();
+        for (SpringScenario scenario : scenariosWithCertificationPattern(report.scenarios())) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("scenarioId", scenario.id());
+            item.put("certificationPatternId", scenario.certificationPatternId());
+            item.put("surface", scenario.surface().name());
+            item.put("complexQueryScenario", scenario.isComplexQueryScenario());
+            certificationPatternMapping.add(item);
+        }
+        root.put("certificationPatternMapping", certificationPatternMapping);
+
         List<Map<String, Object>> results = new ArrayList<>();
         for (MatrixCellResult result : report.results()) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -454,7 +490,8 @@ public final class SpringCompatibilityMatrixRunner {
             new SpringProfileTarget("petclinic-boot-2.7-data-3.4", "petclinic27", "2.7.x", "3.4.x", "17"),
             new SpringProfileTarget("petclinic-boot-3.2-data-4.2", "petclinic32", "3.2.x", "4.2.x", "17"),
             new SpringProfileTarget("commerce-boot-3.2-data-4.2", "commerce32", "3.2.x", "4.2.x", "17"),
-            new SpringProfileTarget("commerce-boot-3.3-data-4.3", "commerce33", "3.3.x", "4.3.x", "21")
+            new SpringProfileTarget("commerce-boot-3.3-data-4.3", "commerce33", "3.3.x", "4.3.x", "21"),
+            new SpringProfileTarget("analytics-boot-3.4-data-4.4", "analytics34", "3.4.x", "4.4.x", "21")
         );
     }
 
@@ -1038,6 +1075,130 @@ public final class SpringCompatibilityMatrixRunner {
                 )
             ),
             new SpringScenario(
+                "spring.complex.query.expr-array-index-comparison",
+                SpringSurface.REPOSITORY,
+                "Expr array-index traversal compatibility aligned with certification pack",
+                "cq.expr.array-index-comparison",
+                scenario(
+                    "spring.complex.query.expr-array-index-comparison",
+                    "insert + expr array-index compatibility checks",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_expr_array",
+                            "documents",
+                            List.of(
+                                payload("_id", 1, "metrics", List.of(10, 20), "series", List.of(payload("value", 5))),
+                                payload("_id", 2, "metrics", List.of(9), "series", List.of(payload("value", 5)))
+                            )
+                        )
+                    ),
+                    command(
+                        "find",
+                        payload(
+                            "collection",
+                            "spring_complex_expr_array",
+                            "filter",
+                            payload(
+                                "$expr",
+                                payload("$eq", List.of("$metrics.0", 10))
+                            )
+                        )
+                    ),
+                    command(
+                        "find",
+                        payload(
+                            "collection",
+                            "spring_complex_expr_array",
+                            "filter",
+                            payload(
+                                "$expr",
+                                payload("$eq", List.of("$metrics", List.of(10, 20)))
+                            )
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.complex.query.array-index-comparison",
+                SpringSurface.MONGO_TEMPLATE,
+                "Array index comparison compatibility aligned with certification pack",
+                "cq.path.array-index-comparison",
+                scenario(
+                    "spring.complex.query.array-index-comparison",
+                    "insert + array-index comparison query",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_array_index_compare",
+                            "documents",
+                            List.of(
+                                payload("_id", 1, "metrics", List.of(11, 2)),
+                                payload("_id", 2, "metrics", List.of(9, 8)),
+                                payload("_id", 3, "metrics", List.of(12, 1))
+                            )
+                        )
+                    ),
+                    command(
+                        "find",
+                        payload(
+                            "collection",
+                            "spring_complex_array_index_compare",
+                            "filter",
+                            payload("metrics.0", payload("$gt", 10))
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
+                "spring.complex.query.deep-array-document",
+                SpringSurface.REPOSITORY,
+                "Deep array document path compatibility aligned with certification pack",
+                "cq.path.deep-array-document",
+                scenario(
+                    "spring.complex.query.deep-array-document",
+                    "insert + deep array document query",
+                    command(
+                        "insert",
+                        payload(
+                            "collection",
+                            "spring_complex_deep_array_docs",
+                            "documents",
+                            List.of(
+                                payload(
+                                    "_id",
+                                    1,
+                                    "series",
+                                    List.of(
+                                        payload("meta", payload("code", "A"), "value", 11),
+                                        payload("meta", payload("code", "B"), "value", 3)
+                                    )
+                                ),
+                                payload(
+                                    "_id",
+                                    2,
+                                    "series",
+                                    List.of(
+                                        payload("meta", payload("code", "B"), "value", 7)
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    command(
+                        "find",
+                        payload(
+                            "collection",
+                            "spring_complex_deep_array_docs",
+                            "filter",
+                            payload("series.0.meta.code", "A")
+                        )
+                    )
+                )
+            ),
+            new SpringScenario(
                 "spring.mongo-template.index-ttl-partial",
                 SpringSurface.MONGO_TEMPLATE,
                 "MongoTemplate index lifecycle with ttl/partial/collation metadata",
@@ -1134,6 +1295,16 @@ public final class SpringCompatibilityMatrixRunner {
             lookup.put(resultKey(result.targetId(), result.scenarioId()), result);
         }
         return lookup;
+    }
+
+    private static List<SpringScenario> scenariosWithCertificationPattern(List<SpringScenario> scenarios) {
+        List<SpringScenario> mapped = new ArrayList<>();
+        for (SpringScenario scenario : scenarios) {
+            if (scenario.certificationPatternId() != null) {
+                mapped.add(scenario);
+            }
+        }
+        return List.copyOf(mapped);
     }
 
     private static String resultKey(String targetId, String scenarioId) {
