@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -33,31 +34,51 @@ class ComplexQueryPatternPackTest {
             }
         }
 
-        assertTrue(explicitlyUnsupportedCount >= 3, "expected explicit unsupported coverage in pattern pack");
+        assertTrue(explicitlyUnsupportedCount >= 2, "expected explicit unsupported coverage in pattern pack");
     }
 
     @Test
     void exprArrayIndexComparisonPatternUsesMongodCompatibleExprPathSemantics() {
-        final ComplexQueryPatternPack.PatternCase pattern = ComplexQueryPatternPack.patterns().stream()
-                .filter(candidate -> "cq.expr.array-index-comparison".equals(candidate.id()))
+        final ScenarioOutcome outcome =
+                new WireCommandIngressBackend("wire").execute(findPattern("cq.expr.array-index-comparison").scenario());
+
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected successful scenario execution"));
+        assertEquals(0, findFirstBatchSize(outcome), "unexpected find output: " + outcome.commandResults());
+    }
+
+    @Test
+    void queryModAndBitsAllSetPatternsExecuteAsSupportedMatches() {
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+
+        final ScenarioOutcome modOutcome = backend.execute(findPattern("cq.unsupported.query-mod").scenario());
+        assertTrue(modOutcome.success(), modOutcome.errorMessage().orElse("expected mod scenario success"));
+        assertEquals(1, findFirstBatchSize(modOutcome));
+
+        final ScenarioOutcome bitsOutcome = backend.execute(findPattern("cq.unsupported.query-bitsallset").scenario());
+        assertTrue(bitsOutcome.success(), bitsOutcome.errorMessage().orElse("expected bitsAllSet scenario success"));
+        assertEquals(1, findFirstBatchSize(bitsOutcome));
+    }
+
+    private static ComplexQueryPatternPack.PatternCase findPattern(final String patternId) {
+        return ComplexQueryPatternPack.patterns().stream()
+                .filter(candidate -> patternId.equals(candidate.id()))
                 .findFirst()
                 .orElseThrow();
+    }
 
-        final ScenarioOutcome outcome = new WireCommandIngressBackend("wire").execute(pattern.scenario());
-        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected successful scenario execution"));
-        assertEquals(2, outcome.commandResults().size());
-
+    private static int findFirstBatchSize(final ScenarioOutcome outcome) {
+        assertEquals(2, outcome.commandResults().size(), "expected insert + find command sequence");
         final Map<String, Object> findResult = asMap(outcome.commandResults().get(1), "find result");
         final Map<String, Object> cursor = asMap(findResult.get("cursor"), "find cursor");
         final List<?> firstBatch = asList(cursor.get("firstBatch"), "find firstBatch");
-        assertEquals(0, firstBatch.size(), "expected no matches for $expr path '$metrics.0' against array values");
+        return firstBatch.size();
     }
 
     private static Map<String, Object> asMap(final Object value, final String fieldName) {
         assertNotNull(value, fieldName + " must not be null");
         assertTrue(value instanceof Map<?, ?>, fieldName + " must be an object");
         final Map<?, ?> raw = (Map<?, ?>) value;
-        final java.util.LinkedHashMap<String, Object> normalized = new java.util.LinkedHashMap<>();
+        final Map<String, Object> normalized = new LinkedHashMap<>();
         for (final Map.Entry<?, ?> entry : raw.entrySet()) {
             normalized.put(String.valueOf(entry.getKey()), entry.getValue());
         }

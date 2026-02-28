@@ -98,6 +98,27 @@ class QueryMatcherTest {
     }
 
     @Test
+    void supportsModOperator() {
+        final Document document = new Document("qty", 6).append("samples", Arrays.asList(1, 2, 3));
+
+        assertTrue(QueryMatcher.matches(document, new Document("qty", new Document("$mod", List.of(2, 0)))));
+        assertFalse(QueryMatcher.matches(document, new Document("qty", new Document("$mod", List.of(4, 1)))));
+        assertTrue(QueryMatcher.matches(document, new Document("samples", new Document("$mod", List.of(3, 0)))));
+        assertFalse(QueryMatcher.matches(document, new Document("missing", new Document("$mod", List.of(2, 0)))));
+    }
+
+    @Test
+    void supportsBitsAllSetOperator() {
+        final Document document = new Document("flags", 3).append("moreFlags", Arrays.asList(4, 6));
+
+        assertTrue(QueryMatcher.matches(document, new Document("flags", new Document("$bitsAllSet", 1))));
+        assertTrue(QueryMatcher.matches(document, new Document("flags", new Document("$bitsAllSet", List.of(0, 1)))));
+        assertFalse(QueryMatcher.matches(document, new Document("flags", new Document("$bitsAllSet", 4))));
+        assertTrue(QueryMatcher.matches(document, new Document("moreFlags", new Document("$bitsAllSet", 2))));
+        assertFalse(QueryMatcher.matches(document, new Document("missing", new Document("$bitsAllSet", 1))));
+    }
+
+    @Test
     void supportsLogicalAndOrNotNorOperators() {
         Document document = new Document("role", "user").append("active", true).append("score", 7);
 
