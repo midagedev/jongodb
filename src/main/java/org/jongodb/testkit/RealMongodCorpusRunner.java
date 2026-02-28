@@ -27,6 +27,9 @@ public final class RealMongodCorpusRunner {
     private static final String DEFAULT_SEED = "wire-vs-real-mongod-baseline-v1";
     private static final int DEFAULT_TOP_REGRESSION_LIMIT = 10;
     private static final int DEFAULT_SCENARIO_COUNT = 2_000;
+    private static final int DEFAULT_MAX_MISMATCH = 0;
+    private static final int DEFAULT_MAX_ERROR = 0;
+    private static final boolean DEFAULT_FAIL_ON_GATE = true;
 
     private static final String BASELINE_JSON = "real-mongod-differential-baseline.json";
     private static final String BASELINE_MARKDOWN = "real-mongod-differential-baseline.md";
@@ -87,8 +90,23 @@ public final class RealMongodCorpusRunner {
         System.out.println("- mismatch: " + result.report().mismatchCount());
         System.out.println("- error: " + result.report().errorCount());
         System.out.println("- passRate: " + PassRate.from(result.report()).formatted());
+        System.out.println("- gate: " + result.gateResult().status());
+        System.out.println("- maxMismatch: " + result.gateResult().thresholds().maxMismatch());
+        System.out.println("- maxError: " + result.gateResult().thresholds().maxError());
+        if (result.gateResult().thresholds().minPassRate() != null) {
+            System.out.println("- minPassRate: " + formatRatio(result.gateResult().thresholds().minPassRate()));
+        }
+        if (!result.gateResult().failureReasons().isEmpty()) {
+            for (String failureReason : result.gateResult().failureReasons()) {
+                System.out.println("- gateFailure: " + failureReason);
+            }
+        }
         System.out.println("- jsonArtifact: " + paths.jsonArtifact());
         System.out.println("- markdownArtifact: " + paths.markdownArtifact());
+        if (config.failOnGate() && result.gateResult().status() == QualityGateStatus.FAIL) {
+            System.err.println("Real mongod differential baseline gate failed.");
+            System.exit(2);
+        }
     }
 
     public RunResult runAndWrite(RunConfig config) throws IOException {
@@ -112,7 +130,8 @@ public final class RealMongodCorpusRunner {
         DifferentialReport report = harness.run(scenarios);
         long numericSeed = deterministicSeed(config.seed());
         List<RegressionSample> topRegressions = topRegressions(report, config.topRegressionLimit());
-        return new RunResult(config.seed(), numericSeed, report.generatedAt(), report, topRegressions);
+        GateResult gateResult = evaluateGate(report, config.gateThresholds());
+        return new RunResult(config.seed(), numericSeed, report.generatedAt(), report, topRegressions, gateResult);
     }
 
     public static ArtifactPaths artifactPaths(Path outputDir) {
@@ -355,6 +374,35 @@ public final class RealMongodCorpusRunner {
         return hash;
     }
 
+    static GateResult evaluateGate(DifferentialReport report, GateThresholds thresholds) {
+        Objects.requireNonNull(report, "report");
+        Objects.requireNonNull(thresholds, "thresholds");
+
+        List<String> failureReasons = new ArrayList<>();
+        int mismatchCount = report.mismatchCount();
+        int errorCount = report.errorCount();
+        double passRate = PassRate.from(report).ratio();
+
+        if (mismatchCount > thresholds.maxMismatch()) {
+            failureReasons.add("mismatch threshold exceeded: " + mismatchCount + " > " + thresholds.maxMismatch());
+        }
+        if (errorCount > thresholds.maxError()) {
+            failureReasons.add("error threshold exceeded: " + errorCount + " > " + thresholds.maxError());
+        }
+        if (thresholds.minPassRate() != null && passRate < thresholds.minPassRate()) {
+            failureReasons.add(
+                "passRate threshold not met: " + formatRatio(passRate) + " < " + formatRatio(thresholds.minPassRate())
+            );
+        }
+
+        QualityGateStatus status = failureReasons.isEmpty() ? QualityGateStatus.PASS : QualityGateStatus.FAIL;
+        return new GateResult(status, mismatchCount, errorCount, passRate, thresholds, List.copyOf(failureReasons));
+    }
+
+    private static String formatRatio(double ratio) {
+        return String.format(Locale.ROOT, "%.4f", ratio);
+    }
+
     String renderMarkdown(RunResult result) {
         Objects.requireNonNull(result, "result");
         DifferentialReport report = result.report();
@@ -369,6 +417,28 @@ public final class RealMongodCorpusRunner {
         sb.append("- mismatch: ").append(report.mismatchCount()).append('\n');
         sb.append("- error: ").append(report.errorCount()).append('\n');
         sb.append("- passRate: ").append(PassRate.from(report).formatted()).append("\n\n");
+
+        sb.append("## Gate\n");
+        sb.append("- status: ").append(result.gateResult().status()).append('\n');
+        sb.append("- measuredMismatch: ").append(result.gateResult().mismatchCount()).append('\n');
+        sb.append("- measuredError: ").append(result.gateResult().errorCount()).append('\n');
+        sb.append("- measuredPassRate: ").append(formatRatio(result.gateResult().passRate())).append('\n');
+        sb.append("- maxMismatch: ").append(result.gateResult().thresholds().maxMismatch()).append('\n');
+        sb.append("- maxError: ").append(result.gateResult().thresholds().maxError()).append('\n');
+        if (result.gateResult().thresholds().minPassRate() == null) {
+            sb.append("- minPassRate: none\n");
+        } else {
+            sb.append("- minPassRate: ").append(formatRatio(result.gateResult().thresholds().minPassRate())).append('\n');
+        }
+        if (result.gateResult().failureReasons().isEmpty()) {
+            sb.append("- gateFailures: none\n\n");
+        } else {
+            sb.append("- gateFailures:\n");
+            for (String failureReason : result.gateResult().failureReasons()) {
+                sb.append("  - ").append(failureReason).append('\n');
+            }
+            sb.append('\n');
+        }
 
         sb.append("## Top Regressions\n");
         if (result.topRegressions().isEmpty()) {
@@ -417,6 +487,7 @@ public final class RealMongodCorpusRunner {
         summary.put("error", report.errorCount());
         summary.put("passRate", PassRate.from(report).ratio());
         root.put("summary", summary);
+        root.put("gate", result.gateResult().toJsonMap());
 
         List<Map<String, Object>> topRegressionItems = new ArrayList<>();
         for (RegressionSample sample : result.topRegressions()) {
@@ -473,6 +544,11 @@ public final class RealMongodCorpusRunner {
         System.out.println("  --seed=<text>             Deterministic corpus seed");
         System.out.println("  --scenario-count=<int>    Corpus size target (default: 2000)");
         System.out.println("  --top-regressions=<int>   Number of top regressions to extract");
+        System.out.println("  --max-mismatch=<int>      Maximum allowed mismatches before gate fails (default: 0)");
+        System.out.println("  --max-error=<int>         Maximum allowed errors before gate fails (default: 0)");
+        System.out.println("  --min-pass-rate=<ratio>   Optional minimum pass rate threshold in [0.0, 1.0]");
+        System.out.println("  --fail-on-gate            Exit non-zero when baseline gate fails (default)");
+        System.out.println("  --no-fail-on-gate         Always exit zero");
         System.out.println("  --help                    Show this help message");
     }
 
@@ -490,6 +566,16 @@ public final class RealMongodCorpusRunner {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
         return normalized;
+    }
+
+    private static double requireRatio(double value, String fieldName) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(fieldName + " must be finite");
+        }
+        if (value < 0.0d || value > 1.0d) {
+            throw new IllegalArgumentException(fieldName + " must be in range [0.0, 1.0]");
+        }
+        return value;
     }
 
     public static final class ArtifactPaths {
@@ -510,18 +596,148 @@ public final class RealMongodCorpusRunner {
         }
     }
 
+    public static final class GateThresholds {
+        private final int maxMismatch;
+        private final int maxError;
+        private final Double minPassRate;
+
+        public GateThresholds(int maxMismatch, int maxError, Double minPassRate) {
+            if (maxMismatch < 0) {
+                throw new IllegalArgumentException("maxMismatch must be >= 0");
+            }
+            if (maxError < 0) {
+                throw new IllegalArgumentException("maxError must be >= 0");
+            }
+            if (minPassRate != null) {
+                requireRatio(minPassRate, "minPassRate");
+            }
+            this.maxMismatch = maxMismatch;
+            this.maxError = maxError;
+            this.minPassRate = minPassRate;
+        }
+
+        public int maxMismatch() {
+            return maxMismatch;
+        }
+
+        public int maxError() {
+            return maxError;
+        }
+
+        public Double minPassRate() {
+            return minPassRate;
+        }
+    }
+
+    public static final class GateResult {
+        private final QualityGateStatus status;
+        private final int mismatchCount;
+        private final int errorCount;
+        private final double passRate;
+        private final GateThresholds thresholds;
+        private final List<String> failureReasons;
+
+        GateResult(
+            QualityGateStatus status,
+            int mismatchCount,
+            int errorCount,
+            double passRate,
+            GateThresholds thresholds,
+            List<String> failureReasons
+        ) {
+            this.status = Objects.requireNonNull(status, "status");
+            if (mismatchCount < 0) {
+                throw new IllegalArgumentException("mismatchCount must be >= 0");
+            }
+            if (errorCount < 0) {
+                throw new IllegalArgumentException("errorCount must be >= 0");
+            }
+            requireRatio(passRate, "passRate");
+            this.mismatchCount = mismatchCount;
+            this.errorCount = errorCount;
+            this.passRate = passRate;
+            this.thresholds = Objects.requireNonNull(thresholds, "thresholds");
+            this.failureReasons = List.copyOf(new ArrayList<>(Objects.requireNonNull(failureReasons, "failureReasons")));
+        }
+
+        public QualityGateStatus status() {
+            return status;
+        }
+
+        public int mismatchCount() {
+            return mismatchCount;
+        }
+
+        public int errorCount() {
+            return errorCount;
+        }
+
+        public double passRate() {
+            return passRate;
+        }
+
+        public GateThresholds thresholds() {
+            return thresholds;
+        }
+
+        public List<String> failureReasons() {
+            return failureReasons;
+        }
+
+        Map<String, Object> toJsonMap() {
+            Map<String, Object> thresholdMap = new LinkedHashMap<>();
+            thresholdMap.put("maxMismatch", thresholds.maxMismatch());
+            thresholdMap.put("maxError", thresholds.maxError());
+            thresholdMap.put("minPassRate", thresholds.minPassRate());
+
+            Map<String, Object> measured = new LinkedHashMap<>();
+            measured.put("mismatch", mismatchCount);
+            measured.put("error", errorCount);
+            measured.put("passRate", passRate);
+
+            Map<String, Object> root = new LinkedHashMap<>();
+            root.put("status", status.name());
+            root.put("thresholds", thresholdMap);
+            root.put("measured", measured);
+            root.put("failureReasons", failureReasons);
+            return root;
+        }
+    }
+
     public static final class RunConfig {
         private final Path outputDir;
         private final String mongoUri;
         private final String seed;
         private final int scenarioCount;
         private final int topRegressionLimit;
+        private final GateThresholds gateThresholds;
+        private final boolean failOnGate;
 
         public RunConfig(Path outputDir, String mongoUri, String seed, int topRegressionLimit) {
             this(outputDir, mongoUri, seed, DEFAULT_SCENARIO_COUNT, topRegressionLimit);
         }
 
         public RunConfig(Path outputDir, String mongoUri, String seed, int scenarioCount, int topRegressionLimit) {
+            this(
+                outputDir,
+                mongoUri,
+                seed,
+                scenarioCount,
+                topRegressionLimit,
+                new GateThresholds(DEFAULT_MAX_MISMATCH, DEFAULT_MAX_ERROR, null),
+                DEFAULT_FAIL_ON_GATE
+            );
+        }
+
+        public RunConfig(
+            Path outputDir,
+            String mongoUri,
+            String seed,
+            int scenarioCount,
+            int topRegressionLimit,
+            GateThresholds gateThresholds,
+            boolean failOnGate
+        ) {
             this.outputDir = Objects.requireNonNull(outputDir, "outputDir").normalize();
             this.mongoUri = requireText(mongoUri, "mongoUri");
             this.seed = requireText(seed, "seed");
@@ -533,6 +749,8 @@ public final class RealMongodCorpusRunner {
                 throw new IllegalArgumentException("topRegressionLimit must be > 0");
             }
             this.topRegressionLimit = topRegressionLimit;
+            this.gateThresholds = Objects.requireNonNull(gateThresholds, "gateThresholds");
+            this.failOnGate = failOnGate;
         }
 
         static RunConfig fromArgs(String[] args) {
@@ -541,6 +759,10 @@ public final class RealMongodCorpusRunner {
             String seed = DEFAULT_SEED;
             int scenarioCount = DEFAULT_SCENARIO_COUNT;
             int topRegressionLimit = DEFAULT_TOP_REGRESSION_LIMIT;
+            int maxMismatch = DEFAULT_MAX_MISMATCH;
+            int maxError = DEFAULT_MAX_ERROR;
+            Double minPassRate = null;
+            boolean failOnGate = DEFAULT_FAIL_ON_GATE;
 
             for (String arg : args) {
                 if (arg == null || arg.isBlank()) {
@@ -566,6 +788,26 @@ public final class RealMongodCorpusRunner {
                     topRegressionLimit = parseInt(readValue(arg, "--top-regressions="), "top-regressions");
                     continue;
                 }
+                if (arg.startsWith("--max-mismatch=")) {
+                    maxMismatch = parseInt(readValue(arg, "--max-mismatch="), "max-mismatch");
+                    continue;
+                }
+                if (arg.startsWith("--max-error=")) {
+                    maxError = parseInt(readValue(arg, "--max-error="), "max-error");
+                    continue;
+                }
+                if (arg.startsWith("--min-pass-rate=")) {
+                    minPassRate = parseDouble(readValue(arg, "--min-pass-rate="), "min-pass-rate");
+                    continue;
+                }
+                if ("--fail-on-gate".equals(arg)) {
+                    failOnGate = true;
+                    continue;
+                }
+                if ("--no-fail-on-gate".equals(arg)) {
+                    failOnGate = false;
+                    continue;
+                }
                 throw new IllegalArgumentException("unknown option: " + arg);
             }
 
@@ -574,7 +816,8 @@ public final class RealMongodCorpusRunner {
                     "mongo-uri is required (set --mongo-uri or " + DEFAULT_MONGO_URI_ENV + ")"
                 );
             }
-            return new RunConfig(outputDir, mongoUri, seed, scenarioCount, topRegressionLimit);
+            GateThresholds thresholds = new GateThresholds(maxMismatch, maxError, minPassRate);
+            return new RunConfig(outputDir, mongoUri, seed, scenarioCount, topRegressionLimit, thresholds, failOnGate);
         }
 
         public Path outputDir() {
@@ -597,6 +840,14 @@ public final class RealMongodCorpusRunner {
             return topRegressionLimit;
         }
 
+        public GateThresholds gateThresholds() {
+            return gateThresholds;
+        }
+
+        public boolean failOnGate() {
+            return failOnGate;
+        }
+
         private static String readValue(String arg, String prefix) {
             String value = arg.substring(prefix.length()).trim();
             if (value.isEmpty()) {
@@ -612,6 +863,14 @@ public final class RealMongodCorpusRunner {
                 throw new IllegalArgumentException(optionName + " must be an integer: " + value);
             }
         }
+
+        private static double parseDouble(String value, String optionName) {
+            try {
+                return Double.parseDouble(value);
+            } catch (NumberFormatException exception) {
+                throw new IllegalArgumentException(optionName + " must be a number: " + value);
+            }
+        }
     }
 
     public static final class RunResult {
@@ -620,19 +879,22 @@ public final class RealMongodCorpusRunner {
         private final Instant generatedAt;
         private final DifferentialReport report;
         private final List<RegressionSample> topRegressions;
+        private final GateResult gateResult;
 
         RunResult(
             String seed,
             long numericSeed,
             Instant generatedAt,
             DifferentialReport report,
-            List<RegressionSample> topRegressions
+            List<RegressionSample> topRegressions,
+            GateResult gateResult
         ) {
             this.seed = requireText(seed, "seed");
             this.numericSeed = numericSeed;
             this.generatedAt = Objects.requireNonNull(generatedAt, "generatedAt");
             this.report = Objects.requireNonNull(report, "report");
             this.topRegressions = List.copyOf(new ArrayList<>(Objects.requireNonNull(topRegressions, "topRegressions")));
+            this.gateResult = Objects.requireNonNull(gateResult, "gateResult");
         }
 
         public String seed() {
@@ -653,6 +915,10 @@ public final class RealMongodCorpusRunner {
 
         public List<RegressionSample> topRegressions() {
             return topRegressions;
+        }
+
+        public GateResult gateResult() {
+            return gateResult;
         }
     }
 

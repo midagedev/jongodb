@@ -145,8 +145,19 @@ Official Suite Sharded UTF gate modes:
 Run differential baseline against real MongoDB:
 
 ```bash
-gradle realMongodDifferentialBaseline -PrealMongodUri="mongodb://localhost:27017"
+gradle realMongodDifferentialBaseline \
+  -PrealMongodUri="mongodb://localhost:27017" \
+  -PrealMongodMaxMismatch=0 \
+  -PrealMongodMaxError=0 \
+  -PrealMongodMinPassRate=1.0 \
+  -PrealMongodFailOnGate=true
 ```
+
+`realMongodDifferentialBaseline` gate options:
+- `realMongodMaxMismatch` (default `0`)
+- `realMongodMaxError` (default `0`)
+- `realMongodMinPassRate` (optional, range `0.0..1.0`)
+- `realMongodFailOnGate` (`true` by default)
 
 Run UTF corpus evidence:
 

@@ -214,14 +214,24 @@ tasks.register<JavaExec>("realMongodDifferentialBaseline") {
     val seed = (findProperty("realMongodSeed") as String?) ?: "wire-vs-real-mongod-baseline-v1"
     val scenarioCount = (findProperty("realMongodScenarioCount") as String?) ?: "2000"
     val topRegressions = (findProperty("realMongodTopRegressions") as String?) ?: "10"
+    val maxMismatch = (findProperty("realMongodMaxMismatch") as String?) ?: "0"
+    val maxError = (findProperty("realMongodMaxError") as String?) ?: "0"
+    val minPassRate = (findProperty("realMongodMinPassRate") as String?)?.trim().orEmpty()
+    val failOnGate = (findProperty("realMongodFailOnGate") as String?)?.toBoolean() ?: true
     val mongoUri = (findProperty("realMongodUri") as String?) ?: (System.getenv("JONGODB_REAL_MONGOD_URI") ?: "")
 
     args(
         "--output-dir=$outputDir",
         "--seed=$seed",
         "--scenario-count=$scenarioCount",
-        "--top-regressions=$topRegressions"
+        "--top-regressions=$topRegressions",
+        "--max-mismatch=$maxMismatch",
+        "--max-error=$maxError",
+        if (failOnGate) "--fail-on-gate" else "--no-fail-on-gate"
     )
+    if (minPassRate.isNotBlank()) {
+        args("--min-pass-rate=$minPassRate")
+    }
     if (mongoUri.isNotBlank()) {
         args("--mongo-uri=$mongoUri")
     }
