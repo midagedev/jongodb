@@ -431,6 +431,9 @@ tasks.register<JavaExec>("fixtureRefresh") {
     val mode = (findProperty("fixtureRefreshMode") as String?)?.trim().orEmpty().ifBlank { "full" }
     val requireApproval = (findProperty("fixtureRefreshRequireApproval") as String?)?.toBoolean() ?: false
     val approved = (findProperty("fixtureRefreshApproved") as String?)?.toBoolean() ?: false
+    val warnThreshold = (findProperty("fixtureRefreshWarnThreshold") as String?)?.trim().orEmpty().ifBlank { "0.15" }
+    val failThreshold = (findProperty("fixtureRefreshFailThreshold") as String?)?.trim().orEmpty().ifBlank { "0.30" }
+    val failOnThreshold = (findProperty("fixtureRefreshFailOnThreshold") as String?)?.toBoolean() ?: false
 
     doFirst {
         if (baselineDir.isBlank()) {
@@ -448,7 +451,9 @@ tasks.register<JavaExec>("fixtureRefresh") {
         "--baseline-dir=$baselineDir",
         "--candidate-dir=$candidateDir",
         "--output-dir=$outputDir",
-        "--mode=$mode"
+        "--mode=$mode",
+        "--warn-threshold=$warnThreshold",
+        "--fail-threshold=$failThreshold"
     )
     if (requireApproval) {
         args("--require-approval")
@@ -456,6 +461,7 @@ tasks.register<JavaExec>("fixtureRefresh") {
     if (approved) {
         args("--approved")
     }
+    args(if (failOnThreshold) "--fail-on-threshold" else "--no-fail-on-threshold")
 }
 
 tasks.register<JavaExec>("fixtureRestore") {

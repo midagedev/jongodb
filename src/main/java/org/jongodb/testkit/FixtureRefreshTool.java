@@ -70,6 +70,11 @@ public final class FixtureRefreshTool {
 
             final List<CollectionDiff> diffs = computeDiffs(baseline, candidate, config.mode(), refreshOutputDir);
             final boolean requiresApproval = diffs.stream().anyMatch(CollectionDiff::requiresApproval);
+            final FixtureDriftAnalyzer.DriftReport driftReport = FixtureDriftAnalyzer.analyze(
+                    baseline,
+                    candidate,
+                    config.warnThreshold(),
+                    config.failThreshold());
 
             final Instant finishedAt = Instant.now();
             final RefreshReport report = RefreshReport.from(
@@ -79,11 +84,20 @@ public final class FixtureRefreshTool {
                     baseline,
                     candidate,
                     diffs,
+                    driftReport,
                     requiresApproval,
                     config.approved());
 
             Files.writeString(config.outputDir().resolve(REPORT_JSON), report.toJson(), StandardCharsets.UTF_8);
             Files.writeString(config.outputDir().resolve(REPORT_MD), report.toMarkdown(), StandardCharsets.UTF_8);
+            Files.writeString(
+                    config.outputDir().resolve(FixtureDriftAnalyzer.REPORT_JSON),
+                    driftReport.toJson(),
+                    StandardCharsets.UTF_8);
+            Files.writeString(
+                    config.outputDir().resolve(FixtureDriftAnalyzer.REPORT_MD),
+                    driftReport.toMarkdown(),
+                    StandardCharsets.UTF_8);
 
             out.println("Fixture refresh finished");
             out.println("- mode: " + config.mode().value());
@@ -91,12 +105,20 @@ public final class FixtureRefreshTool {
             out.println("- candidateCollections: " + candidate.size());
             out.println("- changedCollections: " + diffs.stream().filter(CollectionDiff::isChanged).count());
             out.println("- requiresApproval: " + requiresApproval);
+            out.println("- driftWarnings: " + driftReport.warningCollections());
+            out.println("- driftFailures: " + driftReport.failingCollections());
             out.println("- outputDir: " + refreshOutputDir);
             out.println("- reportJson: " + config.outputDir().resolve(REPORT_JSON));
             out.println("- reportMd: " + config.outputDir().resolve(REPORT_MD));
+            out.println("- driftJson: " + config.outputDir().resolve(FixtureDriftAnalyzer.REPORT_JSON));
+            out.println("- driftMd: " + config.outputDir().resolve(FixtureDriftAnalyzer.REPORT_MD));
 
             if (config.requireApproval() && requiresApproval && !config.approved()) {
                 err.println("refresh includes breaking changes; rerun with --approved to acknowledge");
+                return 1;
+            }
+            if (config.failOnThreshold() && driftReport.hasFailures()) {
+                err.println("drift threshold failed; adjust fixtures or raise threshold with explicit policy update");
                 return 1;
             }
             return 0;
@@ -356,6 +378,10 @@ public final class FixtureRefreshTool {
         stream.println("  --mode=full|incremental      Refresh mode (default: full)");
         stream.println("  --require-approval           Fail when breaking changes exist without --approved");
         stream.println("  --approved                   Acknowledge and approve breaking refresh result");
+        stream.println("  --warn-threshold=<value>     Drift warning threshold score (default: 0.15)");
+        stream.println("  --fail-threshold=<value>     Drift failure threshold score (default: 0.30)");
+        stream.println("  --fail-on-threshold          Fail when any collection crosses fail threshold");
+        stream.println("  --no-fail-on-threshold       Do not fail on drift threshold (default)");
         stream.println("  --help                       Show usage");
     }
 
@@ -366,6 +392,9 @@ public final class FixtureRefreshTool {
             RefreshMode mode,
             boolean requireApproval,
             boolean approved,
+            double warnThreshold,
+            double failThreshold,
+            boolean failOnThreshold,
             boolean help) {
         static Config fromArgs(final String[] args) {
             Path baselineDir = null;
@@ -374,6 +403,9 @@ public final class FixtureRefreshTool {
             RefreshMode mode = RefreshMode.FULL;
             boolean requireApproval = false;
             boolean approved = false;
+            double warnThreshold = 0.15d;
+            double failThreshold = 0.30d;
+            boolean failOnThreshold = false;
             boolean help = false;
 
             for (final String arg : args) {
@@ -405,6 +437,22 @@ public final class FixtureRefreshTool {
                     approved = true;
                     continue;
                 }
+                if (arg.startsWith("--warn-threshold=")) {
+                    warnThreshold = parseThreshold(valueAfterPrefix(arg, "--warn-threshold="), "--warn-threshold");
+                    continue;
+                }
+                if (arg.startsWith("--fail-threshold=")) {
+                    failThreshold = parseThreshold(valueAfterPrefix(arg, "--fail-threshold="), "--fail-threshold");
+                    continue;
+                }
+                if ("--fail-on-threshold".equals(arg)) {
+                    failOnThreshold = true;
+                    continue;
+                }
+                if ("--no-fail-on-threshold".equals(arg)) {
+                    failOnThreshold = false;
+                    continue;
+                }
                 throw new IllegalArgumentException("unknown argument: " + arg);
             }
 
@@ -417,6 +465,12 @@ public final class FixtureRefreshTool {
             if (!help && outputDir == null) {
                 throw new IllegalArgumentException("--output-dir=<dir> is required");
             }
+            if (!help && warnThreshold < 0d) {
+                throw new IllegalArgumentException("--warn-threshold must be >= 0");
+            }
+            if (!help && failThreshold < warnThreshold) {
+                throw new IllegalArgumentException("--fail-threshold must be >= --warn-threshold");
+            }
 
             return new Config(
                     baselineDir,
@@ -425,7 +479,18 @@ public final class FixtureRefreshTool {
                     mode,
                     requireApproval,
                     approved,
+                    warnThreshold,
+                    failThreshold,
+                    failOnThreshold,
                     help);
+        }
+
+        private static double parseThreshold(final String rawValue, final String fieldName) {
+            try {
+                return Double.parseDouble(rawValue);
+            } catch (final NumberFormatException exception) {
+                throw new IllegalArgumentException(fieldName + " must be a decimal number");
+            }
         }
 
         private static String valueAfterPrefix(final String arg, final String prefix) {
@@ -502,6 +567,9 @@ public final class FixtureRefreshTool {
             int baselineCollections,
             int candidateCollections,
             int changedCollections,
+            int driftWarningCollections,
+            int driftFailingCollections,
+            boolean driftHasFailures,
             boolean requiresApproval,
             boolean approved,
             List<CollectionDiff> collections) {
@@ -512,6 +580,7 @@ public final class FixtureRefreshTool {
                 final Map<String, List<Document>> baseline,
                 final Map<String, List<Document>> candidate,
                 final List<CollectionDiff> collections,
+                final FixtureDriftAnalyzer.DriftReport driftReport,
                 final boolean requiresApproval,
                 final boolean approved) {
             final int changedCollections = (int) collections.stream().filter(CollectionDiff::isChanged).count();
@@ -522,6 +591,9 @@ public final class FixtureRefreshTool {
                     baseline.size(),
                     candidate.size(),
                     changedCollections,
+                    driftReport.warningCollections(),
+                    driftReport.failingCollections(),
+                    driftReport.hasFailures(),
                     requiresApproval,
                     approved,
                     collections);
@@ -535,6 +607,9 @@ public final class FixtureRefreshTool {
             root.put("baselineCollections", baselineCollections);
             root.put("candidateCollections", candidateCollections);
             root.put("changedCollections", changedCollections);
+            root.put("driftWarningCollections", driftWarningCollections);
+            root.put("driftFailingCollections", driftFailingCollections);
+            root.put("driftHasFailures", driftHasFailures);
             root.put("requiresApproval", requiresApproval);
             root.put("approved", approved);
             final List<Map<String, Object>> items = new ArrayList<>(collections.size());
@@ -552,6 +627,9 @@ public final class FixtureRefreshTool {
             sb.append("- baselineCollections: ").append(baselineCollections).append("\n");
             sb.append("- candidateCollections: ").append(candidateCollections).append("\n");
             sb.append("- changedCollections: ").append(changedCollections).append("\n");
+            sb.append("- driftWarningCollections: ").append(driftWarningCollections).append("\n");
+            sb.append("- driftFailingCollections: ").append(driftFailingCollections).append("\n");
+            sb.append("- driftHasFailures: ").append(driftHasFailures).append("\n");
             sb.append("- requiresApproval: ").append(requiresApproval).append("\n");
             sb.append("- approved: ").append(approved).append("\n\n");
 
