@@ -11,7 +11,7 @@ It complements the broad scorecard/failure-ledger view with a focused complex-qu
 
 ## Pack Metadata
 
-- pack version: `complex-query-pack-v2`
+- pack version: `complex-query-pack-v3`
 - canonical pattern count: `24`
 - support classes:
   - `supported`
@@ -67,10 +67,23 @@ The above metadata is published in artifact JSON under:
 - `cq.aggregate.sortbycount-after-project`
 - `cq.aggregate.unionwith-and-match`
 - `cq.expr.array-index-comparison`
+- `cq.unsupported.aggregate-graphlookup`
 
 ### Explicitly Unsupported
 
-- `cq.unsupported.aggregate-graphlookup`
+- _(none in current canonical pack)_
+
+### `$graphLookup` Certification Subset
+
+Supported option set in current engine subset:
+- `from`
+- `startWith`
+- `connectFromField`
+- `connectToField`
+- `as`
+- `maxDepth` (optional non-negative integer)
+
+Out-of-subset options (for example `depthField`, `restrictSearchWithMatch`) are rejected as `NotImplemented` by design.
 
 ## Runner
 

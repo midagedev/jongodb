@@ -10,7 +10,7 @@ import java.util.Objects;
  * Canonical complex-query certification pattern pack.
  */
 public final class ComplexQueryPatternPack {
-    public static final String PACK_VERSION = "complex-query-pack-v2";
+    public static final String PACK_VERSION = "complex-query-pack-v3";
 
     private static final List<PatternCase> PATTERNS = List.of(
             nestedLogicAndOrDotted(),
@@ -834,10 +834,10 @@ public final class ComplexQueryPatternPack {
     private static PatternCase unsupportedAggregateGraphLookup() {
         return pattern(
                 "cq.unsupported.aggregate-graphlookup",
-                "unsupported graphLookup stage",
-                SupportClass.EXPLICITLY_UNSUPPORTED,
-                ExpectedOutcome.UNSUPPORTED_POLICY,
-                "Keeps unsupported complex join stage under deterministic explicit policy.",
+                "graphLookup stage (minimal subset)",
+                SupportClass.PARTIAL,
+                ExpectedOutcome.MATCH,
+                "Validates minimal graph traversal subset for certification hierarchy expansion.",
                 "hierarchy traversal",
                 command(
                         "insert",

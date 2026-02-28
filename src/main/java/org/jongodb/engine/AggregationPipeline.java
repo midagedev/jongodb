@@ -1,12 +1,16 @@
 package org.jongodb.engine;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.bson.Document;
 
 public final class AggregationPipeline {
@@ -21,6 +25,14 @@ public final class AggregationPipeline {
                         "aggregation.cross_collection_resolver",
                         "stage requires collection resolver: " + requireText(collectionName, "collectionName"));
             };
+
+    private static final Set<String> GRAPH_LOOKUP_SUPPORTED_OPTIONS = Set.of(
+            "from",
+            "startWith",
+            "connectFromField",
+            "connectToField",
+            "as",
+            "maxDepth");
 
     private AggregationPipeline() {}
 
@@ -93,6 +105,7 @@ public final class AggregationPipeline {
                 case "$replaceWith" -> applyReplaceWith(working, stageDefinition);
                 case "$facet" -> applyFacet(working, stageDefinition, collectionResolver, collation);
                 case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver, collation);
+                case "$graphLookup" -> applyGraphLookup(working, stageDefinition, collectionResolver);
                 case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver, collation);
                 default -> throw new UnsupportedFeatureException(
                         "aggregation.stage." + stageName,
@@ -894,6 +907,107 @@ public final class AggregationPipeline {
         return List.copyOf(combined);
     }
 
+    private static List<Document> applyGraphLookup(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollectionResolver collectionResolver) {
+        final Document graphLookupDefinition = requireDocument(stageDefinition, "$graphLookup stage requires a document");
+        for (final String option : graphLookupDefinition.keySet()) {
+            if (!GRAPH_LOOKUP_SUPPORTED_OPTIONS.contains(option)) {
+                throw new UnsupportedFeatureException(
+                        "aggregation.graphLookup.option." + option,
+                        "unsupported $graphLookup option: " + option);
+            }
+        }
+
+        final String from = requireStringField(graphLookupDefinition, "from", "$graphLookup.from must be a string");
+        if (!graphLookupDefinition.containsKey("startWith")) {
+            throw new IllegalArgumentException("$graphLookup.startWith is required");
+        }
+        final Object startWithExpression = graphLookupDefinition.get("startWith");
+        final String connectFromField = requireStringField(
+                graphLookupDefinition,
+                "connectFromField",
+                "$graphLookup.connectFromField must be a string");
+        final String connectToField = requireStringField(
+                graphLookupDefinition,
+                "connectToField",
+                "$graphLookup.connectToField must be a string");
+        final String as = requireStringField(graphLookupDefinition, "as", "$graphLookup.as must be a string");
+        final int maxDepth = parseGraphLookupMaxDepth(graphLookupDefinition.get("maxDepth"));
+
+        final List<Document> foreignSource = materializeDocuments(
+                collectionResolver.resolve(from),
+                "$graphLookup resolver returned null documents");
+        final List<Document> output = new ArrayList<>(input.size());
+        for (final Document source : input) {
+            final Deque<GraphLookupFrontier> frontier = new ArrayDeque<>();
+            for (final Object seed : graphLookupValues(evaluateExpression(source, startWithExpression))) {
+                frontier.addLast(new GraphLookupFrontier(seed, 0));
+            }
+
+            final Set<GroupKey> visited = new LinkedHashSet<>();
+            final List<Document> graph = new ArrayList<>();
+            while (!frontier.isEmpty()) {
+                final GraphLookupFrontier current = frontier.removeFirst();
+                for (final Document candidate : foreignSource) {
+                    final Object connectToValue = resolvePath(candidate, connectToField).valueOrNull();
+                    if (!lookupValueMatches(current.value(), connectToValue)) {
+                        continue;
+                    }
+
+                    final GroupKey candidateKey = new GroupKey(candidate);
+                    if (!visited.add(candidateKey)) {
+                        continue;
+                    }
+
+                    graph.add(DocumentCopies.copy(candidate));
+                    if (current.depth() >= maxDepth) {
+                        continue;
+                    }
+
+                    final Object nextValues = resolvePath(candidate, connectFromField).valueOrNull();
+                    for (final Object nextValue : graphLookupValues(nextValues)) {
+                        frontier.addLast(new GraphLookupFrontier(nextValue, current.depth() + 1));
+                    }
+                }
+            }
+
+            final Document expanded = DocumentCopies.copy(source);
+            expanded.put(as, graph);
+            output.add(expanded);
+        }
+        return List.copyOf(output);
+    }
+
+    private static List<Object> graphLookupValues(final Object value) {
+        if (value instanceof List<?> listValue) {
+            final List<Object> values = new ArrayList<>(listValue.size());
+            for (final Object item : listValue) {
+                values.add(DocumentCopies.copyAny(item));
+            }
+            return Collections.unmodifiableList(values);
+        }
+        return Collections.singletonList(DocumentCopies.copyAny(value));
+    }
+
+    private static int parseGraphLookupMaxDepth(final Object value) {
+        if (value == null) {
+            return Integer.MAX_VALUE;
+        }
+        if (!(value instanceof Number numericValue)) {
+            throw new IllegalArgumentException("$graphLookup.maxDepth must be a non-negative integer");
+        }
+        final double numeric = numericValue.doubleValue();
+        if (!Double.isFinite(numeric)
+                || Math.rint(numeric) != numeric
+                || numeric < 0d
+                || numeric > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("$graphLookup.maxDepth must be a non-negative integer");
+        }
+        return (int) numeric;
+    }
+
     private static Object evaluateExpression(final Document source, final Object expression) {
         if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
             if ("$$ROOT".equals(pathExpression) || "$$CURRENT".equals(pathExpression)) {
@@ -1143,6 +1257,8 @@ public final class AggregationPipeline {
             return present ? value : null;
         }
     }
+
+    private record GraphLookupFrontier(Object value, int depth) {}
 
     private static final class CountBucket {
         private final Object id;

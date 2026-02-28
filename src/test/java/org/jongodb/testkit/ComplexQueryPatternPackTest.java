@@ -34,7 +34,7 @@ class ComplexQueryPatternPackTest {
             }
         }
 
-        assertTrue(explicitlyUnsupportedCount >= 1, "expected explicit unsupported coverage in pattern pack");
+        assertEquals(0, explicitlyUnsupportedCount, "expected no explicitly unsupported patterns in pack");
     }
 
     @Test
@@ -47,7 +47,7 @@ class ComplexQueryPatternPackTest {
     }
 
     @Test
-    void queryModAndBitsAllSetPatternsExecuteAsSupportedMatches() {
+    void queryModBitsAllSetAndGraphLookupPatternsExecuteAsSupportedMatches() {
         final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
 
         final ScenarioOutcome modOutcome = backend.execute(findPattern("cq.unsupported.query-mod").scenario());
@@ -57,6 +57,13 @@ class ComplexQueryPatternPackTest {
         final ScenarioOutcome bitsOutcome = backend.execute(findPattern("cq.unsupported.query-bitsallset").scenario());
         assertTrue(bitsOutcome.success(), bitsOutcome.errorMessage().orElse("expected bitsAllSet scenario success"));
         assertEquals(1, findFirstBatchSize(bitsOutcome));
+
+        final ScenarioOutcome graphLookupOutcome =
+                backend.execute(findPattern("cq.unsupported.aggregate-graphlookup").scenario());
+        assertTrue(
+                graphLookupOutcome.success(),
+                graphLookupOutcome.errorMessage().orElse("expected graphLookup scenario success"));
+        assertEquals(3, findFirstBatchSize(graphLookupOutcome));
     }
 
     private static ComplexQueryPatternPack.PatternCase findPattern(final String patternId) {
