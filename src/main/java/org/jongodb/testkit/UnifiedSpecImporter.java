@@ -282,12 +282,36 @@ public final class UnifiedSpecImporter {
         }
         final Map<String, Object> document =
                 asStringObjectMap(arguments.get("document"), "insertOne.arguments.document");
-        if (containsUnsupportedKeyPath(document)) {
-            throw new UnsupportedOperationException("unsupported UTF insertOne document keys: dot or dollar path");
+        if (containsDollarPrefixedKeyInIdDocument(document.get("_id"))) {
+            throw new UnsupportedOperationException(
+                    "unsupported UTF insertOne _id document with dollar-prefixed keys");
         }
         final Map<String, Object> payload = commandEnvelope("insert", database, collection);
         payload.put("documents", List.of(deepCopyValue(document)));
         return new ScenarioCommand("insert", immutableMap(payload));
+    }
+
+    private static boolean containsDollarPrefixedKeyInIdDocument(final Object idValue) {
+        if (idValue instanceof Map<?, ?> mapValue) {
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                final String key = String.valueOf(entry.getKey());
+                if (key.startsWith("$")) {
+                    return true;
+                }
+                if (containsDollarPrefixedKeyInIdDocument(entry.getValue())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (idValue instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (containsDollarPrefixedKeyInIdDocument(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static ScenarioCommand insertMany(
@@ -514,29 +538,6 @@ public final class UnifiedSpecImporter {
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("replaceOne", immutableMap(payload));
-    }
-
-    private static boolean containsUnsupportedKeyPath(final Object value) {
-        if (value instanceof Map<?, ?> mapValue) {
-            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
-                final String key = String.valueOf(entry.getKey());
-                if (key.startsWith("$") || key.contains(".")) {
-                    return true;
-                }
-                if (containsUnsupportedKeyPath(entry.getValue())) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (value instanceof List<?> listValue) {
-            for (final Object item : listValue) {
-                if (containsUnsupportedKeyPath(item)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private static boolean isReplacementDocument(final Object rawUpdate) {
