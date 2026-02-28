@@ -1,0 +1,54 @@
+name: Fixture Refresh Approval Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  approval-gate:
+    name: fixture-refresh-approval-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate fixture refresh approval label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pullRequest = context.payload.pull_request;
+            if (!pullRequest) {
+              core.setFailed('pull_request context is required');
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullRequest.number,
+              per_page: 100
+            });
+
+            const touchesRefreshArtifacts = files.some((file) => {
+              const fixturePath = file.filename.startsWith('testkit/fixture/');
+              const refreshPayload = file.filename.endsWith('.ndjson')
+                || file.filename.includes('/artifacts/')
+                || file.filename.includes('/refreshed/');
+              return fixturePath && refreshPayload;
+            });
+
+            if (!touchesRefreshArtifacts) {
+              core.info('No fixture refresh artifact changes detected; gate passed.');
+              return;
+            }
+
+            const labels = (pullRequest.labels || []).map((label) => label.name);
+            const approved = labels.includes('fixture-refresh-approved');
+
+            if (!approved) {
+              core.setFailed('Fixture refresh artifact changes detected. Add label "fixture-refresh-approved" to proceed.');
+              return;
+            }
+
+            core.info('Approval label detected: fixture-refresh-approved');

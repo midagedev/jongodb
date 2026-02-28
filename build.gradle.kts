@@ -419,6 +419,45 @@ tasks.register<JavaExec>("fixtureArtifactPack") {
     }
 }
 
+tasks.register<JavaExec>("fixtureRefresh") {
+    group = "verification"
+    description = "Runs full/incremental fixture refresh and writes diff report + refreshed ndjson output."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureRefreshTool")
+
+    val baselineDir = (findProperty("fixtureRefreshBaselineDir") as String?)?.trim().orEmpty()
+    val candidateDir = (findProperty("fixtureRefreshCandidateDir") as String?)?.trim().orEmpty()
+    val outputDir = (findProperty("fixtureRefreshOutputDir") as String?)?.trim().orEmpty()
+    val mode = (findProperty("fixtureRefreshMode") as String?)?.trim().orEmpty().ifBlank { "full" }
+    val requireApproval = (findProperty("fixtureRefreshRequireApproval") as String?)?.toBoolean() ?: false
+    val approved = (findProperty("fixtureRefreshApproved") as String?)?.toBoolean() ?: false
+
+    doFirst {
+        if (baselineDir.isBlank()) {
+            throw GradleException("fixtureRefreshBaselineDir property is required")
+        }
+        if (candidateDir.isBlank()) {
+            throw GradleException("fixtureRefreshCandidateDir property is required")
+        }
+        if (outputDir.isBlank()) {
+            throw GradleException("fixtureRefreshOutputDir property is required")
+        }
+    }
+
+    args(
+        "--baseline-dir=$baselineDir",
+        "--candidate-dir=$candidateDir",
+        "--output-dir=$outputDir",
+        "--mode=$mode"
+    )
+    if (requireApproval) {
+        args("--require-approval")
+    }
+    if (approved) {
+        args("--approved")
+    }
+}
+
 tasks.register<JavaExec>("fixtureRestore") {
     group = "verification"
     description = "Restores fixture ndjson into target MongoDB using replace/merge mode with diagnostics report."
