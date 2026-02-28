@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
+import org.bson.BsonInt64;
 import org.bson.BsonNull;
 import org.junit.jupiter.api.Test;
 
@@ -202,6 +203,24 @@ class RealMongodBackendTest {
         assertEquals(2, values.get(2).asInt32().getValue());
         assertTrue(values.get(3).isDocument());
         assertTrue(values.get(4).isArray());
+    }
+
+    @Test
+    void normalizeResponseForComparisonAddsCountAliasForCountCommand() throws Exception {
+        final Method method = RealMongodBackend.class.getDeclaredMethod(
+                "normalizeResponseForComparison",
+                ScenarioCommand.class,
+                BsonDocument.class);
+        method.setAccessible(true);
+
+        final ScenarioCommand command = new ScenarioCommand("count", Map.of("count", "users"));
+        final BsonDocument response = new BsonDocument()
+                .append("n", new BsonInt64(3L))
+                .append("ok", new BsonInt32(1));
+
+        final BsonDocument normalized = (BsonDocument) method.invoke(null, command, response);
+        assertEquals(3L, normalized.getInt64("n").getValue());
+        assertEquals(3L, normalized.getInt64("count").getValue());
     }
 
     private static MongoClient mongoClientProxy(MongoDatabase database) {

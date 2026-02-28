@@ -736,6 +736,48 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsEstimatedDocumentCountAsCountCommandSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("estimated-document-count.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "estimated count subset",
+                      "operations": [
+                        {"name": "insertOne", "arguments": {"document": {"_id": 1, "name": "alice"}}},
+                        {"name": "estimatedDocumentCount", "arguments": {"maxTimeMS": 1000, "comment": "edc", "rawData": true}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("count", scenario.commands().get(1).commandName());
+        assertEquals("users", scenario.commands().get(1).payload().get("count"));
+        assertEquals(Map.of(), scenario.commands().get(1).payload().get("query"));
+        assertEquals(1000, scenario.commands().get(1).payload().get("maxTimeMS"));
+        assertEquals("edc", scenario.commands().get(1).payload().get("comment"));
+        assertTrue(!scenario.commands().get(1).payload().containsKey("rawData"));
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+        final Map<String, Object> countResult = outcome.commandResults().get(1);
+        assertEquals(1L, ((Number) countResult.get("count")).longValue());
+    }
+
+    @Test
     void importsRunCommandSubsetAndExecutesThroughWireBackend() throws IOException {
         Files.writeString(
                 tempDir.resolve("run-command.json"),

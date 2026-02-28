@@ -250,6 +250,7 @@ public final class UnifiedSpecImporter {
             case "aggregate" -> aggregate(arguments, database, collection);
             case "count" -> countDocuments(arguments, database, collection);
             case "countDocuments" -> countDocuments(arguments, database, collection);
+            case "estimatedDocumentCount" -> estimatedDocumentCount(arguments, database, collection);
             case "distinct" -> distinct(arguments, database, collection);
             case "updateOne" -> update(arguments, database, collection, false);
             case "updateMany" -> update(arguments, database, collection, true);
@@ -337,6 +338,18 @@ public final class UnifiedSpecImporter {
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("countDocuments", immutableMap(payload));
+    }
+
+    private static ScenarioCommand estimatedDocumentCount(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> payload = commandEnvelope("count", database, collection);
+        payload.put("query", Map.of());
+        copyIfPresent(arguments, payload, "maxTimeMS");
+        copyIfPresent(arguments, payload, "comment");
+        // In the current strict lane (<8.2), rawData must be ignored.
+        return new ScenarioCommand("count", immutableMap(payload));
     }
 
     private static ScenarioCommand distinct(

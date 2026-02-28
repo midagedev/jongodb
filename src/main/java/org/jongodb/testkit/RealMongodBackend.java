@@ -629,6 +629,8 @@ public final class RealMongodBackend implements DifferentialBackend {
         final ScenarioCommand command,
         final BsonDocument responseBody
     ) {
+        final boolean countCommand = "count".equals(command.commandName());
+        final boolean countDocumentsCommand = "countDocuments".equals(command.commandName());
         if ("distinct".equals(command.commandName())) {
             final BsonValue valuesValue = responseBody.get("values");
             if (valuesValue != null && valuesValue.isArray()) {
@@ -637,10 +639,13 @@ public final class RealMongodBackend implements DifferentialBackend {
             return responseBody;
         }
 
-        if (!"countDocuments".equals(command.commandName())) {
+        if (!countCommand && !countDocumentsCommand) {
             return responseBody;
         }
         if (!responseBody.containsKey("n") || responseBody.containsKey("count")) {
+            if (countCommand) {
+                return responseBody;
+            }
             final BsonValue cursorValue = responseBody.get("cursor");
             if (cursorValue == null || !cursorValue.isDocument()) {
                 return responseBody;
