@@ -1369,6 +1369,76 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsInsertOneWithDotOrDollarKeys() throws IOException {
+        Files.writeString(
+                tempDir.resolve("insert-one-dot-dollar.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "insertOne with dotted and dollar keys",
+                      "operations": [
+                        {"name": "insertOne", "arguments": {"document": {"_id": 1, "a.b": 1}}},
+                        {"name": "insertOne", "arguments": {"document": {"_id": 2, "nested": {"$x": 1}}}},
+                        {"name": "countDocuments", "arguments": {"filter": {}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        assertEquals("insert", scenario.commands().get(0).commandName());
+        assertEquals("insert", scenario.commands().get(1).commandName());
+        assertEquals("countDocuments", scenario.commands().get(2).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+        final Map<String, Object> countResult = outcome.commandResults().get(2);
+        assertEquals(2L, ((Number) countResult.get("n")).longValue());
+        assertEquals(2L, ((Number) countResult.get("count")).longValue());
+    }
+
+    @Test
+    void skipsInsertOneWithDollarPrefixedKeyInIdDocument() throws IOException {
+        Files.writeString(
+                tempDir.resolve("insert-one-id-dollar.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "insertOne with dollar-prefixed key in _id document",
+                      "operations": [
+                        {"name": "insertOne", "arguments": {"document": {"_id": {"$a": 1}}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertEquals(
+                "unsupported UTF insertOne _id document with dollar-prefixed keys",
+                result.skippedCases().get(0).reason());
+    }
+
+    @Test
     void importsInsertManyOrderedFalseForExecutionParity() throws IOException {
         Files.writeString(
                 tempDir.resolve("insert-many-ordered-false.json"),
