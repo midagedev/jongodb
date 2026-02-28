@@ -295,9 +295,6 @@ public final class UnifiedSpecImporter {
         final List<Object> copied = new ArrayList<>(documents.size());
         for (final Object document : documents) {
             final Map<String, Object> mapped = asStringObjectMap(document, "insertMany document");
-            if (containsUnsupportedKeyPath(mapped)) {
-                throw new UnsupportedOperationException("unsupported UTF insertMany document keys: dot or dollar path");
-            }
             copied.add(deepCopyValue(mapped));
         }
         final Map<String, Object> payload = commandEnvelope("insert", database, collection);
@@ -606,10 +603,6 @@ public final class UnifiedSpecImporter {
         final boolean ordered = orderedValue == null || Boolean.TRUE.equals(orderedValue);
 
         final List<Object> requests = asList(arguments.get("requests"), "bulkWrite.arguments.requests");
-        if (requests.isEmpty()) {
-            throw new IllegalArgumentException("bulkWrite.arguments.requests must not be empty");
-        }
-
         final List<Object> operations = new ArrayList<>(requests.size());
         for (final Object request : requests) {
             final Map<String, Object> requestDocument = asStringObjectMap(request, "bulkWrite request");
@@ -785,9 +778,6 @@ public final class UnifiedSpecImporter {
             throw new IllegalArgumentException("clientBulkWrite.arguments.ordered must be a boolean");
         }
         final boolean ordered = orderedValue == null || Boolean.TRUE.equals(orderedValue);
-        if (Boolean.TRUE.equals(arguments.get("verboseResults"))) {
-            throw new UnsupportedOperationException("unsupported UTF clientBulkWrite option: verboseResults=true");
-        }
 
         final Object modelsValue = arguments.containsKey("models")
                 ? arguments.get("models")
@@ -795,9 +785,6 @@ public final class UnifiedSpecImporter {
                         ? arguments.get("operations")
                         : arguments.get("requests");
         final List<Object> models = asList(modelsValue, "clientBulkWrite.arguments.models");
-        if (models.isEmpty()) {
-            throw new IllegalArgumentException("clientBulkWrite.arguments.models must not be empty");
-        }
 
         CollectionTarget namespace = null;
         final List<Object> requests = new ArrayList<>(models.size());
@@ -818,8 +805,6 @@ public final class UnifiedSpecImporter {
                     defaultCollection);
             if (namespace == null) {
                 namespace = currentNamespace;
-            } else if (!namespace.equals(currentNamespace)) {
-                throw new UnsupportedOperationException("unsupported UTF clientBulkWrite mixed namespaces");
             }
 
             final Map<String, Object> normalizedOperation = new LinkedHashMap<>(operationArguments);
