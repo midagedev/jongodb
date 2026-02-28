@@ -60,6 +60,11 @@ class FixtureRefreshToolTest {
         assertEquals("full", report.getString("mode"));
         assertEquals(1, report.getInteger("changedCollections"));
         assertEquals(false, report.getBoolean("requiresApproval"));
+        assertTrue(report.containsKey("driftWarningCollections"));
+        assertTrue(report.containsKey("driftFailingCollections"));
+
+        assertTrue(Files.exists(outputDir.resolve("fixture-drift-report.json")));
+        assertTrue(Files.exists(outputDir.resolve("fixture-drift-report.md")));
     }
 
     @Test
@@ -153,5 +158,72 @@ class FixtureRefreshToolTest {
                 new PrintStream(new ByteArrayOutputStream()),
                 new PrintStream(new ByteArrayOutputStream()));
         assertEquals(0, approvedExit);
+    }
+
+    @Test
+    void failsWhenDriftThresholdIsExceeded(@TempDir final Path tempDir) throws Exception {
+        final Path baselineDir = tempDir.resolve("baseline");
+        final Path candidateDir = tempDir.resolve("candidate");
+        final Path outputDir = tempDir.resolve("out");
+        Files.createDirectories(baselineDir);
+        Files.createDirectories(candidateDir);
+
+        Files.writeString(
+                baselineDir.resolve("app.users.ndjson"),
+                """
+                {"_id":1,"tier":"free"}
+                {"_id":2,"tier":"free"}
+                {"_id":3,"tier":"free"}
+                {"_id":4,"tier":"free"}
+                """,
+                StandardCharsets.UTF_8);
+        Files.writeString(
+                candidateDir.resolve("app.users.ndjson"),
+                """
+                {"_id":1,"tier":"enterprise"}
+                {"_id":2,"tier":"enterprise"}
+                {"_id":3,"tier":"enterprise"}
+                {"_id":4,"tier":"enterprise"}
+                {"_id":5,"tier":"enterprise"}
+                {"_id":6,"tier":"enterprise"}
+                {"_id":7,"tier":"enterprise"}
+                {"_id":8,"tier":"enterprise"}
+                """,
+                StandardCharsets.UTF_8);
+
+        final ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        final int failedExit = FixtureRefreshTool.run(
+                new String[] {
+                    "--baseline-dir=" + baselineDir,
+                    "--candidate-dir=" + candidateDir,
+                    "--output-dir=" + outputDir,
+                    "--mode=full",
+                    "--warn-threshold=0.10",
+                    "--fail-threshold=0.20",
+                    "--fail-on-threshold"
+                },
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(errBytes));
+        assertEquals(1, failedExit);
+        assertTrue(errBytes.toString().contains("drift threshold failed"));
+
+        final int bypassExit = FixtureRefreshTool.run(
+                new String[] {
+                    "--baseline-dir=" + baselineDir,
+                    "--candidate-dir=" + candidateDir,
+                    "--output-dir=" + outputDir,
+                    "--mode=full",
+                    "--warn-threshold=0.10",
+                    "--fail-threshold=0.20",
+                    "--no-fail-on-threshold"
+                },
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(new ByteArrayOutputStream()));
+        assertEquals(0, bypassExit);
+
+        final Document driftReport = Document.parse(Files.readString(
+                outputDir.resolve("fixture-drift-report.json"),
+                StandardCharsets.UTF_8));
+        assertEquals(true, driftReport.getBoolean("hasFailures"));
     }
 }
