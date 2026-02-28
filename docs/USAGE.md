@@ -186,6 +186,11 @@ gradle r3FailureLedger \
   -Pr3FailureLedgerFailOnFailures=true
 ```
 
+R3 Failure Ledger workflow (`.github/workflows/r3-failure-ledger.yml`) also:
+- emits top `failureId` + `firstDiffPath` summary in trend markdown.
+- compares ledger failure IDs with latest `Official Suite Sharded` shard artifacts.
+- posts a schedule-time triage comment to issue `#378` when `failureCount > 0`.
+
 Run Spring compatibility matrix:
 
 ```bash
