@@ -30,6 +30,7 @@ Fixture workflows:
 - `docs/FIXTURE_SANITIZATION.md`
 - `docs/FIXTURE_ARTIFACTS.md`
 - `docs/FIXTURE_REFRESH.md`
+- `docs/FIXTURE_GOVERNANCE.md`
 - `docs/FIXTURE_RESTORE.md`
 
 Research and design notes:

@@ -4,11 +4,15 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * Packs fixture ndjson files into dual artifacts (portable + fast).
  */
 public final class FixtureArtifactTool {
+    private static final Pattern SEMVER =
+            Pattern.compile("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:[-+][0-9A-Za-z.-]+)?$");
+
     private FixtureArtifactTool() {}
 
     public static void main(final String[] args) {
@@ -41,9 +45,13 @@ public final class FixtureArtifactTool {
             final FixtureArtifactBundle.WriteResult result = FixtureArtifactBundle.writeBundleFromNdjson(
                     config.inputDir(),
                     config.outputDir(),
-                    config.engineVersion());
+                    config.engineVersion(),
+                    config.fixtureVersion(),
+                    config.previousManifestPath());
             out.println("Fixture artifact pack finished");
             out.println("- engineVersion: " + result.engineVersion());
+            out.println("- fixtureVersion: " + result.fixtureVersion());
+            out.println("- dataSchemaHash: " + result.dataSchemaHash());
             out.println("- collections: " + result.collections());
             out.println("- documents: " + result.documents());
             out.println("- portable: " + result.portablePath());
@@ -61,6 +69,8 @@ public final class FixtureArtifactTool {
         stream.println("  --input-dir=<dir>           Fixture ndjson directory");
         stream.println("  --output-dir=<dir>          Output artifact directory");
         stream.println("  --engine-version=<value>    Engine compatibility version (default: runtime version)");
+        stream.println("  --fixture-version=<semver>  Fixture semantic version (default: 0.1.0)");
+        stream.println("  --previous-manifest=<file>  Previous manifest path for changelog generation");
         stream.println("  --help                      Show usage");
     }
 
@@ -68,11 +78,15 @@ public final class FixtureArtifactTool {
             Path inputDir,
             Path outputDir,
             String engineVersion,
+            String fixtureVersion,
+            Path previousManifestPath,
             boolean help) {
         static Config fromArgs(final String[] args) {
             Path inputDir = null;
             Path outputDir = null;
             String engineVersion = null;
+            String fixtureVersion = "0.1.0";
+            Path previousManifestPath = null;
             boolean help = false;
 
             for (final String arg : args) {
@@ -92,6 +106,14 @@ public final class FixtureArtifactTool {
                     engineVersion = valueAfterPrefix(arg, "--engine-version=");
                     continue;
                 }
+                if (arg.startsWith("--fixture-version=")) {
+                    fixtureVersion = valueAfterPrefix(arg, "--fixture-version=");
+                    continue;
+                }
+                if (arg.startsWith("--previous-manifest=")) {
+                    previousManifestPath = Path.of(valueAfterPrefix(arg, "--previous-manifest="));
+                    continue;
+                }
                 throw new IllegalArgumentException("unknown argument: " + arg);
             }
 
@@ -104,7 +126,10 @@ public final class FixtureArtifactTool {
             if (engineVersion == null || engineVersion.isBlank()) {
                 engineVersion = FixtureArtifactBundle.currentEngineVersion();
             }
-            return new Config(inputDir, outputDir, engineVersion, help);
+            if (!help && !SEMVER.matcher(fixtureVersion).matches()) {
+                throw new IllegalArgumentException("--fixture-version must be a semantic version (example: 1.2.3)");
+            }
+            return new Config(inputDir, outputDir, engineVersion, fixtureVersion, previousManifestPath, help);
         }
 
         private static String valueAfterPrefix(final String arg, final String prefix) {

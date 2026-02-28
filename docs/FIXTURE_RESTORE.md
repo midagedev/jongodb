@@ -23,6 +23,7 @@
 - `--namespace=<db.collection[,db.collection...]>`
 - `--report-dir=<dir>`
 - `--no-regenerate-fast-cache` (portable fallback 이후 fast cache 재생성 비활성화)
+- `--required-fixture-version=<semver>` (명시 버전 불일치 시 복원 차단)
 
 ## 산출물
 - `<reportDir>/fixture-restore-report.json`

@@ -135,6 +135,7 @@ public final class FixtureRestoreTool {
                 config.inputDir(),
                 config.regenerateFastCache(),
                 FixtureArtifactBundle.currentEngineVersion(),
+                config.requiredFixtureVersion(),
                 out);
 
         if (bundleResult != null) {
@@ -283,6 +284,7 @@ public final class FixtureRestoreTool {
         stream.println("  --report-dir=<dir>             Report output directory (default: input-dir)");
         stream.println("  --regenerate-fast-cache        Regenerate fast cache when portable fallback is used (default)");
         stream.println("  --no-regenerate-fast-cache     Do not regenerate fast cache on fallback");
+        stream.println("  --required-fixture-version=v   Required fixture version for compatibility check");
         stream.println("  --help                         Show usage");
     }
 
@@ -311,6 +313,7 @@ public final class FixtureRestoreTool {
             String databaseFilter,
             Set<String> namespaceFilter,
             Path reportDir,
+            String requiredFixtureVersion,
             boolean regenerateFastCache,
             boolean help) {
         static Config fromArgs(final String[] args) {
@@ -320,6 +323,7 @@ public final class FixtureRestoreTool {
             String databaseFilter = null;
             final Set<String> namespaceFilter = new LinkedHashSet<>();
             Path reportDir = null;
+            String requiredFixtureVersion = null;
             boolean regenerateFastCache = true;
             boolean help = false;
 
@@ -357,6 +361,10 @@ public final class FixtureRestoreTool {
                     reportDir = Path.of(valueAfterPrefix(arg, "--report-dir="));
                     continue;
                 }
+                if (arg.startsWith("--required-fixture-version=")) {
+                    requiredFixtureVersion = valueAfterPrefix(arg, "--required-fixture-version=");
+                    continue;
+                }
                 if ("--regenerate-fast-cache".equals(arg)) {
                     regenerateFastCache = true;
                     continue;
@@ -384,6 +392,7 @@ public final class FixtureRestoreTool {
                     databaseFilter,
                     Set.copyOf(namespaceFilter),
                     reportDir,
+                    requiredFixtureVersion,
                     regenerateFastCache,
                     help);
         }
