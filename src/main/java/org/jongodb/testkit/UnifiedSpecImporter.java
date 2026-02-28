@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 import org.bson.Document;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 
 /**
@@ -23,6 +24,7 @@ public final class UnifiedSpecImporter {
     private static final String EXT_JSON = ".json";
     private static final String EXT_YAML = ".yaml";
     private static final String EXT_YML = ".yml";
+    private static final int YAML_MAX_ALIASES_FOR_COLLECTIONS = 200;
     private static final String RUN_ON_LANES_PROPERTY = "jongodb.utf.runOnLanes";
     private static final String RUN_ON_LANES_ENV = "JONGODB_UTF_RUNON_LANES";
     private static final Map<String, String> SUPPORTED_RUN_COMMANDS = Map.of(
@@ -48,7 +50,9 @@ public final class UnifiedSpecImporter {
     }
 
     public UnifiedSpecImporter(final ImportProfile profile, final boolean runOnLaneAdjustmentsEnabled) {
-        this.yaml = new Yaml();
+        final LoaderOptions loaderOptions = new LoaderOptions();
+        loaderOptions.setMaxAliasesForCollections(YAML_MAX_ALIASES_FOR_COLLECTIONS);
+        this.yaml = new Yaml(loaderOptions);
         this.profile = Objects.requireNonNull(profile, "profile");
         this.runOnLaneAdjustmentsEnabled = runOnLaneAdjustmentsEnabled;
     }
