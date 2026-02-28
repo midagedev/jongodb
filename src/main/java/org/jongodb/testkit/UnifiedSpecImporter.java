@@ -1254,8 +1254,7 @@ public final class UnifiedSpecImporter {
         if (!clientBulkWriteSource) {
             return false;
         }
-        return !sourcePath.contains("client-bulkWrite-errors")
-                && !sourcePath.contains("client-bulkWrite-errorResponse");
+        return !sourcePath.contains("client-bulkWrite-errorResponse");
     }
 
     private static boolean isSnapshotSessionsNotSupportedClientErrorLaneSourcePath(final String sourcePath) {

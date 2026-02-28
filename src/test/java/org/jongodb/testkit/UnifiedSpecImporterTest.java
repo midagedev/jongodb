@@ -574,7 +574,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void keepsRunOnVersionChecksForClientBulkWriteErrorsLaneFiles() throws IOException {
+    void appliesRunOnVersionLaneForClientBulkWriteErrorsFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("crud/tests/unified");
         Files.createDirectories(suiteRoot);
         Files.writeString(
@@ -585,7 +585,39 @@ class UnifiedSpecImporterTest {
                   "collection_name": "users",
                   "tests": [
                     {
-                      "description": "errors lane excluded",
+                      "description": "errors lane included",
+                      "runOnRequirements": [{"minServerVersion": "8.0"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void keepsRunOnVersionChecksForClientBulkWriteErrorResponseLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("client-bulkWrite-errorResponse.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "errorResponse lane excluded",
                       "runOnRequirements": [{"minServerVersion": "8.0"}],
                       "operations": [
                         {"name": "find", "arguments": {"filter": {"_id": 1}}}
