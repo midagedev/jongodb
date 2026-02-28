@@ -2064,6 +2064,57 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsYamlWithMoreThanFiftyNonScalarAliases() throws IOException {
+        final StringBuilder yaml = new StringBuilder();
+        yaml.append("database_name: app\n");
+        yaml.append("collection_name: users\n");
+        yaml.append("sharedDoc: &sharedDoc\n");
+        yaml.append("  _id: 0\n");
+        yaml.append("  name: alpha\n");
+        yaml.append("tests:\n");
+        yaml.append("  - description: yaml alias limit importer and execution\n");
+        yaml.append("    operations:\n");
+        yaml.append("      - name: insertOne\n");
+        yaml.append("        arguments:\n");
+        yaml.append("          document:\n");
+        yaml.append("            _id: -1\n");
+        yaml.append("            seed: true\n");
+        yaml.append("      - name: insertMany\n");
+        yaml.append("        arguments:\n");
+        yaml.append("          documents:\n");
+        for (int index = 1; index <= 60; index++) {
+            yaml.append("            - <<: *sharedDoc\n");
+            yaml.append("              _id: ").append(index).append('\n');
+        }
+        yaml.append("      - name: countDocuments\n");
+        yaml.append("        arguments:\n");
+        yaml.append("          filter: {}\n");
+
+        Files.writeString(tempDir.resolve("yaml-alias-limit.yml"), yaml.toString());
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(3, scenario.commands().size());
+        assertEquals("insert", scenario.commands().get(0).commandName());
+        assertEquals("insert", scenario.commands().get(1).commandName());
+        assertEquals("countDocuments", scenario.commands().get(2).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> countResult = outcome.commandResults().get(2);
+        assertEquals(61L, ((Number) countResult.get("n")).longValue());
+        assertEquals(61L, ((Number) countResult.get("count")).longValue());
+    }
+
+    @Test
     void importsFindOneAndDeleteAndExecutesThroughWireBackend() throws IOException {
         Files.writeString(
                 tempDir.resolve("find-one-and-delete-integration.json"),
