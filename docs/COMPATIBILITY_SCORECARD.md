@@ -1,57 +1,45 @@
 # Compatibility Scorecard
 
-Status date: 2026-02-25
+Status date: 2026-02-28
 
 This scorecard tracks integration-test compatibility against MongoDB official specs.
 It is not a production MongoDB parity claim.
 
 ## Scope
 
-- Baseline target: `v0.1.2` and current `main`.
+- Historical baseline: Official Suite Sharded run `22339640229`.
+- Current target: `origin/main` commit `d2ba61b`.
 - Primary objective: increase imported differential coverage while keeping mismatch/error at zero.
 
 ## Evidence Sources
 
 | Evidence | Source run / artifact | Result |
 | --- | --- | --- |
-| Official UTF sharded differential (historical baseline) | GitHub Actions `Official Suite Sharded` run `22339640229` | PASS |
-| R3 failure ledger (current) | `build/reports/r3-failure-ledger-local/r3-failure-ledger.json` | PASS (`failureCount=0`) |
-| UTF differential (current, suite-level) | `build/reports/unified-spec-*-local/utf-differential-report.json` | PASS (`mismatch=0`, `error=0`) |
-| Complex-query certification (canonical pack) | `build/reports/complex-query-certification/complex-query-certification.json` | Track via `supportedPassRate`, `mismatchCount`, `errorCount`, `unsupportedDeltaCount` |
+| Official UTF sharded differential (current) | GitHub Actions `Official Suite Sharded` run `22516323868`, artifact `utf-shard-summary/utf-shard-summary.md` | PASS (`total=508`, `match=508`, `mismatch=0`, `error=0`) |
+| R3 failure ledger (current) | GitHub Actions `R3 Failure Ledger` run `22516324202`, artifact `r3-failure-ledger/r3-failure-ledger.json` | PASS (`failureCount=0`) |
+| Complex-query certification (canonical pack) | GitHub Actions `Complex Query Certification` run `22516137734`, artifact `complex-query-certification/complex-query-certification.json` | PASS (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`) |
+| External canary certification (latest success) | GitHub Actions `R3 External Canary Certification` run `22378993613` | PASS (3-project canary set) |
+| Release-readiness streak | `r3-release-readiness-streak.json` from run `22516324202` | Not yet satisfied (`minStreak=3`, counters `0/1`) |
 
 ## Baseline vs Current
 
-Historical frozen baseline (`22339640229`):
-
-| Metric | Value |
-| --- | --- |
-| imported | 200 |
-| skipped | 567 |
-| unsupported | 814 |
-| total differential cases | 200 |
-| match | 146 |
-| mismatch | 54 |
-| error | 0 |
-
-Current local certification snapshot (`r3-failure-ledger-local`, generated 2026-02-24T07:35:28Z):
-
-| Metric | Value |
-| --- | --- |
-| imported | 480 |
-| skipped | 575 |
-| unsupported | 526 |
-| total differential cases | 480 |
-| match | 480 |
-| mismatch | 0 |
-| error | 0 |
+| Metric | Baseline (`22339640229`) | Current (`22516324202`) | Delta |
+| --- | --- | --- | --- |
+| imported | 200 | 508 | +308 |
+| skipped | 567 | 851 | +284 |
+| unsupported | 814 | 222 | -592 |
+| total differential cases | 200 | 508 | +308 |
+| match | 146 | 508 | +362 |
+| mismatch | 54 | 0 | -54 |
+| error | 0 | 0 | 0 |
 
 ## Current R3 Ledger Snapshot
 
-| Suite | Imported | Unsupported | Mismatch | Error |
-| --- | --- | --- | --- | --- |
-| `crud-unified` | 298 | 252 | 0 | 0 |
-| `transactions-unified` | 162 | 228 | 0 | 0 |
-| `sessions` | 20 | 46 | 0 | 0 |
+| Suite | Imported | Skipped | Unsupported | Mismatch | Error |
+| --- | --- | --- | --- | --- | --- |
+| `crud-unified` | 328 | 700 | 44 | 0 | 0 |
+| `transactions-unified` | 164 | 127 | 140 | 0 | 0 |
+| `sessions` | 16 | 24 | 38 | 0 | 0 |
 
 Current ledger gate status:
 
@@ -59,30 +47,37 @@ Current ledger gate status:
 - `byTrack={}`
 - `byStatus={}`
 
-## Top Unsupported Reasons (Current, strict profile)
+## Complex Query Snapshot
 
-| Reason | Count |
+From run `22516137734`:
+
+| Metric | Value |
 | --- | --- |
-| `unsupported-by-policy UTF operation: failPoint` | 136 |
-| `unsupported UTF operation: clientBulkWrite` | 92 |
-| `unsupported UTF operation: targetedFailPoint` | 58 |
-| `unsupported UTF update option: arrayFilters` | 32 *(historical snapshot; subset implemented in #232)* |
-| `unsupported UTF aggregate stage in pipeline` | 28 |
-| `unsupported UTF operation: findOneAndDelete` | 26 |
-| `unsupported UTF operation: distinct` | 26 |
-| `unsupported UTF operation: runCommand` | 14 |
-| `unsupported UTF operation: count` | 12 |
-| `unsupported UTF update pipeline` | 10 |
+| packVersion | `complex-query-pack-v3` |
+| totalPatterns | 24 |
+| supportedPatterns | 17 |
+| supportedPass | 17 |
+| supportedPassRate | 1.0 |
+| mismatchCount | 0 |
+| errorCount | 0 |
+| unsupportedByPolicyCount | 0 |
+| unsupportedDeltaCount | 0 |
 
-Notes:
+Recent subset closures reflected in this snapshot:
+- `#396`: `$expr.$add` certification subset.
+- `#397`: minimal `$graphLookup` certification subset.
 
-- UTF importer now supports subset adapters for `runCommand` and `clientBulkWrite` (`#229`, `#231`).
-- `arrayFilters` subset and collation semantic subset landed (`#232`, `#235`); rerunning the ledger should reduce/update related unsupported buckets.
-- aggregation stage alias subset landed for `$set`/`$unset`/`$replaceWith` (`#265`, `#266`, `#267`); rerunning the ledger should narrow generic aggregate-stage unsupported buckets.
-- aggregation `$out` terminal subset landed (`#269`); rerunning the ledger should reduce aggregate-stage unsupported buckets tied to `$out` pipeline coverage.
-- The counts above are from the latest frozen snapshot; rerunning the ledger will shift those categories toward narrower unsupported reasons (for example unsupported command names/options).
-- Profile context matters: this snapshot is strict-profile (`failPoint` policy exclusion enabled). Compat-profile runs track failpoint categories separately.
-- Deployment profile context matters: standalone and single-node-replica-set runs may surface different compatibility deltas in handshake/read-preference/concern paths.
+## Release-Readiness Streak Snapshot
+
+From run `22516324202` artifact `r3-release-readiness-streak.json`:
+
+- `threshold.minStreak=3`
+- `officialZeroMismatchStreak=0`
+- `r3LedgerZeroFailureStreak=1`
+- `readiness.satisfied=false`
+
+Note:
+- Streak history parsing currently reports `artifact-read-error: HTTP Error 401` for some schedule-history artifact reads, which keeps `officialZeroMismatchStreak` conservative.
 
 ## Policy Exclusions
 
@@ -92,27 +87,17 @@ Notes:
 
 ## Gap-to-Issue Mapping
 
-- `#100`: transaction operation adapter coverage (`startTransaction` and lifecycle wiring) - completed.
-- `#101`: unified CRUD adapter coverage (`bulkWrite`, `findOneAndUpdate`, `findOneAndReplace`, `countDocuments`, `replaceOne`) - completed.
-- `#229`: UTF `runCommand` subset adapter (`ping`, `buildInfo`, `listIndexes`, `count`) - completed.
-- `#231`: UTF `clientBulkWrite` subset adapter (ordered single-namespace rewrite to `bulkWrite`) - completed.
-- `#233`: update pipeline subset adapter (`$set`/`$unset` with literal values) - completed.
-- `#234`: profile-based failpoint handling (`strict` vs `compat`) - completed.
-- `#236`: advanced retryable transaction semantics subset (deterministic retry labels and replay behavior) - completed.
-- `#245`: single-node replica-set semantic profile (URI/handshake/primary-only read-preference contract) - completed.
-- `#238`: canonical complex-query pattern pack (24 scenarios with metadata/versioning) - completed.
-- `#239`: deterministic complex-query differential runner and replay artifacts - completed.
-- `#240`: nested predicate semantics expansion (array-index dotted path + `$expr` positional path resolution) - completed.
-- `#242`: CI quality gate for complex-query certification - completed.
-- `#241`: join-heavy pipeline parity for certification subset (`$lookup` + composed downstream with cursor contract) - completed.
-- `#243`: Spring complex-query matrix alignment with certification pack IDs and dedicated report section - completed.
-- `#232`: `arrayFilters` subset end-to-end (`$set`/`$unset` + `$[identifier]` binding) - completed.
-- `#235`: collation semantic subset (`locale`/`strength`/`caseLevel`) for query/sort/distinct/index interactions - completed.
-- `#265`: aggregate stage alias subset (`$set`/`$unset`) - completed.
-- `#266`: `$replaceWith` stage subset for root replacement - completed.
-- `#267`: aggregation stage subset regression + scorecard mapping update - completed.
-- `#269`: aggregation non-alias subset expansion (`$out` terminal subset) - completed.
-- `#104`: aggregate-stage unsupported reduction - remaining (`$merge`, `$listLocalSessions`, and advanced/non-alias stages).
+Completed compatibility-expansion issues:
+
+- `#395`: listLocalSessions regression pack and importer normalization - completed.
+- `#396`: `$expr.$add` certification subset - completed.
+- `#397`: `$graphLookup` minimal subset for certification - completed.
+- `#398`: release-readiness streak tracking and summary artifacts - completed.
+- `#100`, `#101`, `#229`, `#231`, `#232`, `#233`, `#234`, `#235`, `#236`, `#238`, `#239`, `#240`, `#241`, `#242`, `#243`, `#245`, `#265`, `#266`, `#267`, `#269` - completed.
+
+Remaining track:
+
+- `#104`: aggregate-stage unsupported reduction (remaining focus: `$merge` and advanced non-alias stages).
 
 ## Reproduction
 
