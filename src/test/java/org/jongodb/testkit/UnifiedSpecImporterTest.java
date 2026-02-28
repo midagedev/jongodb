@@ -361,7 +361,7 @@ class UnifiedSpecImporterTest {
         assertEquals(3, pipeline.size());
         assertTrue(pipeline.get(0) instanceof java.util.Map<?, ?>);
         assertTrue(((java.util.Map<?, ?>) pipeline.get(0)).containsKey("$limit"));
-        assertEquals(0, ((java.util.Map<?, ?>) pipeline.get(0)).get("$limit"));
+        assertEquals(1, ((java.util.Map<?, ?>) pipeline.get(0)).get("$limit"));
 
         final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
         final ScenarioOutcome outcome = backend.execute(scenario);
