@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: official-suite-sharded-${{ github.ref }}
@@ -237,10 +238,210 @@ jobs:
             raise SystemExit("UTF mismatch/error strict gate failed")
           PY
 
+      - name: Build zero-mismatch streak snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import re
+          import urllib.request
+          import zipfile
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          WINDOW_SIZE = 10
+          summary_path = Path("artifacts/utf-shard-summary.md")
+          output_json = Path("artifacts/utf-shard-streak.json")
+          output_md = Path("artifacts/utf-shard-streak.md")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ.get("GH_TOKEN", "")
+          run_id = int(os.environ.get("GITHUB_RUN_ID", "0"))
+          run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{run_id}"
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+
+          aggregate_pattern = re.compile(
+              r"## aggregate\\s+"
+              r"- baseline: total=(?P<b_total>\\d+) match=(?P<b_match>\\d+) mismatch=(?P<b_mismatch>\\d+) error=(?P<b_error>\\d+).*?\\n"
+              r"- rerun: total=(?P<r_total>\\d+) match=(?P<r_match>\\d+) mismatch=(?P<r_mismatch>\\d+) error=(?P<r_error>\\d+)",
+              re.S,
+          )
+
+          def parse_aggregate_metrics(text: str):
+              match = aggregate_pattern.search(text)
+              if not match:
+                  return None
+              metrics = {
+                  "baseline": {
+                      "total": int(match.group("b_total")),
+                      "match": int(match.group("b_match")),
+                      "mismatch": int(match.group("b_mismatch")),
+                      "error": int(match.group("b_error")),
+                  },
+                  "rerun": {
+                      "total": int(match.group("r_total")),
+                      "match": int(match.group("r_match")),
+                      "mismatch": int(match.group("r_mismatch")),
+                      "error": int(match.group("r_error")),
+                  },
+              }
+              metrics["zeroMismatchError"] = (
+                  metrics["baseline"]["mismatch"] == 0
+                  and metrics["baseline"]["error"] == 0
+                  and metrics["rerun"]["mismatch"] == 0
+                  and metrics["rerun"]["error"] == 0
+              )
+              return metrics
+
+          def request_json(url: str):
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "jongodb-utf-streak",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as res:
+                  return json.loads(res.read().decode("utf-8"))
+
+          def request_bytes(url: str) -> bytes:
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "jongodb-utf-streak",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=60) as res:
+                  return res.read()
+
+          def read_utf_summary_from_run(target_run_id: int):
+              artifacts = request_json(
+                  f"https://api.github.com/repos/{repo}/actions/runs/{target_run_id}/artifacts?per_page=100"
+              )
+              for artifact in artifacts.get("artifacts", []):
+                  if artifact.get("expired"):
+                      continue
+                  if artifact.get("name") != "utf-shard-summary":
+                      continue
+                  archive = zipfile.ZipFile(io.BytesIO(request_bytes(artifact["archive_download_url"])))
+                  for member in archive.namelist():
+                      if member.endswith("utf-shard-summary.md"):
+                          return archive.read(member).decode("utf-8")
+              return None
+
+          if not summary_path.exists():
+              raise SystemExit(f"missing current summary: {summary_path}")
+          current_metrics = parse_aggregate_metrics(summary_path.read_text(encoding="utf-8"))
+          if current_metrics is None:
+              raise SystemExit("failed to parse aggregate metrics from current utf summary")
+
+          history = [
+              {
+                  "runId": run_id,
+                  "event": os.environ.get("GITHUB_EVENT_NAME"),
+                  "conclusion": "in_progress",
+                  "url": run_url,
+                  "createdAt": datetime.now(timezone.utc).isoformat(),
+                  "metrics": current_metrics,
+                  "zeroMismatchError": current_metrics["zeroMismatchError"],
+                  "source": "current-run-artifact",
+              }
+          ]
+
+          runs = request_json(
+              f"https://api.github.com/repos/{repo}/actions/workflows/official-suite-sharded.yml/runs"
+              "?branch=main&event=schedule&status=completed&per_page=30"
+          ).get("workflow_runs", [])
+
+          for run in runs:
+              target_run_id = int(run.get("id", 0))
+              if target_run_id == run_id:
+                  continue
+              if len(history) >= WINDOW_SIZE:
+                  break
+
+              entry = {
+                  "runId": target_run_id,
+                  "event": run.get("event"),
+                  "conclusion": run.get("conclusion"),
+                  "url": run.get("html_url"),
+                  "createdAt": run.get("created_at"),
+                  "metrics": None,
+                  "zeroMismatchError": False,
+                  "source": "schedule-history",
+              }
+              try:
+                  text = read_utf_summary_from_run(target_run_id)
+                  if text is not None:
+                      parsed = parse_aggregate_metrics(text)
+                      if parsed is not None:
+                          entry["metrics"] = parsed
+                          entry["zeroMismatchError"] = parsed["zeroMismatchError"]
+                      else:
+                          entry["note"] = "summary-parse-failed"
+                  else:
+                      entry["note"] = "utf-shard-summary-artifact-missing"
+              except Exception as exc:
+                  entry["note"] = f"artifact-read-error: {exc}"
+              history.append(entry)
+
+          streak = 0
+          for entry in history:
+              if entry.get("zeroMismatchError"):
+                  streak += 1
+                  continue
+              break
+
+          result = {
+              "generatedAt": datetime.now(timezone.utc).isoformat(),
+              "windowSize": WINDOW_SIZE,
+              "workflow": "official-suite-sharded",
+              "officialZeroMismatchStreak": streak,
+              "history": history,
+          }
+          output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          lines = [
+              "# UTF Zero-Mismatch Streak",
+              "",
+              f"- generatedAt: {result['generatedAt']}",
+              f"- officialZeroMismatchStreak: {streak}",
+              f"- windowSize: {WINDOW_SIZE}",
+              "",
+              "## recentRuns",
+          ]
+          for entry in history:
+              metrics = entry.get("metrics") or {}
+              baseline = metrics.get("baseline", {})
+              rerun = metrics.get("rerun", {})
+              lines.append(
+                  f"- runId={entry.get('runId')} event={entry.get('event')} conclusion={entry.get('conclusion')} "
+                  f"zeroMismatchError={entry.get('zeroMismatchError')} "
+                  f"baseline(mismatch={baseline.get('mismatch', 'n/a')},error={baseline.get('error', 'n/a')}) "
+                  f"rerun(mismatch={rerun.get('mismatch', 'n/a')},error={rerun.get('error', 'n/a')})"
+              )
+          output_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(output_md.read_text(encoding="utf-8"))
+
+          if step_summary:
+              with Path(step_summary).open("a", encoding="utf-8") as handle:
+                  handle.write("\n")
+                  handle.write(output_md.read_text(encoding="utf-8"))
+          PY
+
       - name: Upload summary artifact
         uses: actions/upload-artifact@v4
         with:
           name: utf-shard-summary
-          path: artifacts/utf-shard-summary.md
+          path: |
+            artifacts/utf-shard-summary.md
+            artifacts/utf-shard-streak.json
+            artifacts/utf-shard-streak.md
           if-no-files-found: error
           retention-days: 14
