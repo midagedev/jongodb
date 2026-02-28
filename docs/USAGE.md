@@ -210,6 +210,12 @@ gradle springCompatibilityMatrixEvidence
 
 Spring matrix artifacts include a dedicated `Complex Query Matrix` section aligned with
 `docs/COMPLEX_QUERY_CERTIFICATION.md` pattern IDs.
+Current default catalog scope:
+- targets: 5
+- scenarios: 15
+- certification-mapped scenarios: 8
+Artifact summaries now include a `Certification Pattern Mapping` section
+(`scenarioId ↔ certificationPatternId`) for quick cross-reference with certification runs.
 CI workflow: `.github/workflows/spring-complex-query-matrix.yml`
 
 Run R2 compatibility scorecard + support manifest:
