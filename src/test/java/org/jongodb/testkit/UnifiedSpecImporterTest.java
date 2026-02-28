@@ -222,6 +222,70 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void appliesMongosPinAutoRunOnTopologyLaneOverride() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-pin-auto.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "sharded-only lane",
+                      "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["sharded"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void keepsRunOnTopologyChecksForNonLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("not-mongos-pin-auto.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "sharded-only lane",
+                      "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["sharded"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
     void importsBulkWriteOperationWhenOrderedIsSupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("bulk-write.json"),
@@ -1070,6 +1134,8 @@ class UnifiedSpecImporterTest {
                         {"name": "getSnapshotTime", "object": "session0", "saveResultAsEntity": "savedSnapshotTime"},
                         {"name": "assertSessionTransactionState", "object": "session0", "arguments": {"state": "none"}},
                         {"name": "assertSessionNotDirty", "object": "session0"},
+                        {"name": "assertSessionPinned", "object": "session0"},
+                        {"name": "assertSessionUnpinned", "object": "session0"},
                         {"name": "assertSameLsidOnLastTwoCommands", "object": "session0"},
                         {"name": "endSession", "object": "session0"},
                         {"name": "modifyCollection"},
@@ -1857,6 +1923,50 @@ class UnifiedSpecImporterTest {
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
                         && skipped.reason().contains("unsupported UTF operation: targetedFailPoint")));
+    }
+
+    @Test
+    void strictProfileTreatsTargetedFailPointAsNoOpInMongosPinAutoLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-pin-auto.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "targeted failpoint no-op lane",
+                      "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["sharded"]}],
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "targetedFailPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "off"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
     }
 
     @Test
