@@ -1151,6 +1151,13 @@ public final class UnifiedSpecImporter {
                     runOnContext.serverless(),
                     runOnContext.authEnabled()));
         }
+        if (isMongosTopologyLaneSourcePath(sourcePath) && !"sharded".equals(runOnContext.topology())) {
+            laneContexts.add(RunOnContext.evaluated(
+                    runOnContext.serverVersion(),
+                    "sharded",
+                    runOnContext.serverless(),
+                    runOnContext.authEnabled()));
+        }
         if (isHintLegacyServerLaneSourcePath(sourcePath)) {
             final List<String> legacyVersions = List.of("3.3.99", "4.0.99", "4.1.9", "4.2.99", "4.3.3");
             for (final String legacyVersion : legacyVersions) {
@@ -1217,6 +1224,15 @@ public final class UnifiedSpecImporter {
     private static boolean isMongosPinAutoLaneSourcePath(final String sourcePath) {
         return "transactions/tests/unified/mongos-pin-auto.json".equals(sourcePath)
                 || "transactions/tests/unified/mongos-pin-auto.yml".equals(sourcePath);
+    }
+
+    private static boolean isMongosTopologyLaneSourcePath(final String sourcePath) {
+        return "transactions/tests/unified/pin-mongos.json".equals(sourcePath)
+                || "transactions/tests/unified/pin-mongos.yml".equals(sourcePath)
+                || "transactions/tests/unified/mongos-unpin.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-unpin.yml".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token.yml".equals(sourcePath);
     }
 
     private static boolean isHintLegacyServerLaneSourcePath(final String sourcePath) {
