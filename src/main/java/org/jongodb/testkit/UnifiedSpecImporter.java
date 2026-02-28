@@ -492,9 +492,6 @@ public final class UnifiedSpecImporter {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
         final Object preparedUpdate = prepareSupportedUpdateValue(rawUpdate);
-        if (multi && isReplacementDocument(preparedUpdate)) {
-            throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
-        }
 
         final Map<String, Object> updateEntry = new LinkedHashMap<>();
         updateEntry.put("q", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
@@ -525,18 +522,6 @@ public final class UnifiedSpecImporter {
         copyIfPresent(normalizedArguments, payload, "hint");
         copyIfPresent(normalizedArguments, payload, "collation");
         return new ScenarioCommand("replaceOne", immutableMap(payload));
-    }
-
-    private static boolean isReplacementDocument(final Object rawUpdate) {
-        if (!(rawUpdate instanceof Map<?, ?> mapped) || mapped.isEmpty()) {
-            return false;
-        }
-        for (final Object key : mapped.keySet()) {
-            if (!(key instanceof String field) || !field.startsWith("$")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static ScenarioCommand delete(
