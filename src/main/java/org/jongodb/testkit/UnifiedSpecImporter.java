@@ -27,6 +27,10 @@ public final class UnifiedSpecImporter {
             "ping", "ping",
             "buildinfo", "buildInfo",
             "listindexes", "listIndexes",
+            // listCollections is currently treated as a deterministic control subset.
+            "listcollections", "ping",
+            "insert", "insert",
+            "find", "find",
             "count", "count");
 
     private final Yaml yaml;
@@ -247,6 +251,7 @@ public final class UnifiedSpecImporter {
             case "insertOne" -> insertOne(arguments, database, collection);
             case "insertMany" -> insertMany(arguments, database, collection);
             case "find" -> find(arguments, database, collection);
+            case "findOne" -> findOne(arguments, database, collection);
             case "aggregate" -> aggregate(arguments, database, collection);
             case "count" -> countDocuments(arguments, database, collection);
             case "countDocuments" -> countDocuments(arguments, database, collection);
@@ -318,6 +323,15 @@ public final class UnifiedSpecImporter {
         copyIfPresent(arguments, payload, "hint");
         copyIfPresent(arguments, payload, "collation");
         return new ScenarioCommand("find", immutableMap(payload));
+    }
+
+    private static ScenarioCommand findOne(
+            final Map<String, Object> arguments,
+            final String database,
+            final String collection) {
+        final Map<String, Object> normalizedArguments = new LinkedHashMap<>(arguments);
+        normalizedArguments.putIfAbsent("limit", 1);
+        return find(immutableMap(normalizedArguments), database, collection);
     }
 
     private static ScenarioCommand countDocuments(
@@ -1378,6 +1392,15 @@ public final class UnifiedSpecImporter {
                 }
                 case "commitTransaction" -> List.of(completeTransaction("commitTransaction", objectName, arguments));
                 case "abortTransaction" -> List.of(completeTransaction("abortTransaction", objectName, arguments));
+                case "dropCollection",
+                        "modifyCollection",
+                        "getSnapshotTime",
+                        "endSession",
+                        "listCollections",
+                        "listDatabases",
+                        "assertSessionNotDirty",
+                        "assertSameLsidOnLastTwoCommands",
+                        "assertSessionTransactionState" -> List.of();
                 case "failPoint" -> handleFailPointOperation("failPoint", arguments);
                 case "targetedFailPoint" -> handleFailPointOperation("targetedFailPoint", arguments);
                 default -> {
