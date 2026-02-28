@@ -1177,6 +1177,27 @@ public final class UnifiedSpecImporter {
                         runOnContext.authEnabled()));
             }
         }
+        if (isSnapshotSessionsNotSupportedClientErrorLaneSourcePath(sourcePath)) {
+            final List<String> snapshotLegacyVersions = List.of("4.4.99");
+            for (final String laneVersion : snapshotLegacyVersions) {
+                if (laneVersion.equals(runOnContext.serverVersion())) {
+                    continue;
+                }
+                laneContexts.add(RunOnContext.evaluated(
+                        laneVersion,
+                        runOnContext.topology(),
+                        runOnContext.serverless(),
+                        runOnContext.authEnabled()));
+            }
+        }
+        if (isSnapshotSessionsNotSupportedServerErrorLaneSourcePath(sourcePath)
+                && !"single".equals(runOnContext.topology())) {
+            laneContexts.add(RunOnContext.evaluated(
+                    runOnContext.serverVersion(),
+                    "single",
+                    runOnContext.serverless(),
+                    runOnContext.authEnabled()));
+        }
         return List.copyOf(laneContexts);
     }
 
@@ -1206,6 +1227,18 @@ public final class UnifiedSpecImporter {
         }
         return !sourcePath.contains("client-bulkWrite-errors")
                 && !sourcePath.contains("client-bulkWrite-errorResponse");
+    }
+
+    private static boolean isSnapshotSessionsNotSupportedClientErrorLaneSourcePath(final String sourcePath) {
+        return "sessions/tests/snapshot-sessions-not-supported-client-error.json".equals(sourcePath)
+                || "sessions/tests/snapshot-sessions-not-supported-client-error.yml".equals(sourcePath)
+                || "sessions/tests/snapshot-sessions-not-supported-client-error.yaml".equals(sourcePath);
+    }
+
+    private static boolean isSnapshotSessionsNotSupportedServerErrorLaneSourcePath(final String sourcePath) {
+        return "sessions/tests/snapshot-sessions-not-supported-server-error.json".equals(sourcePath)
+                || "sessions/tests/snapshot-sessions-not-supported-server-error.yml".equals(sourcePath)
+                || "sessions/tests/snapshot-sessions-not-supported-server-error.yaml".equals(sourcePath);
     }
 
     private static boolean isDotsAndDollarsUpdateNoOpLaneSourcePath(final String sourcePath) {
