@@ -334,16 +334,16 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("find", arguments);
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("find", arguments);
         final Map<String, Object> payload = commandEnvelope("find", database, collection);
-        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
-        copyIfPresent(arguments, payload, "projection");
-        copyIfPresent(arguments, payload, "sort");
-        copyIfPresent(arguments, payload, "limit");
-        copyIfPresent(arguments, payload, "skip");
-        copyIfPresent(arguments, payload, "batchSize");
-        copyIfPresent(arguments, payload, "hint");
-        copyIfPresent(arguments, payload, "collation");
+        payload.put("filter", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
+        copyIfPresent(normalizedArguments, payload, "projection");
+        copyIfPresent(normalizedArguments, payload, "sort");
+        copyIfPresent(normalizedArguments, payload, "limit");
+        copyIfPresent(normalizedArguments, payload, "skip");
+        copyIfPresent(normalizedArguments, payload, "batchSize");
+        copyIfPresent(normalizedArguments, payload, "hint");
+        copyIfPresent(normalizedArguments, payload, "collation");
         return new ScenarioCommand("find", immutableMap(payload));
     }
 
@@ -418,8 +418,10 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("aggregate", arguments);
-        final List<Object> pipeline = asList(arguments.getOrDefault("pipeline", List.of()), "aggregate.arguments.pipeline");
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("aggregate", arguments);
+        final List<Object> pipeline = asList(
+                normalizedArguments.getOrDefault("pipeline", List.of()),
+                "aggregate.arguments.pipeline");
         final List<Object> copiedPipeline = new ArrayList<>(pipeline.size());
         for (final Object stage : pipeline) {
             final Map<String, Object> stageMap = asStringObjectMap(stage, "aggregate stage");
@@ -432,20 +434,20 @@ public final class UnifiedSpecImporter {
 
         final Map<String, Object> payload = commandEnvelope("aggregate", database, collection);
         payload.put("pipeline", List.copyOf(copiedPipeline));
-        if (arguments.containsKey("bypassDocumentValidation")) {
-            if (!Boolean.FALSE.equals(arguments.get("bypassDocumentValidation"))) {
+        if (normalizedArguments.containsKey("bypassDocumentValidation")) {
+            if (!Boolean.FALSE.equals(normalizedArguments.get("bypassDocumentValidation"))) {
                 throw new UnsupportedOperationException("unsupported UTF aggregate option: bypassDocumentValidation");
             }
             payload.put("bypassDocumentValidation", false);
         }
         final Map<String, Object> cursor = new LinkedHashMap<>();
-        if (arguments.containsKey("batchSize")) {
-            cursor.put("batchSize", deepCopyValue(arguments.get("batchSize")));
+        if (normalizedArguments.containsKey("batchSize")) {
+            cursor.put("batchSize", deepCopyValue(normalizedArguments.get("batchSize")));
         }
         payload.put("cursor", immutableMap(cursor));
-        copyIfPresent(arguments, payload, "allowDiskUse");
-        copyIfPresent(arguments, payload, "hint");
-        copyIfPresent(arguments, payload, "collation");
+        copyIfPresent(normalizedArguments, payload, "allowDiskUse");
+        copyIfPresent(normalizedArguments, payload, "hint");
+        copyIfPresent(normalizedArguments, payload, "collation");
         return new ScenarioCommand("aggregate", immutableMap(payload));
     }
 
@@ -497,10 +499,11 @@ public final class UnifiedSpecImporter {
             final String database,
             final String collection,
             final boolean multi) {
-        rejectUnsupportedLetOption(multi ? "updateMany" : "updateOne", arguments);
-        final Object rawUpdate = arguments.containsKey("update")
-                ? arguments.get("update")
-                : arguments.get("replacement");
+        final String operationName = multi ? "updateMany" : "updateOne";
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet(operationName, arguments);
+        final Object rawUpdate = normalizedArguments.containsKey("update")
+                ? normalizedArguments.get("update")
+                : normalizedArguments.get("replacement");
         if (rawUpdate == null) {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
@@ -510,13 +513,13 @@ public final class UnifiedSpecImporter {
         }
 
         final Map<String, Object> updateEntry = new LinkedHashMap<>();
-        updateEntry.put("q", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        updateEntry.put("q", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
         updateEntry.put("u", deepCopyValue(rawUpdate));
         updateEntry.put("multi", multi);
-        updateEntry.put("upsert", Boolean.TRUE.equals(arguments.get("upsert")));
-        copyIfPresent(arguments, updateEntry, "arrayFilters");
-        copyIfPresent(arguments, updateEntry, "collation");
-        copyIfPresent(arguments, updateEntry, "hint");
+        updateEntry.put("upsert", Boolean.TRUE.equals(normalizedArguments.get("upsert")));
+        copyIfPresent(normalizedArguments, updateEntry, "arrayFilters");
+        copyIfPresent(normalizedArguments, updateEntry, "collation");
+        copyIfPresent(normalizedArguments, updateEntry, "hint");
 
         final Map<String, Object> payload = commandEnvelope("update", database, collection);
         payload.put("updates", List.of(immutableMap(updateEntry)));
@@ -527,16 +530,16 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("replaceOne", arguments);
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("replaceOne", arguments);
         final Map<String, Object> replacement = asStringObjectMap(
-                arguments.get("replacement"),
+                normalizedArguments.get("replacement"),
                 "replaceOne.arguments.replacement");
         final Map<String, Object> payload = commandEnvelope("replaceOne", database, collection);
-        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("filter", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
         payload.put("replacement", deepCopyValue(replacement));
-        copyIfPresent(arguments, payload, "upsert");
-        copyIfPresent(arguments, payload, "hint");
-        copyIfPresent(arguments, payload, "collation");
+        copyIfPresent(normalizedArguments, payload, "upsert");
+        copyIfPresent(normalizedArguments, payload, "hint");
+        copyIfPresent(normalizedArguments, payload, "collation");
         return new ScenarioCommand("replaceOne", immutableMap(payload));
     }
 
@@ -557,12 +560,13 @@ public final class UnifiedSpecImporter {
             final String database,
             final String collection,
             final int limit) {
-        rejectUnsupportedLetOption(limit == 1 ? "deleteOne" : "deleteMany", arguments);
+        final String operationName = limit == 1 ? "deleteOne" : "deleteMany";
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet(operationName, arguments);
         final Map<String, Object> deleteEntry = new LinkedHashMap<>();
-        deleteEntry.put("q", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        deleteEntry.put("q", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
         deleteEntry.put("limit", limit);
-        copyIfPresent(arguments, deleteEntry, "collation");
-        copyIfPresent(arguments, deleteEntry, "hint");
+        copyIfPresent(normalizedArguments, deleteEntry, "collation");
+        copyIfPresent(normalizedArguments, deleteEntry, "hint");
 
         final Map<String, Object> payload = commandEnvelope("delete", database, collection);
         payload.put("deletes", List.of(immutableMap(deleteEntry)));
@@ -573,22 +577,22 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("findOneAndUpdate", arguments);
-        final Object updateValue = arguments.get("update");
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("findOneAndUpdate", arguments);
+        final Object updateValue = normalizedArguments.get("update");
         if (updateValue == null) {
             throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
         }
         validateSupportedUpdatePipeline(updateValue);
         final Map<String, Object> payload = commandEnvelope("findOneAndUpdate", database, collection);
-        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("filter", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
         payload.put("update", deepCopyValue(updateValue));
-        copyIfPresent(arguments, payload, "sort");
-        copyIfPresent(arguments, payload, "projection");
-        copyIfPresent(arguments, payload, "upsert");
-        copyNormalizedReturnDocumentIfPresent(arguments, payload);
-        copyIfPresent(arguments, payload, "hint");
-        copyIfPresent(arguments, payload, "collation");
-        copyIfPresent(arguments, payload, "arrayFilters");
+        copyIfPresent(normalizedArguments, payload, "sort");
+        copyIfPresent(normalizedArguments, payload, "projection");
+        copyIfPresent(normalizedArguments, payload, "upsert");
+        copyNormalizedReturnDocumentIfPresent(normalizedArguments, payload);
+        copyIfPresent(normalizedArguments, payload, "hint");
+        copyIfPresent(normalizedArguments, payload, "collation");
+        copyIfPresent(normalizedArguments, payload, "arrayFilters");
         return new ScenarioCommand("findOneAndUpdate", immutableMap(payload));
     }
 
@@ -596,16 +600,16 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("findOneAndDelete", arguments);
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("findOneAndDelete", arguments);
         final Map<String, Object> payload = commandEnvelope("findAndModify", database, collection);
-        payload.put("query", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("query", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
         payload.put("remove", true);
-        copyIfPresent(arguments, payload, "sort");
-        if (arguments.containsKey("projection")) {
-            payload.put("fields", deepCopyValue(arguments.get("projection")));
+        copyIfPresent(normalizedArguments, payload, "sort");
+        if (normalizedArguments.containsKey("projection")) {
+            payload.put("fields", deepCopyValue(normalizedArguments.get("projection")));
         }
-        copyIfPresent(arguments, payload, "hint");
-        copyIfPresent(arguments, payload, "collation");
+        copyIfPresent(normalizedArguments, payload, "hint");
+        copyIfPresent(normalizedArguments, payload, "collation");
         return new ScenarioCommand("findAndModify", immutableMap(payload));
     }
 
@@ -613,19 +617,19 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("findOneAndReplace", arguments);
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("findOneAndReplace", arguments);
         final Map<String, Object> replacement = asStringObjectMap(
-                arguments.get("replacement"),
+                normalizedArguments.get("replacement"),
                 "findOneAndReplace.arguments.replacement");
         final Map<String, Object> payload = commandEnvelope("findOneAndReplace", database, collection);
-        payload.put("filter", deepCopyValue(arguments.getOrDefault("filter", Map.of())));
+        payload.put("filter", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
         payload.put("replacement", deepCopyValue(replacement));
-        copyIfPresent(arguments, payload, "sort");
-        copyIfPresent(arguments, payload, "projection");
-        copyIfPresent(arguments, payload, "upsert");
-        copyNormalizedReturnDocumentIfPresent(arguments, payload);
-        copyIfPresent(arguments, payload, "hint");
-        copyIfPresent(arguments, payload, "collation");
+        copyIfPresent(normalizedArguments, payload, "sort");
+        copyIfPresent(normalizedArguments, payload, "projection");
+        copyIfPresent(normalizedArguments, payload, "upsert");
+        copyNormalizedReturnDocumentIfPresent(normalizedArguments, payload);
+        copyIfPresent(normalizedArguments, payload, "hint");
+        copyIfPresent(normalizedArguments, payload, "collation");
         return new ScenarioCommand("findOneAndReplace", immutableMap(payload));
     }
 
@@ -633,14 +637,14 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String database,
             final String collection) {
-        rejectUnsupportedLetOption("bulkWrite", arguments);
-        final Object orderedValue = arguments.get("ordered");
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("bulkWrite", arguments);
+        final Object orderedValue = normalizedArguments.get("ordered");
         if (orderedValue != null && !(orderedValue instanceof Boolean)) {
             throw new IllegalArgumentException("bulkWrite.arguments.ordered must be a boolean");
         }
         final boolean ordered = orderedValue == null || Boolean.TRUE.equals(orderedValue);
 
-        final List<Object> requests = asList(arguments.get("requests"), "bulkWrite.arguments.requests");
+        final List<Object> requests = asList(normalizedArguments.get("requests"), "bulkWrite.arguments.requests");
         final List<Object> operations = new ArrayList<>(requests.size());
         for (final Object request : requests) {
             final Map<String, Object> requestDocument = asStringObjectMap(request, "bulkWrite request");
@@ -786,6 +790,54 @@ public final class UnifiedSpecImporter {
         if (arguments.containsKey("let")) {
             throw new UnsupportedOperationException("unsupported UTF " + operationName + " option: let");
         }
+    }
+
+    private static Map<String, Object> normalizeArgumentsWithLet(
+            final String operationName,
+            final Map<String, Object> arguments) {
+        if (!arguments.containsKey("let")) {
+            return arguments;
+        }
+        final Map<String, Object> letVariables = asStringObjectMap(arguments.get("let"), operationName + ".arguments.let");
+        final Map<String, Object> normalized = new LinkedHashMap<>();
+        for (final Map.Entry<String, Object> entry : arguments.entrySet()) {
+            if ("let".equals(entry.getKey())) {
+                continue;
+            }
+            normalized.put(entry.getKey(), inlineLetVariables(operationName, letVariables, entry.getValue()));
+        }
+        return immutableMap(normalized);
+    }
+
+    private static Object inlineLetVariables(
+            final String operationName,
+            final Map<String, Object> letVariables,
+            final Object value) {
+        if (value instanceof String textValue && textValue.startsWith("$$") && textValue.length() > 2) {
+            final String variableName = textValue.substring(2);
+            if (!letVariables.containsKey(variableName)) {
+                throw new UnsupportedOperationException(
+                        "unsupported UTF " + operationName + " option: let unresolved variable: " + variableName);
+            }
+            return deepCopyValue(letVariables.get(variableName));
+        }
+        if (value instanceof Map<?, ?> mapValue) {
+            final Map<String, Object> copied = new LinkedHashMap<>();
+            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
+                copied.put(
+                        String.valueOf(entry.getKey()),
+                        inlineLetVariables(operationName, letVariables, entry.getValue()));
+            }
+            return immutableMap(copied);
+        }
+        if (value instanceof List<?> listValue) {
+            final List<Object> copied = new ArrayList<>(listValue.size());
+            for (final Object item : listValue) {
+                copied.add(inlineLetVariables(operationName, letVariables, item));
+            }
+            return List.copyOf(copied);
+        }
+        return deepCopyValue(value);
     }
 
     private static ScenarioCommand runCommand(final Map<String, Object> arguments, final String database) {

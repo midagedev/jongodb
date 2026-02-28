@@ -667,7 +667,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksFindLetOptionAsUnsupported() throws IOException {
+    void importsFindLetOptionByInliningVariables() throws IOException {
         Files.writeString(
                 tempDir.resolve("find-let-unsupported.json"),
                 """
@@ -678,6 +678,7 @@ class UnifiedSpecImporterTest {
                     {
                       "description": "find with let option",
                       "operations": [
+                        {"name": "insertOne", "arguments": {"document": {"_id": 1, "name": "alice"}}},
                         {
                           "name": "find",
                           "arguments": {
@@ -694,11 +695,53 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(1).commandName());
+        final Object filterValue = scenario.commands().get(1).payload().get("filter");
+        assertTrue(filterValue instanceof java.util.Map<?, ?>);
+        final java.util.Map<?, ?> filter = (java.util.Map<?, ?>) filterValue;
+        assertTrue(filter.containsKey("$expr"));
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+    }
+
+    @Test
+    void keepsFindLetUnsupportedWhenVariableIsUnresolved() throws IOException {
+        Files.writeString(
+                tempDir.resolve("find-let-unresolved.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "find with unresolved let variable",
+                      "operations": [
+                        {
+                          "name": "find",
+                          "arguments": {
+                            "filter": {"$expr": {"$eq": ["$name", "$$target"]}},
+                            "let": {"other": "alice"}
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
         assertEquals(0, result.importedCount());
         assertEquals(1, result.unsupportedCount());
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF find option: let")));
+                        && skipped.reason().contains("unresolved variable")));
     }
 
     @Test
