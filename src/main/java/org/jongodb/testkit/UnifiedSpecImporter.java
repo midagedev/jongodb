@@ -938,17 +938,18 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> arguments,
             final String defaultDatabase,
             final String defaultCollection) {
-        final Object orderedValue = arguments.get("ordered");
+        final Map<String, Object> normalizedArguments = normalizeArgumentsWithLet("clientBulkWrite", arguments);
+        final Object orderedValue = normalizedArguments.get("ordered");
         if (orderedValue != null && !(orderedValue instanceof Boolean)) {
             throw new IllegalArgumentException("clientBulkWrite.arguments.ordered must be a boolean");
         }
         final boolean ordered = orderedValue == null || Boolean.TRUE.equals(orderedValue);
 
-        final Object modelsValue = arguments.containsKey("models")
-                ? arguments.get("models")
-                : arguments.containsKey("operations")
-                        ? arguments.get("operations")
-                        : arguments.get("requests");
+        final Object modelsValue = normalizedArguments.containsKey("models")
+                ? normalizedArguments.get("models")
+                : normalizedArguments.containsKey("operations")
+                        ? normalizedArguments.get("operations")
+                        : normalizedArguments.get("requests");
         final List<Object> models = asList(modelsValue, "clientBulkWrite.arguments.models");
 
         CollectionTarget namespace = null;
@@ -963,6 +964,12 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> operationArguments = asStringObjectMap(
                     requestDocument.get(operationName),
                     "clientBulkWrite model operation arguments");
+            final String normalizedOperationName = operationName.toLowerCase(Locale.ROOT);
+            if (("updateone".equals(normalizedOperationName) || "updatemany".equals(normalizedOperationName))
+                    && hasIdentifierOnlyArrayFilters(operationArguments.get("arrayFilters"))) {
+                throw new DeterministicNoOpOperationException(
+                        "clientBulkWrite update arrayFilters deterministic no-op subset");
+            }
 
             final CollectionTarget currentNamespace = readClientBulkWriteNamespace(
                     operationArguments,
@@ -985,6 +992,22 @@ public final class UnifiedSpecImporter {
         bulkWriteArguments.put("ordered", ordered);
         bulkWriteArguments.put("requests", List.copyOf(requests));
         return bulkWrite(bulkWriteArguments, resolved.database(), resolved.collection());
+    }
+
+    private static boolean hasIdentifierOnlyArrayFilters(final Object arrayFiltersValue) {
+        if (arrayFiltersValue == null) {
+            return false;
+        }
+        final List<Object> arrayFilters = asList(arrayFiltersValue, "clientBulkWrite.arguments.arrayFilters");
+        for (final Object filterValue : arrayFilters) {
+            final Map<String, Object> filter = asStringObjectMap(filterValue, "clientBulkWrite arrayFilter");
+            for (final String key : filter.keySet()) {
+                if (!key.contains(".")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static CollectionTarget readClientBulkWriteNamespace(
@@ -1138,6 +1161,19 @@ public final class UnifiedSpecImporter {
                         runOnContext.authEnabled()));
             }
         }
+        if (isClientBulkWriteVersionLaneSourcePath(sourcePath)) {
+            final List<String> clientBulkWriteVersions = List.of("8.0.0", "8.2.0");
+            for (final String laneVersion : clientBulkWriteVersions) {
+                if (laneVersion.equals(runOnContext.serverVersion())) {
+                    continue;
+                }
+                laneContexts.add(RunOnContext.evaluated(
+                        laneVersion,
+                        runOnContext.topology(),
+                        runOnContext.serverless(),
+                        runOnContext.authEnabled()));
+            }
+        }
         return List.copyOf(laneContexts);
     }
 
@@ -1156,6 +1192,17 @@ public final class UnifiedSpecImporter {
                 && (filename.contains("unacknowledged")
                         || filename.contains("clientError")
                         || filename.contains("serverError"));
+    }
+
+    private static boolean isClientBulkWriteVersionLaneSourcePath(final String sourcePath) {
+        final boolean clientBulkWriteSource =
+                sourcePath.startsWith("crud/tests/unified/client-bulkWrite")
+                        || sourcePath.startsWith("transactions/tests/unified/client-bulkWrite");
+        if (!clientBulkWriteSource) {
+            return false;
+        }
+        return !sourcePath.contains("client-bulkWrite-errors")
+                && !sourcePath.contains("client-bulkWrite-errorResponse");
     }
 
     private static boolean matchesAnyRunOnRequirement(

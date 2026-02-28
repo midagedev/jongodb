@@ -350,6 +350,102 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void appliesClientBulkWriteVersionLaneOverride() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("client-bulkWrite-options.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "client bulkWrite lane",
+                      "runOnRequirements": [{"minServerVersion": "8.0"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void keepsRunOnVersionChecksForNonClientBulkWriteLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("bulkWrite-client-options.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "non client-bulkWrite lane",
+                      "runOnRequirements": [{"minServerVersion": "8.0"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
+    void keepsRunOnVersionChecksForClientBulkWriteErrorsLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("client-bulkWrite-errors.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "errors lane excluded",
+                      "runOnRequirements": [{"minServerVersion": "8.0"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
     void importsBulkWriteOperationWhenOrderedIsSupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("bulk-write.json"),
@@ -1466,6 +1562,82 @@ class UnifiedSpecImporterTest {
         assertEquals("bulkWrite", scenario.commands().get(0).commandName());
         assertEquals("users", scenario.commands().get(0).payload().get("bulkWrite"));
         assertEquals("app", scenario.commands().get(0).payload().get("$db"));
+    }
+
+    @Test
+    void importsClientBulkWriteLetByInliningVariables() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-let.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite let subset",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [{"_id": 1}, {"_id": 2}]}},
+                        {"name": "clientBulkWrite", "arguments": {
+                          "models": [
+                            {"deleteOne": {"namespace": "app.users", "filter": {"$expr": {"$eq": ["$_id", "$$targetId"]}}}}
+                          ],
+                          "let": {"targetId": 1}
+                        }},
+                        {"name": "countDocuments", "arguments": {"filter": {}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(result.importedScenarios().get(0).scenario());
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        final Map<String, Object> countResult = outcome.commandResults().get(2);
+        assertEquals(1L, ((Number) countResult.get("n")).longValue());
+    }
+
+    @Test
+    void skipsClientBulkWriteIdentifierOnlyArrayFiltersAsNoOpSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-arrayfilters-noop.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite arrayFilters identifier-only",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"models": [
+                          {"updateOne": {
+                            "namespace": "app.users",
+                            "filter": {"_id": 1},
+                            "update": {"$set": {"array.$[i]": 4}},
+                            "arrayFilters": [{"i": {"$gte": 2}}]
+                          }}
+                        ]}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
+                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
     }
 
     @Test
