@@ -391,6 +391,34 @@ tasks.register<JavaExec>("fixtureSanitize") {
     args(if (failOnPii) "--fail-on-pii" else "--no-fail-on-pii")
 }
 
+tasks.register<JavaExec>("fixtureArtifactPack") {
+    group = "verification"
+    description = "Packs fixture ndjson into portable + fast dual artifacts with checksum manifest."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.FixtureArtifactTool")
+
+    val inputDir = (findProperty("fixtureArtifactInputDir") as String?)?.trim().orEmpty()
+    val outputDir = (findProperty("fixtureArtifactOutputDir") as String?)?.trim().orEmpty()
+    val engineVersion = (findProperty("fixtureArtifactEngineVersion") as String?)?.trim().orEmpty()
+
+    doFirst {
+        if (inputDir.isBlank()) {
+            throw GradleException("fixtureArtifactInputDir property is required")
+        }
+        if (outputDir.isBlank()) {
+            throw GradleException("fixtureArtifactOutputDir property is required")
+        }
+    }
+
+    args(
+        "--input-dir=$inputDir",
+        "--output-dir=$outputDir"
+    )
+    if (engineVersion.isNotBlank()) {
+        args("--engine-version=$engineVersion")
+    }
+}
+
 tasks.register<JavaExec>("fixtureRestore") {
     group = "verification"
     description = "Restores fixture ndjson into target MongoDB using replace/merge mode with diagnostics report."
@@ -403,6 +431,7 @@ tasks.register<JavaExec>("fixtureRestore") {
     val database = (findProperty("fixtureRestoreDatabase") as String?)?.trim().orEmpty()
     val namespace = (findProperty("fixtureRestoreNamespace") as String?)?.trim().orEmpty()
     val reportDir = (findProperty("fixtureRestoreReportDir") as String?)?.trim().orEmpty()
+    val regenerateFastCache = (findProperty("fixtureRestoreRegenerateFastCache") as String?)?.toBoolean() ?: true
 
     doFirst {
         if (inputDir.isBlank()) {
@@ -427,6 +456,7 @@ tasks.register<JavaExec>("fixtureRestore") {
     if (reportDir.isNotBlank()) {
         args("--report-dir=$reportDir")
     }
+    args(if (regenerateFastCache) "--regenerate-fast-cache" else "--no-regenerate-fast-cache")
 }
 
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {

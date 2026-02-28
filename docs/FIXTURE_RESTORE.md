@@ -4,6 +4,7 @@
 
 ## 목적
 - NDJSON fixture를 로컬/CI Mongo로 복원합니다.
+- dual artifact(Portable + Fast) 입력을 자동 인식해 복원합니다.
 - `replace|merge` 모드와 DB/namespace 대상 선택을 지원합니다.
 - 복원 진단 리포트를 생성합니다.
 
@@ -21,9 +22,11 @@
 - `--database=<db>`
 - `--namespace=<db.collection[,db.collection...]>`
 - `--report-dir=<dir>`
+- `--no-regenerate-fast-cache` (portable fallback 이후 fast cache 재생성 비활성화)
 
 ## 산출물
 - `<reportDir>/fixture-restore-report.json`
+  - `sourceFormat` (`FAST`, `PORTABLE_FALLBACK`, `NDJSON`)
   - 컬렉션별 source/restored 문서 수
   - 스키마 불일치 경고(top-level signature mix)
 
