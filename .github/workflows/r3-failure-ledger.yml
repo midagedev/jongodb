@@ -291,9 +291,9 @@ jobs:
           current_failure_count = int(current_ledger.get("failureCount", 0))
 
           aggregate_pattern = re.compile(
-              r"## aggregate\\s+"
-              r"- baseline: total=(?P<b_total>\\d+) match=(?P<b_match>\\d+) mismatch=(?P<b_mismatch>\\d+) error=(?P<b_error>\\d+).*?\\n"
-              r"- rerun: total=(?P<r_total>\\d+) match=(?P<r_match>\\d+) mismatch=(?P<r_mismatch>\\d+) error=(?P<r_error>\\d+)",
+              r"## aggregate\s+"
+              r"- baseline: total=(?P<b_total>\d+) match=(?P<b_match>\d+) mismatch=(?P<b_mismatch>\d+) error=(?P<b_error>\d+).*?\n"
+              r"- rerun: total=(?P<r_total>\d+) match=(?P<r_match>\d+) mismatch=(?P<r_mismatch>\d+) error=(?P<r_error>\d+)",
               re.S,
           )
 
