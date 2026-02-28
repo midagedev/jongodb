@@ -187,6 +187,41 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void evaluatesTestLevelRunOnRequirementsWhenRuntimeContextIsProvided() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-on-test-level.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "find gated by test-level runOn",
+                      "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["replicaset"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult matched = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.4", "replicaset", false, false));
+        assertEquals(1, matched.importedCount());
+        assertEquals(0, matched.skippedCount());
+
+        final UnifiedSpecImporter.ImportResult unmatched = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("6.0.14", "single", false, false));
+        assertEquals(0, unmatched.importedCount());
+        assertEquals(1, unmatched.skippedCount());
+        assertTrue(unmatched.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
     void importsBulkWriteOperationWhenOrderedIsSupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("bulk-write.json"),
@@ -501,7 +536,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void importsOutAndMergeStagesAndBypassValidationFalse() throws IOException {
+    void marksMergeStageAndBypassValidationTrueAsUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-aggregation.json"),
                 """
@@ -562,16 +597,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(3, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
+        assertEquals(2, result.importedCount());
+        assertEquals(2, result.unsupportedCount());
         final Scenario outScenario = result.importedScenarios().stream()
                 .map(UnifiedSpecImporter.ImportedScenario::scenario)
                 .filter(scenario -> scenario.description().equals("aggregate with out"))
-                .findFirst()
-                .orElseThrow();
-        final Scenario mergeScenario = result.importedScenarios().stream()
-                .map(UnifiedSpecImporter.ImportedScenario::scenario)
-                .filter(scenario -> scenario.description().equals("aggregate with merge"))
                 .findFirst()
                 .orElseThrow();
         final Scenario bypassFalseScenario = result.importedScenarios().stream()
@@ -581,11 +611,48 @@ class UnifiedSpecImporterTest {
                 .orElseThrow();
         assertEquals(1, outScenario.commands().size());
         assertEquals("aggregate", outScenario.commands().get(0).commandName());
-        assertEquals("aggregate", mergeScenario.commands().get(0).commandName());
         assertEquals(Boolean.FALSE, bypassFalseScenario.commands().get(0).payload().get("bypassDocumentValidation"));
-        assertTrue(result.skippedCases().stream().allMatch(skipped ->
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF aggregate stage in pipeline")));
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
                         && skipped.reason().contains("unsupported UTF aggregate option: bypassDocumentValidation")));
+    }
+
+    @Test
+    void marksFindLetOptionAsUnsupported() throws IOException {
+        Files.writeString(
+                tempDir.resolve("find-let-unsupported.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "find with let option",
+                      "operations": [
+                        {
+                          "name": "find",
+                          "arguments": {
+                            "filter": {"$expr": {"$eq": ["$name", "$$target"]}},
+                            "let": {"target": "alice"}
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.unsupportedCount());
+        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
+                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
+                        && skipped.reason().contains("unsupported UTF find option: let")));
     }
 
     @Test
@@ -752,6 +819,64 @@ class UnifiedSpecImporterTest {
         final Map<String, Object> buildInfoResult = outcome.commandResults().get(1);
         assertEquals(1.0, ((Number) buildInfoResult.get("ok")).doubleValue());
         assertTrue(outcome.commandResults().get(2).containsKey("cursor"));
+    }
+
+    @Test
+    void importsCreateIndexCommitQuorumOption() throws IOException {
+        Files.writeString(
+                tempDir.resolve("create-index-commitquorum.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "createIndex with commitQuorum",
+                      "operations": [
+                        {"name": "createIndex", "arguments": {"key": {"name": 1}, "name": "name_1", "commitQuorum": "majority"}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("createIndexes", scenario.commands().get(0).commandName());
+        assertEquals("majority", scenario.commands().get(0).payload().get("commitQuorum"));
+    }
+
+    @Test
+    void defaultsCreateIndexCommitQuorumToVotingMembers() throws IOException {
+        Files.writeString(
+                tempDir.resolve("create-index-default-commitquorum.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "createIndex default commitQuorum",
+                      "operations": [
+                        {"name": "createIndex", "arguments": {"key": {"name": 1}, "name": "name_1"}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("votingMembers", scenario.commands().get(0).payload().get("commitQuorum"));
     }
 
     @Test

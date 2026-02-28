@@ -623,6 +623,7 @@ class CommandDispatcherE2ETest {
         assertEquals(false, response.getBoolean("createdCollectionAutomatically").getValue());
         assertEquals(0, response.getInt32("numIndexesBefore").getValue());
         assertEquals(1, response.getInt32("numIndexesAfter").getValue());
+        assertEquals("votingMembers", response.getString("commitQuorum").getValue());
         assertEquals("app", store.lastCreateIndexesDatabase);
         assertEquals("users", store.lastCreateIndexesCollection);
         assertEquals(1, store.lastCreateIndexesRequests.size());
@@ -660,6 +661,19 @@ class CommandDispatcherE2ETest {
         assertEquals("en", store.lastCreateIndexesRequests.get(0).collation().getString("locale").getValue());
         assertEquals(2, store.lastCreateIndexesRequests.get(0).collation().getInt32("strength").getValue());
         assertEquals(3600L, store.lastCreateIndexesRequests.get(0).expireAfterSeconds());
+    }
+
+    @Test
+    void createIndexesCommandEchoesCommitQuorumInResponse() {
+        final RecordingStore store = new RecordingStore();
+        store.createIndexesResult = new CommandStore.CreateIndexesResult(0, 1);
+        final CommandDispatcher dispatcher = new CommandDispatcher(store);
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"commitQuorum\":\"majority\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1}}]}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals("majority", response.getString("commitQuorum").getValue());
     }
 
     @Test

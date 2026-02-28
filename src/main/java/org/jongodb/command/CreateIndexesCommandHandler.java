@@ -119,11 +119,18 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
             return CommandErrors.duplicateKey(exception.getMessage());
         }
 
-        return new BsonDocument()
-                .append("createdCollectionAutomatically", BsonBoolean.FALSE)
+        final BsonDocument response = new BsonDocument()
+                .append(
+                        "createdCollectionAutomatically",
+                        BsonBoolean.valueOf(result.createdCollectionAutomatically()))
                 .append("numIndexesBefore", new BsonInt32(result.numIndexesBefore()))
                 .append("numIndexesAfter", new BsonInt32(result.numIndexesAfter()))
                 .append("ok", new BsonDouble(1.0));
+        final BsonValue commitQuorum = command.get("commitQuorum");
+        response.append(
+                "commitQuorum",
+                commitQuorum == null ? new BsonString("votingMembers") : commitQuorum);
+        return response;
     }
 
     private static String readDatabase(final BsonDocument command) {
