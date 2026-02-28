@@ -29,6 +29,8 @@ import org.bson.BsonValue;
 public final class RealMongodBackend implements DifferentialBackend {
     private static final String DEFAULT_DATABASE_PREFIX = "testkit";
     private static final String ADMIN_DATABASE_NAME = "admin";
+    private static final long RESET_DROP_MAX_TIME_MS = 5_000L;
+    private static final int RESET_RETRY_ATTEMPTS = 2;
 
     private final String name;
     private final String connectionUri;
@@ -64,8 +66,8 @@ public final class RealMongodBackend implements DifferentialBackend {
 
         try (MongoClient client = clientFactory.create(connectionUri)) {
             final Map<String, ClientSession> sessionPool = new HashMap<>();
+            resetDatabase(client, databaseName);
             MongoDatabase database = client.getDatabase(databaseName);
-            resetDatabase(database);
 
             List<Map<String, Object>> commandResults = new ArrayList<>(scenario.commands().size());
             try {
@@ -745,9 +747,34 @@ public final class RealMongodBackend implements DifferentialBackend {
         builder.append(value);
     }
 
-    private static void resetDatabase(MongoDatabase database) {
-        Objects.requireNonNull(database, "database");
-        database.drop();
+    private static void resetDatabase(final MongoClient client, final String databaseName) {
+        Objects.requireNonNull(client, "client");
+        final String normalizedDatabaseName = requireText(databaseName, "databaseName");
+        final MongoDatabase database = client.getDatabase(normalizedDatabaseName);
+        final MongoDatabase adminDatabase = client.getDatabase(ADMIN_DATABASE_NAME);
+
+        RuntimeException lastError = null;
+        for (int attempt = 0; attempt < RESET_RETRY_ATTEMPTS; attempt++) {
+            try {
+                database.runCommand(new BsonDocument("dropDatabase", new BsonInt32(1))
+                        .append("maxTimeMS", new BsonInt64(RESET_DROP_MAX_TIME_MS)), BsonDocument.class);
+                return;
+            } catch (final RuntimeException exception) {
+                lastError = exception;
+                if (attempt + 1 >= RESET_RETRY_ATTEMPTS) {
+                    break;
+                }
+                clearLingeringSessions(adminDatabase);
+            }
+        }
+
+        throw lastError;
+    }
+
+    private static void clearLingeringSessions(final MongoDatabase adminDatabase) {
+        adminDatabase.runCommand(
+                new BsonDocument("killAllSessionsByPattern", new BsonArray(List.of(new BsonDocument()))),
+                BsonDocument.class);
     }
 
     private static void validateConnectionUri(String connectionUri) {

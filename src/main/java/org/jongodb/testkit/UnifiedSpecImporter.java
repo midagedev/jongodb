@@ -1394,6 +1394,8 @@ public final class UnifiedSpecImporter {
                         "endSession",
                         "listCollections",
                         "listDatabases",
+                        "assertCollectionNotExists",
+                        "assertIndexNotExists",
                         "assertSessionNotDirty",
                         "assertSameLsidOnLastTwoCommands",
                         "assertSessionTransactionState" -> List.of();
