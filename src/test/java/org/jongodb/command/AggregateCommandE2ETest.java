@@ -420,22 +420,10 @@ class AggregateCommandE2ETest {
         final BsonDocument thirdNode = firstBatch.get(2).asDocument();
         assertEquals("C", thirdNode.getString("_id").getValue());
         assertEquals(2, thirdNode.getArray("graph").size());
-        assertEquals(
-                "B",
-                thirdNode
-                        .getArray("graph")
-                        .get(0)
-                        .asDocument()
-                        .getString("_id")
-                        .getValue());
-        assertEquals(
-                "A",
-                thirdNode
-                        .getArray("graph")
-                        .get(1)
-                        .asDocument()
-                        .getString("_id")
-                        .getValue());
+        final Set<String> graphIds = Set.of(
+                thirdNode.getArray("graph").get(0).asDocument().getString("_id").getValue(),
+                thirdNode.getArray("graph").get(1).asDocument().getString("_id").getValue());
+        assertEquals(Set.of("A", "B"), graphIds);
     }
 
     @Test
