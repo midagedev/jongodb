@@ -1635,7 +1635,9 @@ public final class UnifiedSpecImporter {
                 default -> {
                     try {
                         if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
-                            yield List.of();
+                            yield List.of(new ScenarioCommand("ping", immutableMap(Map.of(
+                                    "ping", 1,
+                                    "$db", "admin"))));
                         }
                         final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
                         final ScenarioCommand converted = convertCrudOperation(
