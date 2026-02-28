@@ -61,8 +61,7 @@ public final class EngineBackedCommandStore implements CommandStore {
             throw new IllegalStateException("transaction snapshots require InMemoryEngineStore");
         }
         final InMemoryEngineStore baselineSnapshot = inMemoryEngineStore.snapshot();
-        final InMemoryEngineStore transactionStore = baselineSnapshot.snapshot();
-        return new EngineBackedCommandStore(transactionStore, baselineSnapshot);
+        return new CopyOnWriteTransactionCommandStore(baselineSnapshot);
     }
 
     @Override
@@ -73,6 +72,12 @@ public final class EngineBackedCommandStore implements CommandStore {
         }
         if (!(snapshot instanceof EngineBackedCommandStore engineSnapshot)
                 || !(engineSnapshot.engineStore instanceof InMemoryEngineStore inMemorySnapshot)) {
+            if (snapshot instanceof CopyOnWriteTransactionCommandStore copyOnWriteSnapshot) {
+                inMemoryEngineStore.mergeTransactionSnapshot(
+                        copyOnWriteSnapshot.baselineSnapshot(),
+                        copyOnWriteSnapshot.transactionSnapshot());
+                return;
+            }
             throw new IllegalArgumentException("snapshot must be an EngineBackedCommandStore backed by InMemoryEngineStore");
         }
         if (engineSnapshot.transactionBaselineSnapshot != null) {
@@ -475,6 +480,132 @@ public final class EngineBackedCommandStore implements CommandStore {
         throw new UnsupportedFeatureException(
                 "aggregation.stage.$merge.form",
                 "$merge stage currently supports string targets or {into: <collection>} form only");
+    }
+
+    private static boolean containsTerminalWriteStage(final List<BsonDocument> pipeline) {
+        Objects.requireNonNull(pipeline, "pipeline");
+        for (final BsonDocument stage : pipeline) {
+            if (stage != null && (stage.containsKey("$out") || stage.containsKey("$merge"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static final class CopyOnWriteTransactionCommandStore implements CommandStore {
+        private final InMemoryEngineStore baselineSnapshot;
+        private final EngineBackedCommandStore readDelegate;
+        private volatile EngineBackedCommandStore writeDelegate;
+
+        private CopyOnWriteTransactionCommandStore(final InMemoryEngineStore baselineSnapshot) {
+            this.baselineSnapshot = Objects.requireNonNull(baselineSnapshot, "baselineSnapshot");
+            this.readDelegate = new EngineBackedCommandStore(baselineSnapshot, baselineSnapshot);
+        }
+
+        InMemoryEngineStore baselineSnapshot() {
+            return baselineSnapshot;
+        }
+
+        InMemoryEngineStore transactionSnapshot() {
+            final EngineBackedCommandStore writable = writeDelegate;
+            if (writable == null) {
+                return baselineSnapshot;
+            }
+            if (!(writable.engineStore instanceof InMemoryEngineStore inMemoryWritableStore)) {
+                throw new IllegalStateException("transaction write snapshot must be InMemoryEngineStore");
+            }
+            return inMemoryWritableStore;
+        }
+
+        boolean materializedWriteSnapshot() {
+            return writeDelegate != null;
+        }
+
+        private EngineBackedCommandStore activeReadDelegate() {
+            final EngineBackedCommandStore writable = writeDelegate;
+            return writable == null ? readDelegate : writable;
+        }
+
+        private synchronized EngineBackedCommandStore materializeWriteDelegate() {
+            if (writeDelegate == null) {
+                final InMemoryEngineStore writableSnapshot = baselineSnapshot.snapshot();
+                writeDelegate = new EngineBackedCommandStore(writableSnapshot, baselineSnapshot);
+            }
+            return writeDelegate;
+        }
+
+        @Override
+        public int insert(final String database, final String collection, final List<BsonDocument> documents) {
+            return materializeWriteDelegate().insert(database, collection, documents);
+        }
+
+        @Override
+        public List<BsonDocument> find(final String database, final String collection, final BsonDocument filter) {
+            return activeReadDelegate().find(database, collection, filter);
+        }
+
+        @Override
+        public List<BsonDocument> find(
+                final String database,
+                final String collection,
+                final BsonDocument filter,
+                final CollationSupport.Config collation) {
+            return activeReadDelegate().find(database, collection, filter, collation);
+        }
+
+        @Override
+        public List<BsonDocument> aggregate(
+                final String database, final String collection, final List<BsonDocument> pipeline) {
+            return aggregate(database, collection, pipeline, CollationSupport.Config.simple());
+        }
+
+        @Override
+        public List<BsonDocument> aggregate(
+                final String database,
+                final String collection,
+                final List<BsonDocument> pipeline,
+                final CollationSupport.Config collation) {
+            if (containsTerminalWriteStage(pipeline)) {
+                return materializeWriteDelegate().aggregate(database, collection, pipeline, collation);
+            }
+            return activeReadDelegate().aggregate(database, collection, pipeline, collation);
+        }
+
+        @Override
+        public void reset() {
+            materializeWriteDelegate().reset();
+        }
+
+        @Override
+        public CommandStore snapshotForTransaction() {
+            return activeReadDelegate().snapshotForTransaction();
+        }
+
+        @Override
+        public void publishTransactionSnapshot(final CommandStore snapshot) {
+            activeReadDelegate().publishTransactionSnapshot(snapshot);
+        }
+
+        @Override
+        public CreateIndexesResult createIndexes(
+                final String database, final String collection, final List<IndexRequest> indexes) {
+            return materializeWriteDelegate().createIndexes(database, collection, indexes);
+        }
+
+        @Override
+        public List<IndexMetadata> listIndexes(final String database, final String collection) {
+            return activeReadDelegate().listIndexes(database, collection);
+        }
+
+        @Override
+        public UpdateResult update(final String database, final String collection, final List<UpdateRequest> updates) {
+            return materializeWriteDelegate().update(database, collection, updates);
+        }
+
+        @Override
+        public int delete(final String database, final String collection, final List<DeleteRequest> deletes) {
+            return materializeWriteDelegate().delete(database, collection, deletes);
+        }
     }
 
     private record TerminalWriteStagePlan(
