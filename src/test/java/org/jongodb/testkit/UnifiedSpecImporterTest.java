@@ -254,6 +254,38 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void skipsMongosPinAutoWhenRunOnLaneAdjustmentsDisabled() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-pin-auto.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "sharded-only lane",
+                      "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["sharded"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.STRICT, false);
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(0, result.importedCount());
+        assertEquals(1, result.skippedCount());
+        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+    }
+
+    @Test
     void keepsRunOnTopologyChecksForNonLaneFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
         Files.createDirectories(suiteRoot);
