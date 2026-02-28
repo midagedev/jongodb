@@ -503,7 +503,56 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksUnsupportedUpdatePipelineStagesAsUnsupported() throws IOException {
+    void importsUpdatePipelineWithLetLiteralInlining() throws IOException {
+        Files.writeString(
+                tempDir.resolve("update-pipeline-let-literal.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "update pipeline let with literal",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [{"_id": 1, "name": "before"}]}},
+                        {
+                          "name": "updateMany",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$set": {"x": "$$x", "y": "$$y"}}],
+                            "let": {"x": "foo", "y": {"$literal": "bar"}}
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(result.importedScenarios().get(0).scenario());
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> findResult = outcome.commandResults().get(2);
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> cursor = (Map<String, Object>) findResult.get("cursor");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> firstBatch = (List<Map<String, Object>>) cursor.get("firstBatch");
+        assertEquals(1, firstBatch.size());
+        assertEquals("foo", firstBatch.get(0).get("x"));
+        assertEquals("bar", firstBatch.get(0).get("y"));
+    }
+
+    @Test
+    void skipsUnsupportedUpdatePipelineStagesAsDeterministicNoOpSubset() throws IOException {
         Files.writeString(
                 tempDir.resolve("update-pipeline-unsupported.json"),
                 """
@@ -531,10 +580,10 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
         assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
+        assertEquals(0, result.unsupportedCount());
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF update pipeline form outside subset")));
+                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
+                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
     }
 
     @Test

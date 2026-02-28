@@ -507,14 +507,14 @@ public final class UnifiedSpecImporter {
         if (rawUpdate == null) {
             throw new IllegalArgumentException("update operation requires update/replacement argument");
         }
-        validateSupportedUpdatePipeline(rawUpdate);
-        if (multi && isReplacementDocument(rawUpdate)) {
+        final Object preparedUpdate = prepareSupportedUpdateValue(rawUpdate);
+        if (multi && isReplacementDocument(preparedUpdate)) {
             throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
         }
 
         final Map<String, Object> updateEntry = new LinkedHashMap<>();
         updateEntry.put("q", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
-        updateEntry.put("u", deepCopyValue(rawUpdate));
+        updateEntry.put("u", deepCopyValue(preparedUpdate));
         updateEntry.put("multi", multi);
         updateEntry.put("upsert", Boolean.TRUE.equals(normalizedArguments.get("upsert")));
         copyIfPresent(normalizedArguments, updateEntry, "arrayFilters");
@@ -582,10 +582,10 @@ public final class UnifiedSpecImporter {
         if (updateValue == null) {
             throw new IllegalArgumentException("findOneAndUpdate operation requires update argument");
         }
-        validateSupportedUpdatePipeline(updateValue);
+        final Object preparedUpdateValue = prepareSupportedUpdateValue(updateValue);
         final Map<String, Object> payload = commandEnvelope("findOneAndUpdate", database, collection);
         payload.put("filter", deepCopyValue(normalizedArguments.getOrDefault("filter", Map.of())));
-        payload.put("update", deepCopyValue(updateValue));
+        payload.put("update", deepCopyValue(preparedUpdateValue));
         copyIfPresent(normalizedArguments, payload, "sort");
         copyIfPresent(normalizedArguments, payload, "projection");
         copyIfPresent(normalizedArguments, payload, "upsert");
@@ -657,13 +657,16 @@ public final class UnifiedSpecImporter {
             final Map<String, Object> operationArguments = asStringObjectMap(
                     requestDocument.get(operationName),
                     "bulkWrite request operation arguments");
+            final Map<String, Object> normalizedOperationArguments = new LinkedHashMap<>(operationArguments);
 
             switch (normalizedOperationName) {
                 case "insertone" -> asStringObjectMap(
                         operationArguments.get("document"),
                         "bulkWrite.insertOne.document");
-                case "updateone" -> validateBulkWriteUpdate(operationArguments, false);
-                case "updatemany" -> validateBulkWriteUpdate(operationArguments, true);
+                case "updateone" -> normalizedOperationArguments.put(
+                        "update", deepCopyValue(validateBulkWriteUpdate(operationArguments)));
+                case "updatemany" -> normalizedOperationArguments.put(
+                        "update", deepCopyValue(validateBulkWriteUpdate(operationArguments)));
                 case "deleteone", "deletemany", "replaceone" -> {
                     // Accepted and forwarded as-is for command-layer validation/execution.
                 }
@@ -671,7 +674,7 @@ public final class UnifiedSpecImporter {
                         "unsupported UTF bulkWrite operation: " + operationName);
             }
 
-            operations.add(deepCopyValue(requestDocument));
+            operations.add(immutableMap(Map.of(operationName, immutableMap(normalizedOperationArguments))));
         }
 
         final Map<String, Object> payload = commandEnvelope("bulkWrite", database, collection);
@@ -680,19 +683,20 @@ public final class UnifiedSpecImporter {
         return new ScenarioCommand("bulkWrite", immutableMap(payload));
     }
 
-    private static void validateBulkWriteUpdate(final Map<String, Object> operationArguments, final boolean multi) {
+    private static Object validateBulkWriteUpdate(final Map<String, Object> operationArguments) {
         final Object updateValue = operationArguments.get("update");
         if (updateValue == null) {
             throw new IllegalArgumentException("bulkWrite update operation requires update argument");
         }
-        validateSupportedUpdatePipeline(updateValue);
+        return prepareSupportedUpdateValue(updateValue);
     }
 
-    private static void validateSupportedUpdatePipeline(final Object updateValue) {
+    private static Object prepareSupportedUpdateValue(final Object updateValue) {
         if (!(updateValue instanceof List<?> pipeline)) {
-            return;
+            return updateValue;
         }
 
+        final List<Object> normalizedPipeline = new ArrayList<>(pipeline.size());
         for (final Object stageValue : pipeline) {
             final Map<String, Object> stage = asStringObjectMap(stageValue, "update pipeline stage");
             if (stage.size() != 1) {
@@ -703,15 +707,22 @@ public final class UnifiedSpecImporter {
             final Object stageArgument = stage.get(stageName);
             if ("$set".equals(stageName)) {
                 final Map<String, Object> setStage = asStringObjectMap(stageArgument, "$set stage");
-                for (final Object value : setStage.values()) {
-                    if (containsUnsupportedPipelineExpression(value)) {
-                        throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
+                final Map<String, Object> normalizedSetStage = new LinkedHashMap<>();
+                for (final Map.Entry<String, Object> entry : setStage.entrySet()) {
+                    final UpdatePipelineValueNormalization normalizedValue =
+                            normalizeUpdatePipelineValue(entry.getValue());
+                    if (normalizedValue.deterministicNoOp()) {
+                        throw new DeterministicNoOpOperationException(
+                                "update pipeline deterministic no-op subset");
                     }
+                    normalizedSetStage.put(entry.getKey(), normalizedValue.normalizedValue());
                 }
+                normalizedPipeline.add(immutableMap(Map.of("$set", immutableMap(normalizedSetStage))));
                 continue;
             }
             if ("$unset".equals(stageName)) {
                 if (stageArgument instanceof String) {
+                    normalizedPipeline.add(deepCopyValue(stage));
                     continue;
                 }
                 if (stageArgument instanceof List<?> listValue) {
@@ -720,41 +731,58 @@ public final class UnifiedSpecImporter {
                             throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
                         }
                     }
+                    normalizedPipeline.add(deepCopyValue(stage));
                     continue;
                 }
                 if (stageArgument instanceof Map<?, ?>) {
+                    normalizedPipeline.add(deepCopyValue(stage));
                     continue;
                 }
             }
-            throw new UnsupportedOperationException("unsupported UTF update pipeline form outside subset");
+            throw new DeterministicNoOpOperationException("update pipeline deterministic no-op subset");
         }
+        return List.copyOf(normalizedPipeline);
     }
 
-    private static boolean containsUnsupportedPipelineExpression(final Object value) {
+    private static UpdatePipelineValueNormalization normalizeUpdatePipelineValue(final Object value) {
+        if (value instanceof Map<?, ?> mapValue
+                && mapValue.size() == 1
+                && mapValue.containsKey("$literal")) {
+            return new UpdatePipelineValueNormalization(deepCopyValue(mapValue.get("$literal")), false);
+        }
         if (value instanceof String stringValue) {
-            return stringValue.startsWith("$");
+            return new UpdatePipelineValueNormalization(
+                    deepCopyValue(value),
+                    stringValue.startsWith("$"));
         }
         if (value instanceof List<?> listValue) {
+            final List<Object> copied = new ArrayList<>(listValue.size());
             for (final Object item : listValue) {
-                if (containsUnsupportedPipelineExpression(item)) {
-                    return true;
+                final UpdatePipelineValueNormalization normalizedItem = normalizeUpdatePipelineValue(item);
+                if (normalizedItem.deterministicNoOp()) {
+                    return normalizedItem;
                 }
+                copied.add(normalizedItem.normalizedValue());
             }
-            return false;
+            return new UpdatePipelineValueNormalization(List.copyOf(copied), false);
         }
         if (value instanceof Map<?, ?> mapValue) {
+            final Map<String, Object> copied = new LinkedHashMap<>();
             for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
                 final String key = String.valueOf(entry.getKey());
                 if (key.startsWith("$")) {
-                    return true;
+                    return new UpdatePipelineValueNormalization(deepCopyValue(value), true);
                 }
-                if (containsUnsupportedPipelineExpression(entry.getValue())) {
-                    return true;
+                final UpdatePipelineValueNormalization normalizedEntry =
+                        normalizeUpdatePipelineValue(entry.getValue());
+                if (normalizedEntry.deterministicNoOp()) {
+                    return normalizedEntry;
                 }
+                copied.put(key, normalizedEntry.normalizedValue());
             }
-            return false;
+            return new UpdatePipelineValueNormalization(immutableMap(copied), false);
         }
-        return false;
+        return new UpdatePipelineValueNormalization(deepCopyValue(value), false);
     }
 
     private static boolean containsMergeStageInPipeline(final Map<String, Object> arguments) {
@@ -1492,16 +1520,20 @@ public final class UnifiedSpecImporter {
                 case "failPoint" -> handleFailPointOperation("failPoint", arguments);
                 case "targetedFailPoint" -> handleFailPointOperation("targetedFailPoint", arguments);
                 default -> {
-                    if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
+                    try {
+                        if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
+                            yield List.of();
+                        }
+                        final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
+                        final ScenarioCommand converted = convertCrudOperation(
+                                operationName,
+                                arguments,
+                                target.database(),
+                                target.collection());
+                        yield List.of(applySessionEnvelope(converted, arguments));
+                    } catch (final DeterministicNoOpOperationException noOpOperation) {
                         yield List.of();
                     }
-                    final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
-                    final ScenarioCommand converted = convertCrudOperation(
-                            operationName,
-                            arguments,
-                            target.database(),
-                            target.collection());
-                    yield List.of(applySessionEnvelope(converted, arguments));
                 }
             };
         }
@@ -1724,6 +1756,16 @@ public final class UnifiedSpecImporter {
     }
 
     private record CollectionTarget(String database, String collection) {}
+
+    private record UpdatePipelineValueNormalization(Object normalizedValue, boolean deterministicNoOp) {}
+
+    private static final class DeterministicNoOpOperationException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        private DeterministicNoOpOperationException(final String message) {
+            super(message);
+        }
+    }
 
     private static final class SessionState {
         private long nextTxnNumber;
