@@ -383,6 +383,32 @@ class QueryMatcherTest {
     }
 
     @Test
+    void supportsExprAddOperatorForNumericOperands() {
+        final Document document = new Document("price", 100).append("tax", 20).append("discount", -5);
+
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document(
+                                "$expr",
+                                new Document("$eq", List.of(new Document("$add", List.of("$price", "$tax")), 120)))));
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document(
+                                "$expr",
+                                new Document(
+                                        "$gt",
+                                        List.of(new Document("$add", List.of("$price", "$tax", "$discount")), 110)))));
+        assertFalse(
+                QueryMatcher.matches(
+                        document,
+                        new Document(
+                                "$expr",
+                                new Document("$eq", List.of(new Document("$add", List.of("$price", "$missing")), 100)))));
+    }
+
+    @Test
     void supportsExprPathResolutionWithArrayIndexes() {
         final Document document =
                 new Document("metrics", List.of(5, 2, 1))
@@ -445,6 +471,12 @@ class QueryMatcherTest {
                         QueryMatcher.matches(
                                 document,
                                 new Document("$expr", new Document("$eq", List.of("$score")))));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        QueryMatcher.matches(
+                                document,
+                                new Document("$expr", new Document("$add", List.of("$score", "x")))));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->

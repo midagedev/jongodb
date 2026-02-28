@@ -10,7 +10,7 @@ import java.util.Objects;
  * Canonical complex-query certification pattern pack.
  */
 public final class ComplexQueryPatternPack {
-    public static final String PACK_VERSION = "complex-query-pack-v1";
+    public static final String PACK_VERSION = "complex-query-pack-v2";
 
     private static final List<PatternCase> PATTERNS = List.of(
             nestedLogicAndOrDotted(),
@@ -808,10 +808,10 @@ public final class ComplexQueryPatternPack {
     private static PatternCase unsupportedExprAdd() {
         return pattern(
                 "cq.unsupported.expr-add",
-                "unsupported expr add operator",
-                SupportClass.EXPLICITLY_UNSUPPORTED,
-                ExpectedOutcome.UNSUPPORTED_POLICY,
-                "Marks unsupported $expr arithmetic operator subset as explicit policy.",
+                "expr add arithmetic operator",
+                SupportClass.SUPPORTED,
+                ExpectedOutcome.MATCH,
+                "Validates certification subset for $expr arithmetic with $add.",
                 "inline total-cost expression",
                 command(
                         "insert",
