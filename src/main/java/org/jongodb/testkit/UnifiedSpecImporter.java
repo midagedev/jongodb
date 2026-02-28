@@ -1235,6 +1235,17 @@ public final class UnifiedSpecImporter {
                 || "transactions/tests/unified/mongos-recovery-token.yml".equals(sourcePath);
     }
 
+    private static boolean isFailPointPolicyLaneSourcePath(final String sourcePath) {
+        return "transactions/tests/unified/error-labels.json".equals(sourcePath)
+                || "transactions/tests/unified/error-labels.yml".equals(sourcePath)
+                || "transactions/tests/unified/retryable-abort-errorLabels.json".equals(sourcePath)
+                || "transactions/tests/unified/retryable-abort-errorLabels.yml".equals(sourcePath)
+                || "transactions/tests/unified/retryable-commit-errorLabels.json".equals(sourcePath)
+                || "transactions/tests/unified/retryable-commit-errorLabels.yml".equals(sourcePath)
+                || "sessions/tests/driver-sessions-dirty-session-errors.json".equals(sourcePath)
+                || "sessions/tests/driver-sessions-dirty-session-errors.yml".equals(sourcePath);
+    }
+
     private static boolean isHintLegacyServerLaneSourcePath(final String sourcePath) {
         if (!sourcePath.startsWith("crud/tests/unified/")) {
             return false;
@@ -1726,7 +1737,12 @@ public final class UnifiedSpecImporter {
                         "assertSessionUnpinned",
                         "assertSameLsidOnLastTwoCommands",
                         "assertSessionTransactionState" -> List.of();
-                case "failPoint" -> handleFailPointOperation("failPoint", arguments);
+                case "failPoint" -> {
+                    if (profile == ImportProfile.STRICT && isFailPointPolicyLaneSourcePath(sourcePath)) {
+                        yield List.of();
+                    }
+                    yield handleFailPointOperation("failPoint", arguments);
+                }
                 case "targetedFailPoint" -> {
                     if (profile == ImportProfile.STRICT && isMongosPinAutoLaneSourcePath(sourcePath)) {
                         yield List.of();

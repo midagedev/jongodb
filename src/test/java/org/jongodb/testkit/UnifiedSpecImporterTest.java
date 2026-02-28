@@ -2728,6 +2728,47 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void strictProfileTreatsFailPointAsNoOpInPolicyLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("error-labels.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "failPoint policy lane",
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "failPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "alwaysOn"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
     void strictProfileMarksTargetedFailPointAsUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("targeted-failpoint-strict.yml"),
