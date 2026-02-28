@@ -98,4 +98,108 @@ class FixtureRestoreToolTest {
             assertTrue(Files.exists(fixtureDir.resolve("fixture-restore-report.json")));
         }
     }
+
+    @Test
+    void restoreUsesFastArtifactWhenCompatible(@TempDir final Path tempDir) throws Exception {
+        final Path fixtureDir = tempDir.resolve("fixture");
+        final Path artifactDir = tempDir.resolve("artifact");
+        Files.createDirectories(fixtureDir);
+        Files.writeString(
+                fixtureDir.resolve("app.users.ndjson"),
+                """
+                {"_id":1,"name":"alpha"}
+                {"_id":2,"name":"beta"}
+                """,
+                StandardCharsets.UTF_8);
+
+        final int packExit = FixtureArtifactTool.run(
+                new String[] {
+                    "--input-dir=" + fixtureDir,
+                    "--output-dir=" + artifactDir,
+                    "--engine-version=" + FixtureArtifactBundle.currentEngineVersion()
+                },
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(new ByteArrayOutputStream()));
+        assertEquals(0, packExit);
+
+        try (TcpMongoServer server = TcpMongoServer.inMemory()) {
+            server.start();
+            final String uri = server.connectionString("app");
+            final int exitCode = FixtureRestoreTool.run(
+                    new String[] {
+                        "--input-dir=" + artifactDir,
+                        "--mongo-uri=" + uri,
+                        "--mode=replace"
+                    },
+                    new PrintStream(new ByteArrayOutputStream()),
+                    new PrintStream(new ByteArrayOutputStream()));
+            assertEquals(0, exitCode);
+
+            try (MongoClient client = MongoClients.create(uri)) {
+                final MongoCollection<Document> users = client.getDatabase("app").getCollection("users");
+                assertEquals(2, users.countDocuments());
+            }
+
+            final Document report = Document.parse(Files.readString(
+                    artifactDir.resolve("fixture-restore-report.json"),
+                    StandardCharsets.UTF_8));
+            assertEquals("FAST", report.getString("sourceFormat"));
+        }
+    }
+
+    @Test
+    void restoreFallsBackToPortableAndRegeneratesFastCache(@TempDir final Path tempDir) throws Exception {
+        final Path fixtureDir = tempDir.resolve("fixture");
+        final Path artifactDir = tempDir.resolve("artifact");
+        Files.createDirectories(fixtureDir);
+        Files.writeString(
+                fixtureDir.resolve("app.users.ndjson"),
+                """
+                {"_id":1,"name":"portable"}
+                {"_id":2,"name":"fallback"}
+                """,
+                StandardCharsets.UTF_8);
+
+        final int packExit = FixtureArtifactTool.run(
+                new String[] {
+                    "--input-dir=" + fixtureDir,
+                    "--output-dir=" + artifactDir,
+                    "--engine-version=legacy-engine"
+                },
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(new ByteArrayOutputStream()));
+        assertEquals(0, packExit);
+
+        Files.delete(artifactDir.resolve("fixture-fast-snapshot.bin"));
+
+        try (TcpMongoServer server = TcpMongoServer.inMemory()) {
+            server.start();
+            final String uri = server.connectionString("app");
+            final int exitCode = FixtureRestoreTool.run(
+                    new String[] {
+                        "--input-dir=" + artifactDir,
+                        "--mongo-uri=" + uri,
+                        "--mode=replace"
+                    },
+                    new PrintStream(new ByteArrayOutputStream()),
+                    new PrintStream(new ByteArrayOutputStream()));
+            assertEquals(0, exitCode);
+
+            try (MongoClient client = MongoClients.create(uri)) {
+                final MongoCollection<Document> users = client.getDatabase("app").getCollection("users");
+                assertEquals(2, users.countDocuments());
+            }
+
+            final Document report = Document.parse(Files.readString(
+                    artifactDir.resolve("fixture-restore-report.json"),
+                    StandardCharsets.UTF_8));
+            assertEquals("PORTABLE_FALLBACK", report.getString("sourceFormat"));
+
+            final Document manifest = Document.parse(Files.readString(
+                    artifactDir.resolve("fixture-artifact-manifest.json"),
+                    StandardCharsets.UTF_8));
+            assertEquals(FixtureArtifactBundle.currentEngineVersion(), manifest.getString("engineVersion"));
+            assertTrue(Files.exists(artifactDir.resolve("fixture-fast-snapshot.bin")));
+        }
+    }
 }

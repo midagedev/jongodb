@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.bson.Document;
 
@@ -59,27 +60,29 @@ public final class FixtureRestoreTool {
         }
 
         try {
-            final List<FixtureFile> files = discoverFixtureFiles(config.inputDir(), config);
-            final List<RestoreCollectionReport> reports = new ArrayList<>();
+            Files.createDirectories(config.reportDir());
+
             final List<String> diagnostics = new ArrayList<>();
+            final PayloadSourceResult payloadSource = loadPayloads(config, out, diagnostics);
+            final List<RestoreCollectionReport> reports = new ArrayList<>();
 
             final Instant startedAt = Instant.now();
             try (MongoClient client = MongoClients.create(new ConnectionString(config.mongoUri()))) {
-                for (final FixtureFile file : files) {
-                    final List<Document> documents = readDocuments(file.path());
-                    final List<String> schemaWarnings = schemaWarnings(file.key(), documents);
+                for (final FixtureCollectionPayload payload : payloadSource.payloads()) {
+                    final List<String> schemaWarnings = schemaWarnings(payload.key(), payload.documents());
                     diagnostics.addAll(schemaWarnings);
 
                     final MongoCollection<Document> collection =
-                            client.getDatabase(file.database()).getCollection(file.collection());
-                    final int restoredCount = restoreCollection(collection, documents, config.mode());
+                            client.getDatabase(payload.database()).getCollection(payload.collection());
+                    final int restoredCount = restoreCollection(collection, payload.documents(), config.mode());
                     reports.add(new RestoreCollectionReport(
-                            file.key(),
-                            file.path().toString(),
-                            documents.size(),
+                            payload.key(),
+                            payload.source(),
+                            payload.file(),
+                            payload.documents().size(),
                             restoredCount,
                             schemaWarnings));
-                    out.println("Restored " + file.key() + " docs=" + restoredCount + " mode=" + config.mode().value());
+                    out.println("Restored " + payload.key() + " docs=" + restoredCount + " mode=" + config.mode().value());
                 }
             }
             final Instant finishedAt = Instant.now();
@@ -88,12 +91,14 @@ public final class FixtureRestoreTool {
                     startedAt.toString(),
                     finishedAt.toString(),
                     config.mode().value(),
+                    payloadSource.sourceFormat(),
                     reports,
                     diagnostics);
             Files.writeString(config.reportDir().resolve(REPORT_FILE), report.toJson(), StandardCharsets.UTF_8);
 
             out.println("Fixture restore finished");
             out.println("- mode: " + config.mode().value());
+            out.println("- sourceFormat: " + payloadSource.sourceFormat());
             out.println("- collections: " + reports.size());
             out.println("- diagnostics: " + diagnostics.size());
             out.println("- report: " + config.reportDir().resolve(REPORT_FILE));
@@ -120,6 +125,72 @@ public final class FixtureRestoreTool {
         if (exitCode != 0) {
             throw new IllegalStateException("fixture restore failed with exitCode=" + exitCode);
         }
+    }
+
+    private static PayloadSourceResult loadPayloads(
+            final Config config,
+            final PrintStream out,
+            final List<String> diagnostics) throws IOException {
+        final FixtureArtifactBundle.LoadResult bundleResult = FixtureArtifactBundle.tryLoadBundle(
+                config.inputDir(),
+                config.regenerateFastCache(),
+                FixtureArtifactBundle.currentEngineVersion(),
+                out);
+
+        if (bundleResult != null) {
+            diagnostics.addAll(bundleResult.diagnostics());
+            if (bundleResult.sourceFormat() != FixtureArtifactBundle.SourceFormat.NDJSON) {
+                final List<FixtureCollectionPayload> payloads = toCollectionPayloads(bundleResult.collections(), config);
+                return new PayloadSourceResult(bundleResult.sourceFormat().name(), payloads);
+            }
+        }
+
+        final List<FixtureFile> files = discoverFixtureFiles(config.inputDir(), config);
+        final List<FixtureCollectionPayload> payloads = new ArrayList<>(files.size());
+        for (final FixtureFile file : files) {
+            payloads.add(new FixtureCollectionPayload(
+                    file.database(),
+                    file.collection(),
+                    file.key(),
+                    file.path().toString(),
+                    "ndjson",
+                    readDocuments(file.path())));
+        }
+        return new PayloadSourceResult("NDJSON", List.copyOf(payloads));
+    }
+
+    private static List<FixtureCollectionPayload> toCollectionPayloads(
+            final Map<String, List<Document>> collections,
+            final Config config) {
+        final List<FixtureCollectionPayload> payloads = new ArrayList<>();
+        final List<String> namespaces = new ArrayList<>(collections.keySet());
+        namespaces.sort(String::compareTo);
+
+        for (final String namespace : namespaces) {
+            final Matcher matcher = NDJSON_FILE.matcher(namespace + ".ndjson");
+            if (!matcher.matches()) {
+                continue;
+            }
+            final String database = matcher.group(1);
+            final String collection = matcher.group(2);
+            final String key = database + "." + collection;
+
+            if (config.databaseFilter() != null && !config.databaseFilter().equals(database)) {
+                continue;
+            }
+            if (!config.namespaceFilter().isEmpty() && !config.namespaceFilter().contains(key)) {
+                continue;
+            }
+
+            payloads.add(new FixtureCollectionPayload(
+                    database,
+                    collection,
+                    key,
+                    config.inputDir().resolve(key + ".artifact").toString(),
+                    "artifact",
+                    collections.getOrDefault(namespace, List.of())));
+        }
+        return List.copyOf(payloads);
     }
 
     private static int restoreCollection(
@@ -183,7 +254,7 @@ public final class FixtureRestoreTool {
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .forEach(path -> {
                         final String fileName = path.getFileName().toString();
-                        final java.util.regex.Matcher matcher = NDJSON_FILE.matcher(fileName);
+                        final Matcher matcher = NDJSON_FILE.matcher(fileName);
                         if (!matcher.matches()) {
                             return;
                         }
@@ -204,13 +275,15 @@ public final class FixtureRestoreTool {
 
     private static void printUsage(final PrintStream stream) {
         stream.println("Usage: FixtureRestoreTool --input-dir=<dir> --mongo-uri=<uri> [options]");
-        stream.println("  --input-dir=<dir>           Fixture ndjson directory");
-        stream.println("  --mongo-uri=<uri>           Target MongoDB URI");
-        stream.println("  --mode=replace|merge        Restore mode (default: replace)");
-        stream.println("  --database=<db>             Restore only one database");
-        stream.println("  --namespace=a.b,c.d         Restore only selected namespaces");
-        stream.println("  --report-dir=<dir>          Report output directory (default: input-dir)");
-        stream.println("  --help                      Show usage");
+        stream.println("  --input-dir=<dir>              Fixture ndjson directory or artifact directory");
+        stream.println("  --mongo-uri=<uri>              Target MongoDB URI");
+        stream.println("  --mode=replace|merge           Restore mode (default: replace)");
+        stream.println("  --database=<db>                Restore only one database");
+        stream.println("  --namespace=a.b,c.d            Restore only selected namespaces");
+        stream.println("  --report-dir=<dir>             Report output directory (default: input-dir)");
+        stream.println("  --regenerate-fast-cache        Regenerate fast cache when portable fallback is used (default)");
+        stream.println("  --no-regenerate-fast-cache     Do not regenerate fast cache on fallback");
+        stream.println("  --help                         Show usage");
     }
 
     private record FixtureFile(
@@ -219,6 +292,18 @@ public final class FixtureRestoreTool {
             String key,
             Path path) {}
 
+    private record FixtureCollectionPayload(
+            String database,
+            String collection,
+            String key,
+            String file,
+            String source,
+            List<Document> documents) {}
+
+    private record PayloadSourceResult(
+            String sourceFormat,
+            List<FixtureCollectionPayload> payloads) {}
+
     private record Config(
             Path inputDir,
             String mongoUri,
@@ -226,6 +311,7 @@ public final class FixtureRestoreTool {
             String databaseFilter,
             Set<String> namespaceFilter,
             Path reportDir,
+            boolean regenerateFastCache,
             boolean help) {
         static Config fromArgs(final String[] args) {
             Path inputDir = null;
@@ -234,6 +320,7 @@ public final class FixtureRestoreTool {
             String databaseFilter = null;
             final Set<String> namespaceFilter = new LinkedHashSet<>();
             Path reportDir = null;
+            boolean regenerateFastCache = true;
             boolean help = false;
 
             for (final String arg : args) {
@@ -270,6 +357,14 @@ public final class FixtureRestoreTool {
                     reportDir = Path.of(valueAfterPrefix(arg, "--report-dir="));
                     continue;
                 }
+                if ("--regenerate-fast-cache".equals(arg)) {
+                    regenerateFastCache = true;
+                    continue;
+                }
+                if ("--no-regenerate-fast-cache".equals(arg)) {
+                    regenerateFastCache = false;
+                    continue;
+                }
                 throw new IllegalArgumentException("unknown argument: " + arg);
             }
 
@@ -289,6 +384,7 @@ public final class FixtureRestoreTool {
                     databaseFilter,
                     Set.copyOf(namespaceFilter),
                     reportDir,
+                    regenerateFastCache,
                     help);
         }
 
@@ -328,6 +424,7 @@ public final class FixtureRestoreTool {
 
     private record RestoreCollectionReport(
             String collection,
+            String source,
             String file,
             int sourceDocuments,
             int restoredDocuments,
@@ -335,6 +432,7 @@ public final class FixtureRestoreTool {
         Map<String, Object> toMap() {
             final Map<String, Object> root = new LinkedHashMap<>();
             root.put("collection", collection);
+            root.put("source", source);
             root.put("file", file);
             root.put("sourceDocuments", sourceDocuments);
             root.put("restoredDocuments", restoredDocuments);
@@ -347,6 +445,7 @@ public final class FixtureRestoreTool {
             String startedAt,
             String finishedAt,
             String mode,
+            String sourceFormat,
             List<RestoreCollectionReport> collections,
             List<String> diagnostics) {
         String toJson() {
@@ -354,6 +453,7 @@ public final class FixtureRestoreTool {
             root.put("startedAt", startedAt);
             root.put("finishedAt", finishedAt);
             root.put("mode", mode);
+            root.put("sourceFormat", sourceFormat);
             final List<Map<String, Object>> collectionItems = new ArrayList<>(collections.size());
             for (final RestoreCollectionReport collection : collections) {
                 collectionItems.add(collection.toMap());

@@ -23,6 +23,14 @@ Runtime and compatibility:
 - `docs/RELEASE_CHECKLIST.md`
 - `docs/ROADMAP.md`
 
+Fixture workflows:
+- `docs/FIXTURE_MANIFEST.md`
+- `docs/FIXTURE_PLAYBOOK.md`
+- `docs/FIXTURE_EXTRACTION.md`
+- `docs/FIXTURE_SANITIZATION.md`
+- `docs/FIXTURE_ARTIFACTS.md`
+- `docs/FIXTURE_RESTORE.md`
+
 Research and design notes:
 - `docs/research/README.md`
 - `docs/research/17-reference-implementation-status.md`
