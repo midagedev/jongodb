@@ -370,8 +370,12 @@ class QueryMatcherTest {
         assertTrue(
                 QueryMatcher.matches(
                         document,
+                        new Document("$expr", new Document("$eq", List.of("$metrics", List.of(5, 2, 1))))));
+        assertFalse(
+                QueryMatcher.matches(
+                        document,
                         new Document("$expr", new Document("$eq", List.of("$metrics.0", 5)))));
-        assertTrue(
+        assertFalse(
                 QueryMatcher.matches(
                         document,
                         new Document("$expr", new Document("$gt", List.of("$series.0.value", "$series.1.value")))));
