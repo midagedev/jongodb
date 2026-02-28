@@ -1389,6 +1389,7 @@ public final class UnifiedSpecImporter {
                 case "commitTransaction" -> List.of(completeTransaction("commitTransaction", objectName, arguments));
                 case "abortTransaction" -> List.of(completeTransaction("abortTransaction", objectName, arguments));
                 case "dropCollection",
+                        "createCollection",
                         "modifyCollection",
                         "getSnapshotTime",
                         "endSession",

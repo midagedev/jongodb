@@ -983,6 +983,7 @@ class UnifiedSpecImporterTest {
                         {"name": "modifyCollection"},
                         {"name": "listCollections"},
                         {"name": "listDatabases"},
+                        {"name": "createCollection", "arguments": {"collection": "users_view", "viewOn": "users", "pipeline": [{"$match": {"_id": {"$gt": 0}}}]}},
                         {"name": "assertCollectionNotExists", "arguments": {"databaseName": "app", "collectionName": "users_shadow"}},
                         {"name": "assertIndexNotExists", "arguments": {"databaseName": "app", "collectionName": "users", "indexName": "ix_missing"}},
                         {"name": "dropCollection"},
