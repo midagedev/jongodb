@@ -516,18 +516,6 @@ public final class UnifiedSpecImporter {
         return new ScenarioCommand("replaceOne", immutableMap(payload));
     }
 
-    private static boolean isReplacementDocument(final Object rawUpdate) {
-        if (!(rawUpdate instanceof Map<?, ?> mapped) || mapped.isEmpty()) {
-            return false;
-        }
-        for (final Object key : mapped.keySet()) {
-            if (!(key instanceof String field) || !field.startsWith("$")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static boolean containsUnsupportedKeyPath(final Object value) {
         if (value instanceof Map<?, ?> mapValue) {
             for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
@@ -546,6 +534,18 @@ public final class UnifiedSpecImporter {
                 if (containsUnsupportedKeyPath(item)) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isReplacementDocument(final Object rawUpdate) {
+        if (!(rawUpdate instanceof Map<?, ?> mapped) || mapped.isEmpty()) {
+            return false;
+        }
+        for (final Object key : mapped.keySet()) {
+            if (!(key instanceof String field) || !field.startsWith("$")) {
+                return true;
             }
         }
         return false;
@@ -681,9 +681,6 @@ public final class UnifiedSpecImporter {
             throw new IllegalArgumentException("bulkWrite update operation requires update argument");
         }
         validateSupportedUpdatePipeline(updateValue);
-        if (multi && isReplacementDocument(updateValue)) {
-            throw new UnsupportedOperationException("unsupported UTF replacement update with multi=true");
-        }
     }
 
     private static void validateSupportedUpdatePipeline(final Object updateValue) {
