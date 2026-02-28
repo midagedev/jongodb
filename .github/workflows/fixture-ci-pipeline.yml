@@ -1,0 +1,97 @@
+name: Fixture CI Pipeline
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/main/java/org/jongodb/testkit/**"
+      - "src/test/java/org/jongodb/testkit/**"
+      - "testkit/fixture/**"
+      - "docs/FIXTURE_*.md"
+      - "build.gradle.kts"
+      - ".github/workflows/fixture-ci-pipeline.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-ci-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixture-ci:
+    name: fixture-ci-pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Validate fixture manifest
+        run: |
+          gradle --no-daemon --stacktrace fixtureManifestPlan \
+            -PfixtureManifestPath=testkit/fixture/manifests/baseline-dev-smoke-full.json \
+            -PfixtureProfile=dev
+
+      - name: Run fixture dry-run suite with retry
+        run: |
+          set -euo pipefail
+          retry() {
+            local tries=0
+            local max=2
+            until "$@"; do
+              tries=$((tries + 1))
+              if [ "$tries" -ge "$max" ]; then
+                return 1
+              fi
+              echo "Retry $tries/$max: $*"
+              sleep 5
+            done
+          }
+
+          retry gradle --no-daemon --stacktrace test --tests org.jongodb.testkit.FixtureExtractionToolTest
+          retry gradle --no-daemon --stacktrace test --tests org.jongodb.testkit.FixtureSanitizationToolTest --tests org.jongodb.testkit.FixtureArtifactToolTest
+          retry gradle --no-daemon --stacktrace test --tests org.jongodb.testkit.FixtureRestoreToolTest
+
+      - name: Run fixture refresh dry-run gate
+        run: |
+          gradle --no-daemon --stacktrace fixtureRefresh \
+            -PfixtureRefreshBaselineDir=testkit/fixture/nightly/dev/baseline \
+            -PfixtureRefreshCandidateDir=testkit/fixture/nightly/dev/candidate \
+            -PfixtureRefreshOutputDir=build/reports/fixture-ci-refresh \
+            -PfixtureRefreshMode=incremental \
+            -PfixtureRefreshWarnThreshold=0.25 \
+            -PfixtureRefreshFailThreshold=0.60 \
+            -PfixtureRefreshFailOnThreshold=true
+
+      - name: Upload fixture ci reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-ci-refresh-reports
+          path: build/reports/fixture-ci-refresh
+
+      - name: Print failure reproduction
+        if: failure()
+        run: |
+          {
+            echo "## Fixture CI Failure Reproduction"
+            echo "```bash"
+            echo "gradle --no-daemon --stacktrace fixtureManifestPlan -PfixtureManifestPath=testkit/fixture/manifests/baseline-dev-smoke-full.json -PfixtureProfile=dev"
+            echo "gradle --no-daemon --stacktrace test --tests org.jongodb.testkit.FixtureExtractionToolTest --tests org.jongodb.testkit.FixtureSanitizationToolTest --tests org.jongodb.testkit.FixtureArtifactToolTest --tests org.jongodb.testkit.FixtureRestoreToolTest"
+            echo "gradle --no-daemon --stacktrace fixtureRefresh -PfixtureRefreshBaselineDir=testkit/fixture/nightly/dev/baseline -PfixtureRefreshCandidateDir=testkit/fixture/nightly/dev/candidate -PfixtureRefreshOutputDir=build/reports/fixture-ci-refresh -PfixtureRefreshMode=incremental -PfixtureRefreshWarnThreshold=0.25 -PfixtureRefreshFailThreshold=0.60 -PfixtureRefreshFailOnThreshold=true"
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"

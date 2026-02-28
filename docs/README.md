@@ -31,6 +31,7 @@ Fixture workflows:
 - `docs/FIXTURE_ARTIFACTS.md`
 - `docs/FIXTURE_REFRESH.md`
 - `docs/FIXTURE_GOVERNANCE.md`
+- `docs/FIXTURE_AUTOMATION.md`
 - `docs/FIXTURE_RESTORE.md`
 
 Research and design notes:
