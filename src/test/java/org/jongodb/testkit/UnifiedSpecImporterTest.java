@@ -887,6 +887,44 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void importsReplacementUpdateWithMultiTrueForRuntimeValidation() throws IOException {
+        Files.writeString(
+                tempDir.resolve("update-many-replacement-multi-true-validation.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "updateMany replacement with multi=true",
+                      "operations": [
+                        {
+                          "name": "updateMany",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "replacement": {"name": "next"}
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("update", scenario.commands().get(0).commandName());
+        final Object updatesValue = scenario.commands().get(0).payload().get("updates");
+        assertTrue(updatesValue instanceof List<?>);
+        assertEquals(1, ((List<?>) updatesValue).size());
+    }
+
+    @Test
     void skipsMergeStageAsDeterministicNoOpSubsetAndKeepsBypassValidationTrueUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("unsupported-aggregation.json"),
