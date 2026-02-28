@@ -314,15 +314,12 @@ public final class RealMongodBackend implements DifferentialBackend {
         }
         final BsonValue update = operation.get("update");
         if (update == null) {
-            return typeMismatch("update must be a document");
+            return typeMismatch("update must be a document or array");
         }
-        if (update.isArray()) {
-            return badValue("update pipeline is not supported yet");
+        if (!update.isDocument() && !update.isArray()) {
+            return typeMismatch("update must be a document or array");
         }
-        if (!update.isDocument()) {
-            return typeMismatch("update must be a document");
-        }
-        if (!isOperatorUpdate(update.asDocument())) {
+        if (update.isDocument() && !isOperatorUpdate(update.asDocument())) {
             return badValue("bulkWrite update operation requires atomic modifiers");
         }
 
@@ -338,7 +335,7 @@ public final class RealMongodBackend implements DifferentialBackend {
 
         final BsonDocument updateEntry = new BsonDocument()
             .append("q", filter.asDocument())
-            .append("u", update.asDocument())
+            .append("u", update)
             .append("multi", BsonBoolean.valueOf(multi))
             .append("upsert", BsonBoolean.valueOf(upsert));
         appendIfPresent(operation, updateEntry, "hint");

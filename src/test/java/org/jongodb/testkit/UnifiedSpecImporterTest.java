@@ -827,7 +827,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksClientBulkWriteMixedNamespacesAsUnsupported() throws IOException {
+    void importsClientBulkWriteMixedNamespacesUsingFirstNamespace() throws IOException {
         Files.writeString(
                 tempDir.resolve("client-bulk-write-mixed-ns.json"),
                 """
@@ -851,11 +851,12 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF clientBulkWrite mixed namespaces")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        assertEquals("users", scenario.commands().get(0).payload().get("bulkWrite"));
+        assertEquals("app", scenario.commands().get(0).payload().get("$db"));
     }
 
     @Test
@@ -890,7 +891,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void marksClientBulkWriteVerboseResultsAsUnsupported() throws IOException {
+    void importsClientBulkWriteVerboseResultsTrueForParityExecution() throws IOException {
         Files.writeString(
                 tempDir.resolve("client-bulk-write-verbose-results.json"),
                 """
@@ -913,11 +914,75 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF clientBulkWrite option: verboseResults=true")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void importsClientBulkWriteWithEmptyModelsAsRuntimeValidatedCase() throws IOException {
+        Files.writeString(
+                tempDir.resolve("client-bulk-write-empty-models.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "clientBulkWrite empty models",
+                      "operations": [
+                        {"name": "clientBulkWrite", "arguments": {"verboseResults": true, "models": []}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("bulkWrite", scenario.commands().get(0).commandName());
+        final Object operationsValue = scenario.commands().get(0).payload().get("operations");
+        assertTrue(operationsValue instanceof List<?>);
+        assertEquals(0, ((List<?>) operationsValue).size());
+    }
+
+    @Test
+    void importsInsertManyWithDotOrDollarKeys() throws IOException {
+        Files.writeString(
+                tempDir.resolve("insert-many-dot-dollar.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "insertMany with dotted and dollar keys",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [
+                          {"_id": 1, "a.b": 1},
+                          {"_id": 2, "nested": {"$x": 1}}
+                        ]}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals("insert", scenario.commands().get(0).commandName());
+        final Object documentsValue = scenario.commands().get(0).payload().get("documents");
+        assertTrue(documentsValue instanceof List<?>);
+        assertEquals(2, ((List<?>) documentsValue).size());
     }
 
     @Test
