@@ -1,4 +1,5 @@
 import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     `java-library`
@@ -22,24 +23,32 @@ java {
 
 sourceSets {
     named("main") {
-        java.srcDir("testkit/spring-suite/src/main/java")
+        java.exclude("org/jongodb/testkit/**")
     }
     named("test") {
-        java.srcDir("testkit/spring-suite/src/test/java")
+        java.exclude("org/jongodb/testkit/**")
     }
+}
+
+val testkitRuntimeClasspath by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
 }
 
 dependencies {
     api("org.mongodb:bson:4.11.2")
-    implementation("org.mongodb:mongodb-driver-sync:4.11.2")
-    implementation("org.yaml:snakeyaml:2.2")
     compileOnly("org.springframework:spring-context:6.1.17")
     compileOnly("org.springframework:spring-test:6.1.17")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.mongodb:mongodb-driver-sync:4.11.2")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
     testImplementation("org.springframework:spring-context:6.1.17")
     testImplementation("org.springframework:spring-test:6.1.17")
+
+    add(testkitRuntimeClasspath.name, project(":jongodb-testkit"))
+    add(testkitRuntimeClasspath.name, project(":jongodb-spring-suite"))
 }
 
 jreleaser {
@@ -134,8 +143,11 @@ publishing {
     }
 }
 
-tasks.test {
+tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    filter {
+        isFailOnNoMatchingTests = false
+    }
 }
 
 tasks.named("jreleaserDeploy") {
@@ -151,7 +163,7 @@ tasks.register("centralRelease") {
 tasks.register<JavaExec>("m3GateEvidence") {
     group = "verification"
     description = "Runs M3 release-readiness gate automation and writes JSON/MD artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.M3GateAutomation")
 
     val outputDir = (findProperty("m3OutputDir") as String?) ?: "build/reports/m3-gate"
@@ -170,7 +182,7 @@ tasks.register<JavaExec>("m3GateEvidence") {
 tasks.register<JavaExec>("r1PerformanceStabilityGateEvidence") {
     group = "verification"
     description = "Runs R1 performance/stability gates and writes JSON/MD artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.R1PerformanceStabilityGateAutomation")
 
     val outputDir = (findProperty("r1OutputDir") as String?) ?: "build/reports/r1-gates"
@@ -195,7 +207,7 @@ tasks.register<JavaExec>("r1PerformanceStabilityGateEvidence") {
 tasks.register<JavaExec>("realMongodDifferentialBaseline") {
     group = "verification"
     description = "Runs differential corpus against wire backend vs real mongod and writes JSON/MD artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.RealMongodCorpusRunner")
 
     val outputDir = (findProperty("realMongodOutputDir") as String?) ?: "build/reports/real-mongod-baseline"
@@ -218,7 +230,7 @@ tasks.register<JavaExec>("realMongodDifferentialBaseline") {
 tasks.register<JavaExec>("springCompatibilityMatrixEvidence") {
     group = "verification"
     description = "Runs Spring Data Mongo compatibility matrix against jongodb endpoint and writes JSON/MD artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.springsuite.SpringCompatibilityMatrixRunner")
 
     val outputDir = (findProperty("springMatrixOutputDir") as String?) ?: "build/reports/spring-matrix"
@@ -235,7 +247,7 @@ tasks.register<JavaExec>("springCompatibilityMatrixEvidence") {
 tasks.register<JavaExec>("utfCorpusEvidence") {
     group = "verification"
     description = "Runs Unified Test Format corpus through differential harness and writes JSON/MD artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.UnifiedSpecCorpusRunner")
 
     val specRoot = (findProperty("utfSpecRoot") as String?) ?: "testkit/specs/unified"
@@ -258,7 +270,7 @@ tasks.register<JavaExec>("utfCorpusEvidence") {
 tasks.register<JavaExec>("fixtureManifestPlan") {
     group = "verification"
     description = "Validates fixture manifest and renders deterministic profile extraction plan."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureManifestTool")
 
     val manifestPath = (findProperty("fixtureManifestPath") as String?)?.trim().orEmpty()
@@ -280,7 +292,7 @@ tasks.register<JavaExec>("fixtureManifestPlan") {
 tasks.register<JavaExec>("inProcessTemplatePocEvidence") {
     group = "verification"
     description = "Runs in-process vs TCP template PoC benchmark and trace validation, then writes JSON/MD artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.InProcessTemplatePocRunner")
 
     val outputDir = (findProperty("inProcessPocOutputDir") as String?) ?: "build/reports/in-process-template-poc"
@@ -309,7 +321,7 @@ tasks.register<JavaExec>("inProcessTemplatePocEvidence") {
 tasks.register<JavaExec>("fixtureExtract") {
     group = "verification"
     description = "Extracts fixture documents from MongoDB using manifest profile with resume/report guardrails."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureExtractionTool")
 
     val manifestPath = (findProperty("fixtureManifestPath") as String?)?.trim().orEmpty()
@@ -361,7 +373,7 @@ tasks.register<JavaExec>("fixtureExtract") {
 tasks.register<JavaExec>("fixtureSanitize") {
     group = "verification"
     description = "Runs deterministic fixture sanitization + pii lint + normalization pipeline."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureSanitizationTool")
 
     val inputDir = (findProperty("fixtureSanitizeInputDir") as String?)?.trim().orEmpty()
@@ -394,7 +406,7 @@ tasks.register<JavaExec>("fixtureSanitize") {
 tasks.register<JavaExec>("fixtureArtifactPack") {
     group = "verification"
     description = "Packs fixture ndjson into portable + fast dual artifacts with checksum manifest."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureArtifactTool")
 
     val inputDir = (findProperty("fixtureArtifactInputDir") as String?)?.trim().orEmpty()
@@ -428,7 +440,7 @@ tasks.register<JavaExec>("fixtureArtifactPack") {
 tasks.register<JavaExec>("fixtureArtifactGovernance") {
     group = "verification"
     description = "Applies fixture artifact retention/version governance and renders reports."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureArtifactGovernanceTool")
 
     val artifactRoot = (findProperty("fixtureArtifactRoot") as String?)?.trim().orEmpty()
@@ -473,7 +485,7 @@ tasks.register<JavaExec>("fixtureArtifactGovernance") {
 tasks.register<JavaExec>("fixtureRefresh") {
     group = "verification"
     description = "Runs full/incremental fixture refresh and writes diff report + refreshed ndjson output."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureRefreshTool")
 
     val baselineDir = (findProperty("fixtureRefreshBaselineDir") as String?)?.trim().orEmpty()
@@ -518,7 +530,7 @@ tasks.register<JavaExec>("fixtureRefresh") {
 tasks.register<JavaExec>("fixtureRestore") {
     group = "verification"
     description = "Restores fixture ndjson into target MongoDB using replace/merge mode with diagnostics report."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FixtureRestoreTool")
 
     val inputDir = (findProperty("fixtureRestoreInputDir") as String?)?.trim().orEmpty()
@@ -562,7 +574,7 @@ tasks.register<JavaExec>("fixtureRestore") {
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {
     group = "verification"
     description = "Runs canonical complex-query certification pack and enforces gate policy."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.ComplexQueryCertificationRunner")
 
     val outputDir = (findProperty("complexQueryOutputDir") as String?)
@@ -589,7 +601,7 @@ tasks.register<JavaExec>("complexQueryCertificationEvidence") {
 tasks.register<JavaExec>("replayFailureBundle") {
     group = "verification"
     description = "Replays one deterministic failure bundle by failure-id."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.DeterministicReplayBundleRunner")
 
     val bundleDir = (findProperty("replayBundleDir") as String?)
@@ -605,7 +617,7 @@ tasks.register<JavaExec>("replayFailureBundle") {
 tasks.register<JavaExec>("finalReadinessEvidence") {
     group = "verification"
     description = "Aggregates R1 release-readiness evidence into a unified JSON/MD report."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.FinalReleaseReadinessAggregator")
 
     val outputDir = (findProperty("finalReadinessOutputDir") as String?) ?: "build/reports/release-readiness"
@@ -636,7 +648,7 @@ tasks.register<JavaExec>("finalReadinessEvidence") {
 tasks.register<JavaExec>("r2CompatibilityEvidence") {
     group = "verification"
     description = "Generates R2 compatibility scorecard and support manifest artifacts."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.R2CompatibilityScorecard")
 
     val outputDir = (findProperty("r2CompatibilityOutputDir") as String?) ?: "build/reports/r2-compatibility"
@@ -665,7 +677,7 @@ tasks.register("printLauncherClasspath") {
 tasks.register<JavaExec>("r2CanaryCertificationEvidence") {
     group = "verification"
     description = "Generates R2 canary certification artifacts from project canary results."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.R2CanaryCertification")
 
     val inputJson = (findProperty("r2CanaryInputJson") as String?) ?: "build/reports/spring-canary/projects.json"
@@ -682,7 +694,7 @@ tasks.register<JavaExec>("r2CanaryCertificationEvidence") {
 tasks.register<JavaExec>("r3CanaryCertificationEvidence") {
     group = "verification"
     description = "Generates R3 external canary certification artifacts from canary result JSON."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.R2CanaryCertification")
 
     val inputJson = (findProperty("r3CanaryInputJson") as String?)
@@ -700,7 +712,7 @@ tasks.register<JavaExec>("r3CanaryCertificationEvidence") {
 tasks.register<JavaExec>("r3FailureLedger") {
     group = "verification"
     description = "Generates deterministic R3 failure-ledger artifacts from official suite runs."
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = testkitRuntimeClasspath
     mainClass.set("org.jongodb.testkit.R3FailureLedgerRunner")
 
     val specRepoRoot = (findProperty("r3SpecRepoRoot") as String?)

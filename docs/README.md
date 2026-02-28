@@ -20,6 +20,7 @@ Runtime and compatibility:
 - `docs/NODE_SEMVER_POLICY.md`
 - `docs/NODE_TROUBLESHOOTING_PLAYBOOK.md`
 - `docs/SUPPORT_MATRIX.md`
+- `docs/ARCH_MODULE_BOUNDARIES.md`
 - `docs/RELEASE_CHECKLIST.md`
 - `docs/ROADMAP.md`
 

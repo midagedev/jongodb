@@ -1,7 +1,6 @@
 package org.jongodb.spring.test;
 
 import java.util.Objects;
-import org.jongodb.testkit.InProcessIntegrationTemplate;
 import org.springframework.context.ApplicationContext;
 
 /**
