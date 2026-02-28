@@ -277,6 +277,35 @@ tasks.register<JavaExec>("fixtureManifestPlan") {
     }
 }
 
+tasks.register<JavaExec>("inProcessTemplatePocEvidence") {
+    group = "verification"
+    description = "Runs in-process vs TCP template PoC benchmark and trace validation, then writes JSON/MD artifacts."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.jongodb.testkit.InProcessTemplatePocRunner")
+
+    val outputDir = (findProperty("inProcessPocOutputDir") as String?) ?: "build/reports/in-process-template-poc"
+    val seed = (findProperty("inProcessPocSeed") as String?) ?: "in-process-template-poc-v1"
+    val coldStartSamples = (findProperty("inProcessPocColdStartSamples") as String?) ?: "7"
+    val warmupOps = (findProperty("inProcessPocWarmupOps") as String?) ?: "100"
+    val measuredOps = (findProperty("inProcessPocMeasuredOps") as String?) ?: "500"
+    val p95Threshold = (findProperty("inProcessPocP95Threshold") as String?) ?: "0.10"
+    val throughputThreshold = (findProperty("inProcessPocThroughputThreshold") as String?) ?: "0.10"
+    val failOnNoGo = (findProperty("inProcessPocFailOnNoGo") as String?)?.toBoolean() ?: false
+
+    args(
+        "--output-dir=$outputDir",
+        "--seed=$seed",
+        "--cold-start-samples=$coldStartSamples",
+        "--warmup-ops=$warmupOps",
+        "--measured-ops=$measuredOps",
+        "--p95-improvement-threshold=$p95Threshold",
+        "--throughput-improvement-threshold=$throughputThreshold"
+    )
+    if (failOnNoGo) {
+        args("--fail-on-no-go")
+    }
+}
+
 tasks.register<JavaExec>("complexQueryCertificationEvidence") {
     group = "verification"
     description = "Runs canonical complex-query certification pack and enforces gate policy."
