@@ -293,36 +293,9 @@ public final class UnifiedSpecImporter {
         }
         final Map<String, Object> document =
                 asStringObjectMap(arguments.get("document"), "insertOne.arguments.document");
-        if (containsDollarPrefixedKeyInIdDocument(document.get("_id"))) {
-            throw new UnsupportedOperationException(
-                    "unsupported UTF insertOne _id document with dollar-prefixed keys");
-        }
         final Map<String, Object> payload = commandEnvelope("insert", database, collection);
         payload.put("documents", List.of(deepCopyValue(document)));
         return new ScenarioCommand("insert", immutableMap(payload));
-    }
-
-    private static boolean containsDollarPrefixedKeyInIdDocument(final Object idValue) {
-        if (idValue instanceof Map<?, ?> mapValue) {
-            for (final Map.Entry<?, ?> entry : mapValue.entrySet()) {
-                final String key = String.valueOf(entry.getKey());
-                if (key.startsWith("$")) {
-                    return true;
-                }
-                if (containsDollarPrefixedKeyInIdDocument(entry.getValue())) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (idValue instanceof List<?> listValue) {
-            for (final Object item : listValue) {
-                if (containsDollarPrefixedKeyInIdDocument(item)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private static ScenarioCommand insertMany(

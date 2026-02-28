@@ -1905,7 +1905,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void skipsInsertOneWithDollarPrefixedKeyInIdDocument() throws IOException {
+    void importsInsertOneWithDollarPrefixedKeyInIdDocument() throws IOException {
         Files.writeString(
                 tempDir.resolve("insert-one-id-dollar.json"),
                 """
@@ -1916,7 +1916,8 @@ class UnifiedSpecImporterTest {
                     {
                       "description": "insertOne with dollar-prefixed key in _id document",
                       "operations": [
-                        {"name": "insertOne", "arguments": {"document": {"_id": {"$a": 1}}}}
+                        {"name": "insertOne", "arguments": {"document": {"_id": {"$a": 1}, "name": "alpha"}}},
+                        {"name": "countDocuments", "arguments": {"filter": {}}}
                       ]
                     }
                   ]
@@ -1926,11 +1927,17 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertEquals(
-                "unsupported UTF insertOne _id document with dollar-prefixed keys",
-                result.skippedCases().get(0).reason());
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(2, scenario.commands().size());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+        final Map<String, Object> countResult = outcome.commandResults().get(1);
+        assertEquals(1L, ((Number) countResult.get("n")).longValue());
+        assertEquals(1L, ((Number) countResult.get("count")).longValue());
     }
 
     @Test
