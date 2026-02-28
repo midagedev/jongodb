@@ -7,7 +7,17 @@ on:
       - "src/main/java/org/jongodb/server/**"
       - "testkit/node-compat/**"
       - ".github/workflows/node-compat-smoke.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/memory-server/**"
+      - "src/main/java/org/jongodb/server/**"
+      - "testkit/node-compat/**"
+      - ".github/workflows/node-compat-smoke.yml"
   workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *"
 
 permissions:
   contents: read
@@ -75,11 +85,73 @@ jobs:
           JONGODB_CLASSPATH: ${{ steps.classpath.outputs.value }}
         run: npm --prefix testkit/node-compat test
 
+      - name: Render lane summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          lane = "${{ matrix.os }}-node${{ matrix.node }}"
+          report_path = Path("testkit/node-compat/reports/node-compat-smoke.json")
+          summary_path = Path(f"testkit/node-compat/reports/node-compat-smoke-summary-{lane}.md")
+          lines = [
+              "# Node Compatibility Smoke Lane Summary",
+              "",
+              f"- lane: {lane}",
+          ]
+
+          if report_path.exists():
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+              summary = report.get("summary", {})
+              scenarios = report.get("scenarios", [])
+              failed = [s for s in scenarios if s.get("status") != "pass"]
+              lines.extend([
+                  f"- generatedAt: {report.get('generatedAt', 'unknown')}",
+                  f"- total={summary.get('total', 0)} passed={summary.get('passed', 0)} failed={summary.get('failed', 0)}",
+                  "",
+                  "## Failed Scenarios",
+              ])
+              if failed:
+                  for scenario in failed:
+                      lines.append(f"- {scenario.get('name', 'unknown')} ({scenario.get('status', 'unknown')})")
+              else:
+                  lines.append("- none")
+          else:
+              lines.extend([
+                  "- report: missing",
+                  "",
+                  "## Failed Scenarios",
+                  "- report not generated",
+              ])
+
+          lines.extend([
+              "",
+              "## Reproduce",
+              "```bash",
+              "npm run node:build",
+              "export JONGODB_CLASSPATH=\"$(./.tooling/gradle-8.10.2/bin/gradle --no-daemon -q printLauncherClasspath | tail -n 1)\"",
+              "npm --prefix testkit/node-compat ci",
+              "npm --prefix testkit/node-compat test",
+              "```",
+              "",
+          ])
+
+          summary_path.parent.mkdir(parents=True, exist_ok=True)
+          summary_path.write_text("\n".join(lines), encoding="utf-8")
+          if step_summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+              with open(step_summary, "a", encoding="utf-8") as fp:
+                  fp.write(summary_path.read_text(encoding="utf-8"))
+          PY
+
       - name: Upload node compatibility report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: node-compat-smoke-report-${{ matrix.os }}-node${{ matrix.node }}
-          path: testkit/node-compat/reports/node-compat-smoke.json
+          path: |
+            testkit/node-compat/reports/node-compat-smoke.json
+            testkit/node-compat/reports/node-compat-smoke-summary-${{ matrix.os }}-node${{ matrix.node }}.md
           if-no-files-found: warn
           retention-days: 14
