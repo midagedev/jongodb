@@ -388,6 +388,70 @@ class AggregateCommandE2ETest {
     }
 
     @Test
+    void aggregateCommandSupportsGraphLookupMinimalSubset() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"nodes\",\"$db\":\"app\",\"documents\":[{\"_id\":\"A\",\"parent\":null},{\"_id\":\"B\",\"parent\":\"A\"},{\"_id\":\"C\",\"parent\":\"B\"}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"nodes\",\"$db\":\"app\",\"pipeline\":[{\"$graphLookup\":{\"from\":\"nodes\",\"startWith\":\"$parent\",\"connectFromField\":\"parent\",\"connectToField\":\"_id\",\"as\":\"graph\"}},{\"$sort\":{\"_id\":1}}],\"cursor\":{}}"));
+
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        final BsonArray firstBatch = response.getDocument("cursor").getArray("firstBatch");
+        assertEquals(3, firstBatch.size());
+
+        final BsonDocument firstNode = firstBatch.get(0).asDocument();
+        assertEquals("A", firstNode.getString("_id").getValue());
+        assertEquals(0, firstNode.getArray("graph").size());
+
+        final BsonDocument secondNode = firstBatch.get(1).asDocument();
+        assertEquals("B", secondNode.getString("_id").getValue());
+        assertEquals(1, secondNode.getArray("graph").size());
+        assertEquals(
+                "A",
+                secondNode
+                        .getArray("graph")
+                        .get(0)
+                        .asDocument()
+                        .getString("_id")
+                        .getValue());
+
+        final BsonDocument thirdNode = firstBatch.get(2).asDocument();
+        assertEquals("C", thirdNode.getString("_id").getValue());
+        assertEquals(2, thirdNode.getArray("graph").size());
+        assertEquals(
+                "B",
+                thirdNode
+                        .getArray("graph")
+                        .get(0)
+                        .asDocument()
+                        .getString("_id")
+                        .getValue());
+        assertEquals(
+                "A",
+                thirdNode
+                        .getArray("graph")
+                        .get(1)
+                        .asDocument()
+                        .getString("_id")
+                        .getValue());
+    }
+
+    @Test
+    void aggregateCommandRejectsUnsupportedGraphLookupOption() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"nodes\",\"$db\":\"app\",\"documents\":[{\"_id\":\"A\",\"parent\":null}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"aggregate\":\"nodes\",\"$db\":\"app\",\"pipeline\":[{\"$graphLookup\":{\"from\":\"nodes\",\"startWith\":\"$parent\",\"connectFromField\":\"parent\",\"connectToField\":\"_id\",\"as\":\"graph\",\"depthField\":\"depth\"}}],\"cursor\":{}}"));
+
+        assertCommandError(response, 238, "NotImplemented");
+    }
+
+    @Test
     void aggregateCommandSupportsUnionWithPipeline() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
