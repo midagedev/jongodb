@@ -257,7 +257,7 @@ final class QueryMatcher {
                 continue;
             }
             if (current instanceof List<?>) {
-                // $expr paths follow aggregation-style traversal and do not support direct array index segments.
+                // $expr path resolution follows aggregation semantics and does not support direct array indexes.
                 return null;
             }
             return null;
@@ -365,6 +365,12 @@ final class QueryMatcher {
                     break;
                 case "$all":
                     matched = matchesAll(path, operand);
+                    break;
+                case "$mod":
+                    matched = matchesMod(path, operand);
+                    break;
+                case "$bitsAllSet":
+                    matched = matchesBitsAllSet(path, operand);
                     break;
                 case "$not":
                     matched = matchesFieldNot(path, operand);
@@ -845,6 +851,98 @@ final class QueryMatcher {
             }
         }
         return false;
+    }
+
+    private static boolean matchesMod(final PathResolution path, final Object operand) {
+        if (!(operand instanceof List<?> modValues) || modValues.size() != 2) {
+            throw new IllegalArgumentException("$mod requires [divisor, remainder]");
+        }
+        if (!(modValues.get(0) instanceof Number divisorRaw) || !(modValues.get(1) instanceof Number remainderRaw)) {
+            throw new IllegalArgumentException("$mod requires numeric divisor and remainder");
+        }
+
+        final BigDecimal divisor = toBigDecimal(divisorRaw);
+        if (divisor.compareTo(BigDecimal.ZERO) == 0) {
+            throw new IllegalArgumentException("$mod divisor must not be zero");
+        }
+        final BigDecimal expectedRemainder = toBigDecimal(remainderRaw);
+
+        if (!path.exists()) {
+            return false;
+        }
+        for (final Object actual : path.values()) {
+            if (matchesModCandidate(actual, divisor, expectedRemainder)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesModCandidate(
+            final Object actual, final BigDecimal divisor, final BigDecimal expectedRemainder) {
+        if (actual instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (matchesModCandidate(item, divisor, expectedRemainder)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!(actual instanceof Number actualNumber)) {
+            return false;
+        }
+        final BigDecimal remainder = toBigDecimal(actualNumber).remainder(divisor);
+        return remainder.compareTo(expectedRemainder) == 0;
+    }
+
+    private static boolean matchesBitsAllSet(final PathResolution path, final Object operand) {
+        final long mask = parseBitMask(operand, "$bitsAllSet");
+        if (!path.exists()) {
+            return false;
+        }
+        for (final Object actual : path.values()) {
+            if (matchesBitsAllSetCandidate(actual, mask)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static long parseBitMask(final Object operand, final String operator) {
+        if (operand instanceof Number number) {
+            return number.longValue();
+        }
+        if (!(operand instanceof List<?> bitPositions)) {
+            throw new IllegalArgumentException(operator + " requires a numeric mask or an array of bit positions");
+        }
+        long mask = 0L;
+        for (final Object bitPosition : bitPositions) {
+            if (!(bitPosition instanceof Number numberPosition)) {
+                throw new IllegalArgumentException(operator + " bit positions must be numeric");
+            }
+            final int bit = numberPosition.intValue();
+            if (bit < 0 || bit >= Long.SIZE) {
+                throw new IllegalArgumentException(operator + " bit position out of range: " + bit);
+            }
+            mask |= (1L << bit);
+        }
+        return mask;
+    }
+
+    private static boolean matchesBitsAllSetCandidate(final Object actual, final long mask) {
+        if (actual instanceof List<?> listValue) {
+            for (final Object item : listValue) {
+                if (matchesBitsAllSetCandidate(item, mask)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!(actual instanceof Number numberValue)) {
+            return false;
+        }
+        final long candidate = numberValue.longValue();
+        return (candidate & mask) == mask;
     }
 
     private static boolean matchesFieldNot(PathResolution path, Object operand) {

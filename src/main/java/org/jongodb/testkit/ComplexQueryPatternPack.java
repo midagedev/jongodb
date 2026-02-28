@@ -784,10 +784,10 @@ public final class ComplexQueryPatternPack {
     private static PatternCase unsupportedQueryMod() {
         return pattern(
                 "cq.unsupported.query-mod",
-                "unsupported query operator mod",
-                SupportClass.EXPLICITLY_UNSUPPORTED,
-                ExpectedOutcome.UNSUPPORTED_POLICY,
-                "Documents out-of-scope operator behavior as deterministic unsupported policy.",
+                "query operator mod",
+                SupportClass.SUPPORTED,
+                ExpectedOutcome.MATCH,
+                "Validates modulo predicate semantics in query operator evaluation.",
                 "legacy modulo filtering",
                 command(
                         "insert",
@@ -875,10 +875,10 @@ public final class ComplexQueryPatternPack {
     private static PatternCase unsupportedQueryBitsAllSet() {
         return pattern(
                 "cq.unsupported.query-bitsallset",
-                "unsupported bitwise query operator",
-                SupportClass.EXPLICITLY_UNSUPPORTED,
-                ExpectedOutcome.UNSUPPORTED_POLICY,
-                "Tracks bitwise predicate operators as explicitly unsupported policy.",
+                "bitwise query operator bitsAllSet",
+                SupportClass.SUPPORTED,
+                ExpectedOutcome.MATCH,
+                "Covers bitwise mask predicate subset for feature-flag style filtering.",
                 "feature-flag bitmask query",
                 command(
                         "insert",
