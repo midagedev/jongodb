@@ -1,7 +1,10 @@
 package org.jongodb.testkit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -57,6 +60,7 @@ class RealMongodCorpusRunnerTest {
         assertTrue(Files.exists(paths.jsonArtifact()));
         assertTrue(Files.exists(paths.markdownArtifact()));
         assertEquals(2, result.topRegressions().size());
+        assertEquals(QualityGateStatus.FAIL, result.gateResult().status());
         assertEquals(DiffStatus.ERROR, result.topRegressions().get(0).status());
         assertEquals("crud.create-indexes-duplicate-key", result.topRegressions().get(0).scenarioId());
         assertEquals(DiffStatus.MISMATCH, result.topRegressions().get(1).status());
@@ -66,13 +70,81 @@ class RealMongodCorpusRunnerTest {
         String markdown = Files.readString(paths.markdownArtifact());
 
         assertTrue(json.contains("\"seed\":\"seed-for-test\""));
+        assertTrue(json.contains("\"gate\""));
         assertTrue(json.contains("\"topRegressions\""));
         assertTrue(json.contains("\"scenarioId\":\"crud.create-indexes-duplicate-key\""));
 
         assertTrue(markdown.contains("# Real Mongod Differential Baseline"));
         assertTrue(markdown.contains("seed-for-test"));
+        assertTrue(markdown.contains("## Gate"));
         assertTrue(markdown.contains("## Top Regressions"));
         assertTrue(markdown.contains("crud.create-indexes-duplicate-key (ERROR)"));
+    }
+
+    @Test
+    void evaluateGateRespectsConfiguredThresholds() {
+        DifferentialReport report = new DifferentialReport(
+            Instant.parse("2026-02-23T13:00:00Z"),
+            "wire-backend",
+            "real-mongod",
+            List.of(
+                DiffResult.match("s.match", "wire-backend", "real-mongod"),
+                DiffResult.mismatch(
+                    "s.mismatch",
+                    "wire-backend",
+                    "real-mongod",
+                    List.of(new DiffEntry("$.marker", 1, 0, "marker mismatch"))
+                ),
+                DiffResult.error("s.error", "wire-backend", "real-mongod", "forced")
+            )
+        );
+
+        RealMongodCorpusRunner.GateResult strict = RealMongodCorpusRunner.evaluateGate(
+            report,
+            new RealMongodCorpusRunner.GateThresholds(0, 0, 1.0d)
+        );
+        RealMongodCorpusRunner.GateResult relaxed = RealMongodCorpusRunner.evaluateGate(
+            report,
+            new RealMongodCorpusRunner.GateThresholds(2, 2, 0.0d)
+        );
+
+        assertEquals(QualityGateStatus.FAIL, strict.status());
+        assertEquals(QualityGateStatus.PASS, relaxed.status());
+    }
+
+    @Test
+    void runConfigParsesGateOptionsFromArgs() {
+        RealMongodCorpusRunner.RunConfig config = RealMongodCorpusRunner.RunConfig.fromArgs(
+            new String[] {
+                "--mongo-uri=mongodb://localhost:27017",
+                "--max-mismatch=3",
+                "--max-error=4",
+                "--min-pass-rate=0.98",
+                "--no-fail-on-gate"
+            }
+        );
+
+        assertEquals(3, config.gateThresholds().maxMismatch());
+        assertEquals(4, config.gateThresholds().maxError());
+        assertEquals(0.98d, config.gateThresholds().minPassRate());
+        assertFalse(config.failOnGate());
+    }
+
+    @Test
+    void runConfigLeavesMinPassRateUnsetWhenNotProvided() {
+        RealMongodCorpusRunner.RunConfig config = RealMongodCorpusRunner.RunConfig.fromArgs(
+            new String[] {"--mongo-uri=mongodb://localhost:27017"}
+        );
+
+        assertNull(config.gateThresholds().minPassRate());
+    }
+
+    @Test
+    void gateThresholdsRejectOutOfRangeMinPassRate() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new RealMongodCorpusRunner.GateThresholds(0, 0, 1.1d)
+        );
     }
 
     private static List<String> scenarioIds(List<Scenario> scenarios) {

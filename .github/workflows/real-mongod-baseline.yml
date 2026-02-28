@@ -2,6 +2,24 @@ name: Real Mongod Baseline
 
 on:
   workflow_dispatch:
+    inputs:
+      max_mismatch:
+        description: "Maximum allowed mismatches"
+        required: false
+        default: "0"
+      max_error:
+        description: "Maximum allowed errors"
+        required: false
+        default: "0"
+      min_pass_rate:
+        description: "Optional minimum pass rate [0.0, 1.0]"
+        required: false
+        default: "1.0"
+      fail_on_gate:
+        description: "Fail workflow when gate fails"
+        required: false
+        type: boolean
+        default: true
   schedule:
     - cron: "0 3 * * *"
 
@@ -21,6 +39,9 @@ jobs:
       REPLSET_WAIT_INTERVAL_SECONDS: "2"
       REPLSET_DIAGNOSTICS_DIR: build/reports/replset-diagnostics
       REAL_MONGOD_OUTPUT_DIR: build/reports/real-mongod-baseline
+      REAL_MONGOD_MAX_MISMATCH: "0"
+      REAL_MONGOD_MAX_ERROR: "0"
+      REAL_MONGOD_MIN_PASS_RATE: "1.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +64,62 @@ jobs:
         run: |
           gradle --no-daemon --stacktrace \
             -PrealMongodOutputDir="${REAL_MONGOD_OUTPUT_DIR}" \
+            -PrealMongodMaxMismatch="${{ github.event.inputs.max_mismatch || env.REAL_MONGOD_MAX_MISMATCH }}" \
+            -PrealMongodMaxError="${{ github.event.inputs.max_error || env.REAL_MONGOD_MAX_ERROR }}" \
+            -PrealMongodMinPassRate="${{ github.event.inputs.min_pass_rate || env.REAL_MONGOD_MIN_PASS_RATE }}" \
+            -PrealMongodFailOnGate="${{ github.event.inputs.fail_on_gate || 'true' }}" \
             realMongodDifferentialBaseline
+
+      - name: Publish baseline trend summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("build/reports/real-mongod-baseline/real-mongod-differential-baseline.json")
+          trend_path = Path("build/reports/real-mongod-baseline/real-mongod-baseline-trend.md")
+          if not report_path.exists():
+              trend_path.parent.mkdir(parents=True, exist_ok=True)
+              trend_path.write_text("# Real Mongod Baseline Trend\n\n- report: missing\n", encoding="utf-8")
+              print("report is missing; wrote fallback trend summary")
+              if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+                  with open(summary, "a", encoding="utf-8") as fp:
+                      fp.write(trend_path.read_text(encoding="utf-8"))
+              raise SystemExit(0)
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          summary = report.get("summary", {})
+          gate = report.get("gate", {})
+          thresholds = gate.get("thresholds", {})
+          measured = gate.get("measured", {})
+
+          lines = [
+              "# Real Mongod Baseline Trend",
+              "",
+              f"- total={summary.get('total', 0)} match={summary.get('match', 0)} mismatch={summary.get('mismatch', 0)} error={summary.get('error', 0)}",
+              f"- passRate={summary.get('passRate', 0.0):.4f}",
+              f"- gate={gate.get('status', 'UNKNOWN')}",
+              f"- thresholds: maxMismatch={thresholds.get('maxMismatch', 'n/a')} maxError={thresholds.get('maxError', 'n/a')} minPassRate={thresholds.get('minPassRate', 'none')}",
+              f"- measured: mismatch={measured.get('mismatch', 'n/a')} error={measured.get('error', 'n/a')} passRate={measured.get('passRate', 0.0):.4f}",
+          ]
+          reasons = gate.get("failureReasons", [])
+          if reasons:
+              lines.append("- failures:")
+              for reason in reasons:
+                  lines.append(f"  - {reason}")
+          else:
+              lines.append("- failures: none")
+          lines.append("")
+
+          trend_path.parent.mkdir(parents=True, exist_ok=True)
+          trend_path.write_text("\n".join(lines), encoding="utf-8")
+          print(trend_path.read_text(encoding="utf-8"))
+          if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
+              with open(summary_path, "a", encoding="utf-8") as fp:
+                  fp.write(trend_path.read_text(encoding="utf-8"))
+          PY
 
       - name: Collect replica set diagnostics
         if: always()
