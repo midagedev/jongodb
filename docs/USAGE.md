@@ -229,12 +229,14 @@ Run R3 external canary certification from canary result JSON:
 
 ```bash
 gradle r3CanaryCertificationEvidence \
-  -Pr3CanaryInputJson="testkit/canary/r3/projects.sample.json"
+  -Pr3CanaryInputJson="testkit/canary/r3/projects.mainline.json"
 ```
 
 Note:
 - `r3CanaryCertificationEvidence` currently reuses `R2CanaryCertification` output naming.
 - Artifact file names are still `r2-canary-certification.json/.md` under the `r3-canary` directory.
+- Workflow `.github/workflows/r3-external-canary.yml` runs on schedule and emits
+  `build/reports/r3-canary/r3-canary-gate-summary.md` with gate + diagnostics + reproduce command.
 
 Run final readiness aggregation:
 
@@ -304,6 +306,7 @@ gradle \
 - R3 canary:
   - `build/reports/r3-canary/r2-canary-certification.json`
   - `build/reports/r3-canary/r2-canary-certification.md`
+  - `build/reports/r3-canary/r3-canary-gate-summary.md`
 - Final readiness:
   - `build/reports/release-readiness/r1-final-readiness-report.json`
   - `build/reports/release-readiness/r1-final-readiness-report.md`
