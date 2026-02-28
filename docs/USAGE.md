@@ -136,6 +136,12 @@ Current certified reference runs (2026-02-24):
 - R3 Failure Ledger: `22332937657`
 - R3 External Canary Certification: `22332937633`
 
+Official Suite Sharded UTF gate modes:
+- `warn` (default for `pull_request` and manual dispatch): publish aggregate `total/match/mismatch/error` + pass rate summary, emit warning when mismatch/error remain.
+- `strict` (default for scheduled `main` run): fail workflow when aggregate mismatch/error is non-zero.
+- `off`: summary only, no mismatch/error gate.
+- Manual dispatch input: `utf_gate_mode` (`off | warn | strict`).
+
 Run differential baseline against real MongoDB:
 
 ```bash

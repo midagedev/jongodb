@@ -7,6 +7,10 @@ on:
         description: "Commit/tag/branch in mongodb/specifications"
         required: false
         default: "99704fa8860777da1d919ef765af1e41e75f5859"
+      utf_gate_mode:
+        description: "UTF mismatch/error gate mode: off | warn | strict"
+        required: false
+        default: "warn"
   pull_request:
     branches:
       - main
@@ -133,6 +137,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [utf-shards]
     if: always()
+    env:
+      UTF_GATE_MODE: ${{ github.event_name == 'schedule' && 'strict' || github.event.inputs.utf_gate_mode || 'warn' }}
     steps:
       - name: Download shard 0 artifact
         uses: actions/download-artifact@v4
@@ -152,16 +158,22 @@ jobs:
           name: utf-shard-2
           path: artifacts/utf-shard-2
 
-      - name: Build shard summary markdown
+      - name: Build shard summary markdown and evaluate UTF gate
         run: |
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           shard_roots = [Path("artifacts/utf-shard-0"), Path("artifacts/utf-shard-1"), Path("artifacts/utf-shard-2")]
           out = Path("artifacts/utf-shard-summary.md")
+          gate_mode = os.environ.get("UTF_GATE_MODE", "warn").strip().lower()
+          if gate_mode not in {"off", "warn", "strict"}:
+            raise SystemExit(f"invalid UTF gate mode: {gate_mode} (expected off|warn|strict)")
 
           lines = ["# UTF shard summary", ""]
+          baseline_totals = {"total": 0, "match": 0, "mismatch": 0, "error": 0}
+          rerun_totals = {"total": 0, "match": 0, "mismatch": 0, "error": 0}
           for shard_index, root in enumerate(shard_roots):
             baseline_json = next(root.glob("**/baseline/utf-differential-report.json"), None)
             rerun_json = next(root.glob("**/rerun/utf-differential-report.json"), None)
@@ -172,13 +184,57 @@ jobs:
             rerun = json.loads(rerun_json.read_text(encoding="utf-8"))
             b = baseline["differentialSummary"]
             r = rerun["differentialSummary"]
+            for key in baseline_totals:
+              baseline_totals[key] += int(b.get(key, 0))
+              rerun_totals[key] += int(r.get(key, 0))
+
+            baseline_pass = (int(b.get("match", 0)) / int(b.get("total", 0)) * 100.0) if int(b.get("total", 0)) else 100.0
+            rerun_pass = (int(r.get("match", 0)) / int(r.get("total", 0)) * 100.0) if int(r.get("total", 0)) else 100.0
             lines.append(f"## shard-{shard_index}")
-            lines.append(f"- baseline: total={b['total']} match={b['match']} mismatch={b['mismatch']} error={b['error']}")
-            lines.append(f"- rerun: total={r['total']} match={r['match']} mismatch={r['mismatch']} error={r['error']}")
+            lines.append(f"- baseline: total={b['total']} match={b['match']} mismatch={b['mismatch']} error={b['error']} passRate={baseline_pass:.2f}%")
+            lines.append(f"- rerun: total={r['total']} match={r['match']} mismatch={r['mismatch']} error={r['error']} passRate={rerun_pass:.2f}%")
             lines.append("")
+
+          baseline_pass = (baseline_totals["match"] / baseline_totals["total"] * 100.0) if baseline_totals["total"] else 100.0
+          rerun_pass = (rerun_totals["match"] / rerun_totals["total"] * 100.0) if rerun_totals["total"] else 100.0
+          lines.append("## aggregate")
+          lines.append(f"- baseline: total={baseline_totals['total']} match={baseline_totals['match']} mismatch={baseline_totals['mismatch']} error={baseline_totals['error']} passRate={baseline_pass:.2f}%")
+          lines.append(f"- rerun: total={rerun_totals['total']} match={rerun_totals['match']} mismatch={rerun_totals['mismatch']} error={rerun_totals['error']} passRate={rerun_pass:.2f}%")
+          lines.append(f"- gateMode: {gate_mode}")
+          lines.append("")
+
+          gate_triggered = (
+            baseline_totals["mismatch"] > 0
+            or baseline_totals["error"] > 0
+            or rerun_totals["mismatch"] > 0
+            or rerun_totals["error"] > 0
+          )
+          if gate_triggered:
+            gate_message = (
+              "UTF mismatch/error gate triggered: "
+              f"baseline(mismatch={baseline_totals['mismatch']}, error={baseline_totals['error']}), "
+              f"rerun(mismatch={rerun_totals['mismatch']}, error={rerun_totals['error']})"
+            )
+            lines.append(f"- gateResult: FAIL ({gate_message})")
+            if gate_mode == "warn":
+              print(f"::warning::{gate_message}")
+            elif gate_mode == "strict":
+              print(f"::error::{gate_message}")
+          else:
+            lines.append("- gateResult: PASS")
 
           out.write_text("\n".join(lines), encoding="utf-8")
           print(out.read_text(encoding="utf-8"))
+
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if step_summary:
+            with Path(step_summary).open("a", encoding="utf-8") as handle:
+              handle.write("\n")
+              handle.write(out.read_text(encoding="utf-8"))
+              handle.write("\n")
+
+          if gate_triggered and gate_mode == "strict":
+            raise SystemExit("UTF mismatch/error strict gate failed")
           PY
 
       - name: Upload summary artifact
