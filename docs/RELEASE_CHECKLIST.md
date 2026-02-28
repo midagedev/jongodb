@@ -1,18 +1,22 @@
 # Release Checklist
 
-Status date: 2026-02-25
+Status date: 2026-02-28
 
 ## R3 Certification Sign-Off
 
 - [x] Official suite sharded run on `main` completed with zero mismatch/error.
-  - run id: `22332998372`
+  - run id: `22516323868` (commit `d2ba61b`)
 - [x] R3 failure ledger run on `main` completed with `failureCount=0`.
-  - run id: `22332937657`
+  - run id: `22516324202` (commit `d2ba61b`)
 - [x] External canary certification completed for 3 projects with rollback success.
-  - run id: `22332937633`
+  - latest success run id: `22378993613` (commit `868bbc7`)
 - [x] Complex-query certification gate completed on `main` with no supported-subset regressions.
   - workflow: `.github/workflows/complex-query-certification.yml`
-  - run id: `22377660027`
+  - run id: `22516137734` (pack `complex-query-pack-v3`)
+- [ ] Release-readiness streak threshold (`readiness_min_streak=3`) is satisfied on `main`.
+  - latest run id: `22516324202`
+  - counters: `officialZeroMismatchStreak=0`, `r3LedgerZeroFailureStreak=1`
+  - readiness: `satisfied=false`
 - [x] Support boundary documents are updated.
   - `docs/SUPPORT_MATRIX.md`
   - `docs/COMPATIBILITY_SCORECARD.md`
@@ -22,6 +26,7 @@ Status date: 2026-02-25
 
 - Latest Java release tag: `v0.1.5` (run `22379241855`, commit `868bbc7`).
 - Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
+- Latest compatibility certification snapshot: commit `d2ba61b` (runs `22516323868`, `22516324202`, `22516137734`).
 - Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate

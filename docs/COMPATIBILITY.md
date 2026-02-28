@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Status date: 2026-02-25
+Status date: 2026-02-28
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
@@ -20,7 +20,7 @@ Certification context:
 | `getParameter` | Partial | Only selected parameters |
 | `insert` | Partial | Single/batch insert supported; unsupported bulk modes are skipped in differential corpus |
 | `find` | Partial | Core filter support; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
-| `aggregate` | Partial | Tier-1/Tier-2 subset; collation subset applied to `$match`/`$sort`/`$sortByCount` |
+| `aggregate` | Partial | Tier-1/Tier-2 subset plus minimal `$graphLookup`; collation subset applied to `$match`/`$sort`/`$sortByCount` |
 | `getMore` | Supported | Cursor paging |
 | `killCursors` | Supported | Cursor cancellation |
 | `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
@@ -53,6 +53,7 @@ Implemented operators:
 - comparison: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`
 - logical: `$and`, `$or`, `$not`
 - literal: `$literal`
+- arithmetic: `$add` (numeric expression subset)
 
 Not implemented:
 - full expression operator set
@@ -77,6 +78,7 @@ Implemented stages:
 - `$facet`
 - `$lookup` (local/foreign and pipeline+let subset)
 - `$unionWith`
+- `$graphLookup` (minimal subset: `from`, `startWith`, `connectFromField`, `connectToField`, `as`, optional `maxDepth`)
 - `$out` (terminal string-target subset: replaces target collection contents and returns empty result set)
 
 Not implemented or partial:
@@ -84,7 +86,8 @@ Not implemented or partial:
 - many advanced expression operators are still missing
 - `$group` accumulators other than `$sum` are not available
 - `$unwind.includeArrayIndex` is not available
-- `$merge`, `$listLocalSessions` stages are excluded from current differential corpus
+- `$merge` stage is excluded from current differential corpus
+- `$graphLookup` options outside current subset (for example `depthField`, `restrictSearchWithMatch`) are deterministic unsupported paths
 - `bypassDocumentValidation` for aggregate is excluded from current differential corpus
 
 ## Update Semantics

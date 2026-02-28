@@ -1,6 +1,6 @@
 # Roadmap
 
-Status date: 2026-02-24
+Status date: 2026-02-28
 
 This roadmap is implementation-focused and tied to testable outcomes.
 
@@ -38,26 +38,36 @@ Completed:
 - external canary certification gate for 3 Spring projects
 - final scorecard/support manifest publication
 
+## R4 Compatibility Expansion (In Progress)
+
+Completed in current wave:
+- official + ledger imported differential coverage expanded to `508` with `mismatch=0`, `error=0`
+- complex-query pack updated to `complex-query-pack-v3` with `$expr.$add` certification subset
+- minimal `$graphLookup` certification subset implemented with deterministic option boundary
+- listLocalSessions regression coverage normalized in UTF importer regression pack
+- release-readiness streak artifacts added (`utf-shard-streak`, `r3-release-readiness-streak`)
+
 ## Current Focus
 
-### R4 Compatibility Expansion
+### Pre-Release Hardening
 
 Target outcomes:
-- reduce unsupported surface in official UTF suites
-- increase transaction/retry semantics coverage for supported scenario bands
-- increase Spring project cutover confidence on more app profiles
+- keep imported differential parity at zero mismatch/error while reducing unsupported categories
+- close release-readiness streak gate (`minStreak=3`) on scheduled runs
+- refresh certification evidence on release-candidate commit before tagging
 
 Primary measures:
-- lower `unsupported` counts in UTF shard artifacts
-- preserve zero mismatch/error on imported differential cases
+- preserve `mismatch=0`, `error=0` across Official Suite and R3 Ledger
+- increase zero-result streak counters (`officialZeroMismatchStreak`, `r3LedgerZeroFailureStreak`)
 - maintain green canary certification for at least 3 external projects
 
 ## Planned Next
 
-- Expand collation semantics beyond current subset (`locale`/`strength`/`caseLevel`).
-- Implement TTL runtime behavior beyond index metadata registration.
-- Expand update/operator coverage beyond current `arrayFilters` subset (advanced positional/pipeline expressions).
-- Expand supported transaction operations in unified suites while preserving deterministic behavior.
+- close remaining aggregate-stage unsupported surface (`$merge` and advanced non-alias stages)
+- expand collation semantics beyond current subset (`locale`/`strength`/`caseLevel`)
+- implement TTL runtime behavior beyond index metadata registration
+- expand update/operator coverage beyond current `arrayFilters` subset (advanced positional/pipeline expressions)
+- expand supported transaction operations in unified suites while preserving deterministic behavior
 
 ## Out of Scope (Current Phase)
 

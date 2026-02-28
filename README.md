@@ -156,16 +156,22 @@ This project targets integration-test compatibility for common Spring data paths
 | Area | Current level | Notes |
 | --- | --- | --- |
 | Command surface | 22 handlers | Mix of `Supported` and `Partial` |
-| Query language | Core comparison/logical/array/regex + partial `$expr` | Advanced parity incomplete |
-| Aggregation | Core stages + selected Tier-2 stages | Full operator coverage not implemented |
+| Query language | Core comparison/logical/array/regex + partial `$expr` (including `$add` subset) | Advanced parity incomplete |
+| Aggregation | Core stages + selected Tier-2 stages + minimal `$graphLookup` subset | Full operator coverage not implemented |
 | Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) + deterministic retry labels/contracts |
 | Deployment profile | Standalone + single-node replica-set semantic profile | Replica-set profile exposes primary-only handshake/URI semantics for driver compatibility |
 | Wire protocol | `OP_MSG` + `OP_QUERY` | In-process ingress and standalone TCP launcher mode, with OP_QUERY namespace-based `$db` fallback |
 
 Support manifest summary:
 - `Supported`: 7
-- `Partial`: 4
-- `Unsupported`: 1
+- `Partial`: 6
+- `Unsupported`: 0
+
+Latest certification evidence (2026-02-28):
+- Official Suite Sharded: run `22516323868` (`total=508`, `mismatch=0`, `error=0`)
+- R3 Failure Ledger: run `22516324202` (`failureCount=0`)
+- Complex Query Certification: run `22516137734` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
+- R3 External Canary (latest success): run `22378993613` (2026-02-25)
 
 Details:
 - `docs/SUPPORT_MATRIX.md`
