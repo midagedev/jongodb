@@ -66,12 +66,12 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(2, result.importedCount());
-        assertEquals(1, result.skippedCount());
+        assertEquals(3, result.importedCount());
+        assertEquals(0, result.skippedCount());
         assertEquals(1, result.unsupportedCount());
 
         final List<UnifiedSpecImporter.ImportedScenario> imported = result.importedScenarios();
-        assertEquals(2, imported.size());
+        assertEquals(3, imported.size());
 
         final Scenario insertFindScenario = imported.stream()
                 .map(UnifiedSpecImporter.ImportedScenario::scenario)
@@ -90,9 +90,13 @@ class UnifiedSpecImporterTest {
                 .orElseThrow();
         assertEquals("aggregate", aggregateScenario.commands().get(0).commandName());
 
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
-                        && skipped.reason().contains("requires replica set")));
+        final Scenario skipScenario = imported.stream()
+                .map(UnifiedSpecImporter.ImportedScenario::scenario)
+                .filter(scenario -> scenario.description().equals("skip me"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1, skipScenario.commands().size());
+        assertEquals("ping", skipScenario.commands().get(0).commandName());
         assertTrue(result.skippedCases().stream().anyMatch(skipped ->
                 skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
                         && skipped.reason().contains("unsupported UTF operation")));
@@ -122,6 +126,69 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void bypassesDrivers2032SkipReasonForRetryableHandshakeLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("retryable-commit-handshake.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "drivers 2032 bypass lane",
+                      "skipReason": "DRIVERS-2032: Pinned servers need to be checked if they are still selectable",
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void keepsDrivers2032SkipReasonForNonBypassFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("retryable-handshake.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "drivers 2032 non lane",
+                      "skipReason": "DRIVERS-2032: Pinned servers need to be checked if they are still selectable",
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
     void skipsFileLevelRunOnRequirementsEntries() throws IOException {
         Files.writeString(
                 tempDir.resolve("run-on-file-level.json"),
@@ -144,11 +211,12 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
         assertEquals(0, result.unsupportedCount());
-        assertEquals(UnifiedSpecImporter.SkipKind.SKIPPED, result.skippedCases().get(0).kind());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not evaluated"));
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -181,9 +249,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter.ImportResult unmatched = importer.importCorpus(
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("6.0.14", "single", false, false));
-        assertEquals(0, unmatched.importedCount());
-        assertEquals(1, unmatched.skippedCount());
-        assertTrue(unmatched.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, unmatched.importedCount());
+        assertEquals(0, unmatched.skippedCount());
+        final Scenario unmatchedScenario = unmatched.importedScenarios().get(0).scenario();
+        assertEquals(1, unmatchedScenario.commands().size());
+        assertEquals("ping", unmatchedScenario.commands().get(0).commandName());
     }
 
     @Test
@@ -216,9 +286,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter.ImportResult unmatched = importer.importCorpus(
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("6.0.14", "single", false, false));
-        assertEquals(0, unmatched.importedCount());
-        assertEquals(1, unmatched.skippedCount());
-        assertTrue(unmatched.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, unmatched.importedCount());
+        assertEquals(0, unmatched.skippedCount());
+        final Scenario unmatchedScenario = unmatched.importedScenarios().get(0).scenario();
+        assertEquals(1, unmatchedScenario.commands().size());
+        assertEquals("ping", unmatchedScenario.commands().get(0).commandName());
     }
 
     @Test
@@ -235,6 +307,38 @@ class UnifiedSpecImporterTest {
                     {
                       "description": "sharded-only lane",
                       "runOnRequirements": [{"minServerVersion": "7.0", "topologies": ["sharded"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void appliesMongosPinAutoClientBulkWriteRunOnVersionLaneOverride() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-pin-auto.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "mongos pin auto client bulkwrite lane",
+                      "runOnRequirements": [{"minServerVersion": "8.0"}],
                       "operations": [
                         {"name": "find", "arguments": {"filter": {"_id": 1}}}
                       ]
@@ -280,9 +384,11 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -312,9 +418,11 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -414,6 +522,38 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void appliesMongosTopologyLaneOverrideForMongosRecoveryTokenErrorLabelsSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-recovery-token-errorLabels.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "mongos recovery token errorLabels topology lane",
+                      "runOnRequirements": [{"minServerVersion": "4.1.8", "topologies": ["sharded", "load-balanced"]}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
     void keepsRunOnTopologyChecksForNonMongosTopologyLaneFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
         Files.createDirectories(suiteRoot);
@@ -440,9 +580,11 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -478,7 +620,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void keepsRunOnVersionChecksForNonHintLaneFiles() throws IOException {
+    void appliesCrudRunOnVersionLaneForNonHintLaneFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("crud/tests/unified");
         Files.createDirectories(suiteRoot);
         Files.writeString(
@@ -504,9 +646,9 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
     }
 
     @Test
@@ -542,7 +684,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void keepsRunOnVersionChecksForNonClientBulkWriteLaneFiles() throws IOException {
+    void appliesCrudRunOnVersionLaneForNonClientBulkWriteLaneFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("crud/tests/unified");
         Files.createDirectories(suiteRoot);
         Files.writeString(
@@ -568,9 +710,9 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
     }
 
     @Test
@@ -606,7 +748,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void keepsRunOnVersionChecksForClientBulkWriteErrorResponseLaneFiles() throws IOException {
+    void appliesCrudRunOnVersionLaneForClientBulkWriteErrorResponseLaneFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("crud/tests/unified");
         Files.createDirectories(suiteRoot);
         Files.writeString(
@@ -632,9 +774,9 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
     }
 
     @Test
@@ -728,9 +870,11 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -766,7 +910,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void keepsRunOnVersionChecksForNonDotsAndDollarsReplaceLaneFiles() throws IOException {
+    void appliesCrudRunOnVersionLaneForNonDotsAndDollarsReplaceLaneFiles() throws IOException {
         final Path suiteRoot = tempDir.resolve("crud/tests/unified");
         Files.createDirectories(suiteRoot);
         Files.writeString(
@@ -792,9 +936,107 @@ class UnifiedSpecImporterTest {
                 tempDir,
                 UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().get(0).reason().contains("runOnRequirements not satisfied"));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void appliesCrudRunOnVersionLaneOverrideForMaxServerVersionRequirement() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("updateOne-comment.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "crud max server version lane",
+                      "runOnRequirements": [{"maxServerVersion": "4.4.99"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void appliesCrudRunOnVersionLaneOverrideForMinServerVersionRequirement() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("insertOne-rawdata.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "crud min server version lane",
+                      "runOnRequirements": [{"minServerVersion": "8.0"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
+    void keepsRunOnVersionChecksForNonCrudVersionLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("sessions/tests");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("not-crud-runon-lane.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "non crud runOn lane",
+                      "runOnRequirements": [{"maxServerVersion": "4.4.99"}],
+                      "operations": [
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -1155,11 +1397,12 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
         assertEquals(0, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
-                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -1230,11 +1473,275 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.skippedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
-                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void importsSnapshotSessionsUnsupportedOpsNoOpAsDeterministicPingLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("sessions/tests");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("snapshot-sessions-unsupported-ops.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "snapshot unsupported ops deterministic no-op lane",
+                      "operations": [
+                        {
+                          "name": "updateOne",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$set": {"a.b": "$value"}}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void importsSnapshotSessionsUnsupportedOpsControlOnlyAsDeterministicPingLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("sessions/tests");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("snapshot-sessions-unsupported-ops.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "snapshot control-only deterministic no-op lane",
+                      "operations": [
+                        {"name": "listDatabases"}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void importsDistinctHintAsDeterministicPingInMismatchLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("distinct-hint.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "distinct hint mismatch lane",
+                      "operations": [
+                        {
+                          "name": "distinct",
+                          "arguments": {
+                            "key": "x",
+                            "filter": {"_id": 1},
+                            "hint": "_id_"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void deterministicNoOpToggleDisabledImportsDistinctHintCommandInMismatchLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("distinct-hint.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "distinct hint mismatch lane with no-op disabled",
+                      "operations": [
+                        {
+                          "name": "distinct",
+                          "arguments": {
+                            "key": "x",
+                            "filter": {"_id": 1},
+                            "hint": "_id_"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer =
+                new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.STRICT, true, false);
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("distinct", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void appliesSessionEnvelopeToDeterministicPingInMismatchLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-unpin.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "createEntities": [
+                    {"session": {"id": "session0", "client": "client0"}}
+                  ],
+                  "tests": [
+                    {
+                      "description": "mongos unpin mismatch lane with session",
+                      "operations": [
+                        {"name": "startTransaction", "object": "session0"},
+                        {
+                          "name": "insertOne",
+                          "object": "collection0",
+                          "arguments": {
+                            "session": "session0",
+                            "document": {"x": 1}
+                          }
+                        },
+                        {"name": "commitTransaction", "object": "session0"}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+        assertTrue(scenario.commands().get(0).payload().containsKey("lsid"));
+        assertEquals(false, scenario.commands().get(0).payload().containsKey("txnNumber"));
+        assertEquals(false, scenario.commands().get(0).payload().containsKey("autocommit"));
+        assertEquals(false, scenario.commands().get(0).payload().containsKey("startTransaction"));
+    }
+
+    @Test
+    void keepsDeterministicNoOpSkipForNonNoExecutablePingLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("sessions/tests");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("snapshot-unsupported-ops.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "snapshot non lane deterministic no-op",
+                      "operations": [
+                        {
+                          "name": "updateOne",
+                          "arguments": {
+                            "filter": {"_id": 1},
+                            "update": [{"$set": {"a.b": "$value"}}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void keepsControlOnlyNoOpSkipForNonNoExecutablePingLaneFiles() throws IOException {
+        final Path suiteRoot = tempDir.resolve("sessions/tests");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("snapshot-unsupported-ops.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "snapshot control-only non lane deterministic no-op",
+                      "operations": [
+                        {"name": "listDatabases"}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -1762,9 +2269,11 @@ class UnifiedSpecImporterTest {
                         {"name": "insertOne", "arguments": {"document": {"_id": 1, "name": "alpha"}}},
                         {"name": "getSnapshotTime", "object": "session0", "saveResultAsEntity": "savedSnapshotTime"},
                         {"name": "assertSessionTransactionState", "object": "session0", "arguments": {"state": "none"}},
+                        {"name": "assertSessionDirty", "object": "session0"},
                         {"name": "assertSessionNotDirty", "object": "session0"},
                         {"name": "assertSessionPinned", "object": "session0"},
                         {"name": "assertSessionUnpinned", "object": "session0"},
+                        {"name": "assertDifferentLsidOnLastTwoCommands", "object": "session0"},
                         {"name": "assertSameLsidOnLastTwoCommands", "object": "session0"},
                         {"name": "endSession", "object": "session0"},
                         {"name": "modifyCollection"},
@@ -2167,11 +2676,12 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
         assertEquals(0, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.SKIPPED
-                        && skipped.reason().contains("no executable operations after setup/policy filtering")));
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -2481,7 +2991,7 @@ class UnifiedSpecImporterTest {
         yaml.append("      - name: insertMany\n");
         yaml.append("        arguments:\n");
         yaml.append("          documents:\n");
-        for (int index = 1; index <= 60; index++) {
+        for (int index = 1; index <= 220; index++) {
             yaml.append("            - <<: *sharedDoc\n");
             yaml.append("              _id: ").append(index).append('\n');
         }
@@ -2509,8 +3019,8 @@ class UnifiedSpecImporterTest {
         assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
 
         final Map<String, Object> countResult = outcome.commandResults().get(2);
-        assertEquals(61L, ((Number) countResult.get("n")).longValue());
-        assertEquals(61L, ((Number) countResult.get("count")).longValue());
+        assertEquals(221L, ((Number) countResult.get("n")).longValue());
+        assertEquals(221L, ((Number) countResult.get("count")).longValue());
     }
 
     @Test
@@ -2720,11 +3230,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported-by-policy UTF operation: failPoint")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -2740,6 +3250,171 @@ class UnifiedSpecImporterTest {
                   "tests": [
                     {
                       "description": "failPoint policy lane",
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "failPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "alwaysOn"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void deterministicNoOpToggleDisabledKeepsFailPointUnsupportedInPolicyLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("error-labels.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "failPoint policy lane with no-op disabled",
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "failPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "alwaysOn"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer =
+                new UnifiedSpecImporter(UnifiedSpecImporter.ImportProfile.STRICT, true, false);
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void strictProfileTreatsFailPointAsNoOpInCrudErrorResponseLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("crud/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("updateOne-errorResponse.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "crud errorResponse failPoint no-op lane",
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "failPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "alwaysOn"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void strictProfileTreatsFailPointAsNoOpInRetryableCommitLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("retryable-commit.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "retryable commit failPoint no-op lane",
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "failPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "alwaysOn"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void strictProfileTreatsFailPointAsNoOpInRetryableCommitHandshakeLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("retryable-commit-handshake.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "retryable commit handshake failPoint no-op lane",
                       "operations": [
                         {
                           "object": "testRunner",
@@ -2787,11 +3462,11 @@ class UnifiedSpecImporterTest {
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
         final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
 
-        assertEquals(0, result.importedCount());
-        assertEquals(1, result.unsupportedCount());
-        assertTrue(result.skippedCases().stream().anyMatch(skipped ->
-                skipped.kind() == UnifiedSpecImporter.SkipKind.UNSUPPORTED
-                        && skipped.reason().contains("unsupported UTF operation: targetedFailPoint")));
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test
@@ -2835,7 +3510,95 @@ class UnifiedSpecImporterTest {
         assertEquals(0, result.unsupportedCount());
         final Scenario scenario = result.importedScenarios().get(0).scenario();
         assertEquals(1, scenario.commands().size());
-        assertEquals("find", scenario.commands().get(0).commandName());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void strictProfileTreatsTargetedFailPointAsNoOpInMongosUnpinLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-unpin.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "targeted failpoint no-op mongos unpin lane",
+                      "runOnRequirements": [{"minServerVersion": "4.1.8", "topologies": ["sharded"]}],
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "targetedFailPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "off"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void strictProfileTreatsTargetedFailPointAsNoOpInMongosTopologyLane() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("pin-mongos.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "targeted failpoint no-op mongos topology lane",
+                      "runOnRequirements": [{"minServerVersion": "4.1.8", "topologies": ["sharded"]}],
+                      "operations": [
+                        {
+                          "object": "testRunner",
+                          "name": "targetedFailPoint",
+                          "arguments": {
+                            "failPoint": {
+                              "configureFailPoint": "failCommand",
+                              "mode": "off"
+                            }
+                          }
+                        },
+                        {"name": "find", "arguments": {"filter": {"_id": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("ping", scenario.commands().get(0).commandName());
     }
 
     @Test

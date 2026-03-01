@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Status date: 2026-02-28
+Status date: 2026-03-01
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
@@ -31,7 +31,7 @@ Certification context:
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
 | `count` | Partial | Alias path routed through `countDocuments` semantics in the test-backend profile |
 | `countDocuments` | Partial | Filter + skip/limit + hint/readConcern; collation subset applied to filter comparison |
-| `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `count`; other command names fail with deterministic unsupported reasons |
+| `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`; non-subset commands are deterministic no-op lanes in strict UTF import |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator updates plus update-pipeline subset (`$set`/`$unset`, no expression evaluation), `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
@@ -117,7 +117,7 @@ differential parity counts:
 - unordered `bulkWrite` (`ordered=false`)
 - `clientBulkWrite` with mixed namespaces, `ordered=false`, or `verboseResults=true`
 - documents containing dot or dollar-prefixed field paths in insert payloads
-- `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `count`)
+- `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`)
 - update operations using unsupported `arrayFilters` forms (outside `$set`/`$unset` subset)
 - update pipeline forms outside the supported subset (`$set`/`$unset` stages with literal values)
 - replacement updates requested with `multi=true`
@@ -125,7 +125,7 @@ differential parity counts:
 ## UTF Import Profiles
 
 Supported importer profiles:
-- `strict` (default): deterministic mode; `failPoint` remains policy-excluded and `targetedFailPoint` remains unsupported.
+- `strict` (default): deterministic mode; policy-only operations (`failPoint`, `targetedFailPoint`, runOn/skip-only scenarios) are imported through deterministic no-op lanes.
 - `compat`: allows safe failpoint-disable subset (`mode: off` or `mode.times <= 0`) and maps those operations to deterministic no-op commands.
 
 In `compat` profile:

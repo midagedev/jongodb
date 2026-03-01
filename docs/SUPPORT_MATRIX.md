@@ -1,6 +1,6 @@
 # Support Matrix
 
-Status date: 2026-02-28
+Status date: 2026-03-01
 
 This matrix is a versioned support boundary for integration-test usage.
 Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.

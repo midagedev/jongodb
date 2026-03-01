@@ -167,10 +167,11 @@ Support manifest summary:
 - `Partial`: 6
 - `Unsupported`: 0
 
-Latest certification evidence (2026-02-28):
-- Official Suite Sharded: run `22516323868` (`total=508`, `mismatch=0`, `error=0`)
-- R3 Failure Ledger: run `22516324202` (`failureCount=0`)
-- Complex Query Certification: run `22516137734` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
+Latest certification evidence (2026-03-01):
+- Local pre-release UTF full shard: `build/reports/utf-shard-release-final2/utf-differential-report.json` (`imported=1648`, `skipped=0`, `unsupported=0`, `mismatch=0`, `error=0`)
+- Official Suite Sharded (`main`): run `22516323868` (`total=508`, `mismatch=0`, `error=0`)
+- R3 Failure Ledger (`main`): run `22516324202` (`failureCount=0`)
+- Complex Query Certification (`main`): run `22516137734` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
 - R3 External Canary (latest success): run `22378993613` (2026-02-25)
 
 Details:

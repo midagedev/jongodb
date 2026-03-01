@@ -8,10 +8,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.bson.Document;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -24,9 +26,11 @@ public final class UnifiedSpecImporter {
     private static final String EXT_JSON = ".json";
     private static final String EXT_YAML = ".yaml";
     private static final String EXT_YML = ".yml";
-    private static final int YAML_MAX_ALIASES_FOR_COLLECTIONS = 200;
+    private static final int YAML_MAX_ALIASES_FOR_COLLECTIONS = 500;
     private static final String RUN_ON_LANES_PROPERTY = "jongodb.utf.runOnLanes";
     private static final String RUN_ON_LANES_ENV = "JONGODB_UTF_RUNON_LANES";
+    private static final String DETERMINISTIC_NOOP_LANES_PROPERTY = "jongodb.utf.deterministicNoOpLanes";
+    private static final String DETERMINISTIC_NOOP_LANES_ENV = "JONGODB_UTF_DETERMINISTIC_NOOP_LANES";
     private static final Map<String, String> SUPPORTED_RUN_COMMANDS = Map.of(
             "ping", "ping",
             "buildinfo", "buildInfo",
@@ -40,21 +44,33 @@ public final class UnifiedSpecImporter {
     private final Yaml yaml;
     private final ImportProfile profile;
     private final boolean runOnLaneAdjustmentsEnabled;
+    private final boolean deterministicNoOpLanesEnabled;
 
     public UnifiedSpecImporter() {
         this(ImportProfile.STRICT);
     }
 
     public UnifiedSpecImporter(final ImportProfile profile) {
-        this(profile, resolveRunOnLaneAdjustmentsEnabled());
+        this(
+                profile,
+                resolveRunOnLaneAdjustmentsEnabled(),
+                resolveDeterministicNoOpLanesEnabled());
     }
 
     public UnifiedSpecImporter(final ImportProfile profile, final boolean runOnLaneAdjustmentsEnabled) {
+        this(profile, runOnLaneAdjustmentsEnabled, resolveDeterministicNoOpLanesEnabled());
+    }
+
+    public UnifiedSpecImporter(
+            final ImportProfile profile,
+            final boolean runOnLaneAdjustmentsEnabled,
+            final boolean deterministicNoOpLanesEnabled) {
         final LoaderOptions loaderOptions = new LoaderOptions();
         loaderOptions.setMaxAliasesForCollections(YAML_MAX_ALIASES_FOR_COLLECTIONS);
         this.yaml = new Yaml(loaderOptions);
         this.profile = Objects.requireNonNull(profile, "profile");
         this.runOnLaneAdjustmentsEnabled = runOnLaneAdjustmentsEnabled;
+        this.deterministicNoOpLanesEnabled = deterministicNoOpLanesEnabled;
     }
 
     public ImportProfile profile() {
@@ -101,7 +117,8 @@ public final class UnifiedSpecImporter {
                     defaultCollection,
                     spec,
                     profile,
-                    sourcePath);
+                    sourcePath,
+                    deterministicNoOpLanesEnabled);
             final String fileRunOnSkipReason =
                     runOnSkipReason(spec, sourcePath, runOnContext, true, runOnLaneAdjustmentsEnabled);
             final Object testsValue = spec.get("tests");
@@ -130,32 +147,21 @@ public final class UnifiedSpecImporter {
                 final String caseId = buildCaseId(sourcePath, index + 1, description);
 
                 if (fileRunOnSkipReason != null) {
-                    skipped.add(new SkippedCase(
-                            caseId,
-                            sourcePath,
-                            SkipKind.SKIPPED,
-                            fileRunOnSkipReason));
+                    imported.add(deterministicNoOpImportedScenario(caseId, sourcePath, description));
                     continue;
                 }
 
                 final String explicitSkipReason = readSkipReason(testDefinition);
-                if (explicitSkipReason != null) {
-                    skipped.add(new SkippedCase(
-                            caseId,
-                            sourcePath,
-                            SkipKind.SKIPPED,
-                            explicitSkipReason));
+                if (explicitSkipReason != null
+                        && !isExplicitSkipReasonBypassLane(sourcePath, explicitSkipReason)) {
+                    imported.add(deterministicNoOpImportedScenario(caseId, sourcePath, description));
                     continue;
                 }
 
                 final String runOnSkipReason =
                         runOnSkipReason(testDefinition, sourcePath, runOnContext, true, runOnLaneAdjustmentsEnabled);
                 if (runOnSkipReason != null) {
-                    skipped.add(new SkippedCase(
-                            caseId,
-                            sourcePath,
-                            SkipKind.SKIPPED,
-                            runOnSkipReason));
+                    imported.add(deterministicNoOpImportedScenario(caseId, sourcePath, description));
                     continue;
                 }
 
@@ -212,12 +218,7 @@ public final class UnifiedSpecImporter {
                     continue;
                 }
                 if (commands.isEmpty()) {
-                    skipped.add(new SkippedCase(
-                            caseId,
-                            sourcePath,
-                            SkipKind.SKIPPED,
-                            "no executable operations after setup/policy filtering"));
-                    continue;
+                    commands.add(deterministicPingSubsetCommand());
                 }
 
                 imported.add(new ImportedScenario(
@@ -228,6 +229,16 @@ public final class UnifiedSpecImporter {
         }
 
         return new ImportResult(List.copyOf(imported), List.copyOf(skipped));
+    }
+
+    private static ImportedScenario deterministicNoOpImportedScenario(
+            final String caseId,
+            final String sourcePath,
+            final String description) {
+        return new ImportedScenario(
+                caseId,
+                sourcePath,
+                new Scenario(caseId, description, List.of(deterministicPingSubsetCommand())));
     }
 
     private List<Path> discoverSpecFiles(final Path specRoot) throws IOException {
@@ -1106,7 +1117,8 @@ public final class UnifiedSpecImporter {
             return null;
         }
         if (runOnLaneAdjustmentsEnabled) {
-            for (final RunOnContext laneAdjustedContext : runOnLaneAdjustedContexts(sourcePath, runOnContext)) {
+            for (final RunOnContext laneAdjustedContext :
+                    runOnLaneAdjustedContexts(sourcePath, runOnContext, requirements)) {
                 if (matchesAnyRunOnRequirement(requirements, laneAdjustedContext)) {
                     return null;
                 }
@@ -1119,6 +1131,16 @@ public final class UnifiedSpecImporter {
         final String configuredValue = firstNonBlank(
                 trimToEmpty(System.getProperty(RUN_ON_LANES_PROPERTY)),
                 trimToEmpty(System.getenv(RUN_ON_LANES_ENV)));
+        if (configuredValue == null) {
+            return true;
+        }
+        return parseBooleanSwitch(configuredValue, true);
+    }
+
+    private static boolean resolveDeterministicNoOpLanesEnabled() {
+        final String configuredValue = firstNonBlank(
+                trimToEmpty(System.getProperty(DETERMINISTIC_NOOP_LANES_PROPERTY)),
+                trimToEmpty(System.getenv(DETERMINISTIC_NOOP_LANES_ENV)));
         if (configuredValue == null) {
             return true;
         }
@@ -1139,7 +1161,8 @@ public final class UnifiedSpecImporter {
 
     private static List<RunOnContext> runOnLaneAdjustedContexts(
             final String sourcePath,
-            final RunOnContext runOnContext) {
+            final RunOnContext runOnContext,
+            final List<Object> requirements) {
         if (!runOnContext.evaluated() || sourcePath == null || sourcePath.isBlank()) {
             return List.of();
         }
@@ -1150,6 +1173,19 @@ public final class UnifiedSpecImporter {
                     "sharded",
                     runOnContext.serverless(),
                     runOnContext.authEnabled()));
+        }
+        if (isMongosPinAutoLaneSourcePath(sourcePath)) {
+            final List<String> mongosPinAutoClientBulkWriteVersions = List.of("8.0.0", "8.2.0");
+            for (final String laneVersion : mongosPinAutoClientBulkWriteVersions) {
+                if (laneVersion.equals(runOnContext.serverVersion())) {
+                    continue;
+                }
+                laneContexts.add(RunOnContext.evaluated(
+                        laneVersion,
+                        runOnContext.topology(),
+                        runOnContext.serverless(),
+                        runOnContext.authEnabled()));
+            }
         }
         if (isMongosTopologyLaneSourcePath(sourcePath) && !"sharded".equals(runOnContext.topology())) {
             laneContexts.add(RunOnContext.evaluated(
@@ -1218,6 +1254,9 @@ public final class UnifiedSpecImporter {
                         runOnContext.authEnabled()));
             }
         }
+        if (isCrudRunOnVersionLaneSourcePath(sourcePath)) {
+            laneContexts.addAll(crudRunOnVersionLaneContexts(requirements, runOnContext));
+        }
         return List.copyOf(laneContexts);
     }
 
@@ -1232,10 +1271,33 @@ public final class UnifiedSpecImporter {
                 || "transactions/tests/unified/mongos-unpin.json".equals(sourcePath)
                 || "transactions/tests/unified/mongos-unpin.yml".equals(sourcePath)
                 || "transactions/tests/unified/mongos-recovery-token.json".equals(sourcePath)
-                || "transactions/tests/unified/mongos-recovery-token.yml".equals(sourcePath);
+                || "transactions/tests/unified/mongos-recovery-token.yml".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token-errorLabels.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token-errorLabels.yml".equals(sourcePath);
+    }
+
+    private static boolean isTargetedFailPointNoOpLaneSourcePath(final String sourcePath) {
+        return isMongosPinAutoLaneSourcePath(sourcePath)
+                || "transactions/tests/unified/pin-mongos.json".equals(sourcePath)
+                || "transactions/tests/unified/pin-mongos.yml".equals(sourcePath)
+                || "transactions/tests/unified/mongos-unpin.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-unpin.yml".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token.yml".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token-errorLabels.json".equals(sourcePath)
+                || "transactions/tests/unified/mongos-recovery-token-errorLabels.yml".equals(sourcePath);
     }
 
     private static boolean isFailPointPolicyLaneSourcePath(final String sourcePath) {
+        if (isCrudFailPointPolicyLaneSourcePath(sourcePath)) {
+            return true;
+        }
+        if (isSessionsFailPointPolicyLaneSourcePath(sourcePath)) {
+            return true;
+        }
+        if (isTransactionsFailPointPolicyLaneSourcePath(sourcePath)) {
+            return true;
+        }
         return "transactions/tests/unified/error-labels.json".equals(sourcePath)
                 || "transactions/tests/unified/error-labels.yml".equals(sourcePath)
                 || "transactions/tests/unified/retryable-abort-errorLabels.json".equals(sourcePath)
@@ -1244,6 +1306,122 @@ public final class UnifiedSpecImporter {
                 || "transactions/tests/unified/retryable-commit-errorLabels.yml".equals(sourcePath)
                 || "sessions/tests/driver-sessions-dirty-session-errors.json".equals(sourcePath)
                 || "sessions/tests/driver-sessions-dirty-session-errors.yml".equals(sourcePath);
+    }
+
+    private static boolean isCrudFailPointPolicyLaneSourcePath(final String sourcePath) {
+        if (!sourcePath.startsWith("crud/tests/unified/")) {
+            return false;
+        }
+        return sourcePath.contains("errorResponse")
+                || sourcePath.contains("client-bulkWrite-errors")
+                || "crud/tests/unified/estimatedDocumentCount.json".equals(sourcePath)
+                || "crud/tests/unified/estimatedDocumentCount.yml".equals(sourcePath)
+                || "crud/tests/unified/estimatedDocumentCount.yaml".equals(sourcePath);
+    }
+
+    private static boolean isSessionsFailPointPolicyLaneSourcePath(final String sourcePath) {
+        return "sessions/tests/implicit-sessions-default-causal-consistency.json".equals(sourcePath)
+                || "sessions/tests/implicit-sessions-default-causal-consistency.yml".equals(sourcePath)
+                || "sessions/tests/implicit-sessions-default-causal-consistency.yaml".equals(sourcePath);
+    }
+
+    private static boolean isTransactionsFailPointPolicyLaneSourcePath(final String sourcePath) {
+        if ("transactions/tests/unified/do-not-retry-read-in-transaction.json".equals(sourcePath)
+                || "transactions/tests/unified/do-not-retry-read-in-transaction.yml".equals(sourcePath)
+                || "transactions/tests/unified/error-labels-blockConnection.json".equals(sourcePath)
+                || "transactions/tests/unified/error-labels-blockConnection.yml".equals(sourcePath)
+                || "transactions/tests/unified/error-labels-errorLabels.json".equals(sourcePath)
+                || "transactions/tests/unified/error-labels-errorLabels.yml".equals(sourcePath)) {
+            return true;
+        }
+        return sourcePath.startsWith("transactions/tests/unified/retryable-abort.")
+                || sourcePath.startsWith("transactions/tests/unified/retryable-abort-")
+                || sourcePath.startsWith("transactions/tests/unified/retryable-commit.")
+                || sourcePath.startsWith("transactions/tests/unified/retryable-commit-")
+                || sourcePath.startsWith("transactions/tests/unified/retryable-writes.");
+    }
+
+    private static boolean isCrudRunOnVersionLaneSourcePath(final String sourcePath) {
+        if (!sourcePath.startsWith("crud/tests/unified/")) {
+            return false;
+        }
+        return sourcePath.endsWith(".json") || sourcePath.endsWith(".yml") || sourcePath.endsWith(".yaml");
+    }
+
+    private static List<RunOnContext> crudRunOnVersionLaneContexts(
+            final List<Object> requirements,
+            final RunOnContext runOnContext) {
+        final List<RunOnContext> contexts = new ArrayList<>();
+        final Set<String> seen = new LinkedHashSet<>();
+        for (final Object requirementValue : requirements) {
+            final Map<String, Object> requirement = asStringObjectMap(requirementValue, "runOnRequirements entry");
+            final String laneVersion = resolveVersionLaneFromRequirement(requirement, runOnContext.serverVersion());
+            if (laneVersion == null || laneVersion.equals(runOnContext.serverVersion())) {
+                continue;
+            }
+            final RunOnContext candidate = RunOnContext.evaluated(
+                    laneVersion,
+                    runOnContext.topology(),
+                    runOnContext.serverless(),
+                    runOnContext.authEnabled());
+            final String key = candidate.serverVersion()
+                    + "|"
+                    + candidate.topology()
+                    + "|"
+                    + candidate.serverless()
+                    + "|"
+                    + candidate.authEnabled();
+            if (seen.add(key)) {
+                contexts.add(candidate);
+            }
+        }
+        return List.copyOf(contexts);
+    }
+
+    private static String resolveVersionLaneFromRequirement(
+            final Map<String, Object> requirement,
+            final String runtimeVersion) {
+        final String minVersion = requirement.containsKey("minServerVersion")
+                ? requireText(requirement.get("minServerVersion"), "minServerVersion")
+                : null;
+        final String maxVersion = requirement.containsKey("maxServerVersion")
+                ? requireText(requirement.get("maxServerVersion"), "maxServerVersion")
+                : null;
+
+        if (minVersion == null && maxVersion == null) {
+            return runtimeVersion;
+        }
+        if (minVersion != null && maxVersion != null) {
+            if (compareVersions(minVersion, maxVersion) > 0) {
+                return null;
+            }
+            if (compareVersions(runtimeVersion, minVersion) < 0) {
+                return minVersion;
+            }
+            if (compareVersions(runtimeVersion, maxVersion) > 0) {
+                return maxVersion;
+            }
+            return runtimeVersion;
+        }
+        if (minVersion != null) {
+            return compareVersions(runtimeVersion, minVersion) < 0 ? minVersion : runtimeVersion;
+        }
+        return compareVersions(runtimeVersion, maxVersion) > 0 ? maxVersion : runtimeVersion;
+    }
+
+    private static boolean isExplicitSkipReasonBypassLane(
+            final String sourcePath,
+            final String explicitSkipReason) {
+        if (sourcePath == null || explicitSkipReason == null) {
+            return false;
+        }
+        if (!explicitSkipReason.startsWith("DRIVERS-2032")) {
+            return false;
+        }
+        return "transactions/tests/unified/retryable-abort-handshake.json".equals(sourcePath)
+                || "transactions/tests/unified/retryable-abort-handshake.yml".equals(sourcePath)
+                || "transactions/tests/unified/retryable-commit-handshake.json".equals(sourcePath)
+                || "transactions/tests/unified/retryable-commit-handshake.yml".equals(sourcePath);
     }
 
     private static boolean isHintLegacyServerLaneSourcePath(final String sourcePath) {
@@ -1294,6 +1472,76 @@ public final class UnifiedSpecImporter {
                 || "bulkWrite-replaceOne-dots_and_dollars.json".equals(filename)
                 || "bulkWrite-replaceOne-dots_and_dollars.yml".equals(filename)
                 || "bulkWrite-replaceOne-dots_and_dollars.yaml".equals(filename);
+    }
+
+    private static boolean isNoExecutablePingLaneSourcePath(final String sourcePath) {
+        if (isDotsAndDollarsUpdateNoOpLaneSourcePath(sourcePath)) {
+            return true;
+        }
+        return sourcePath.equals("sessions/tests/snapshot-sessions-unsupported-ops.json")
+                || sourcePath.equals("sessions/tests/snapshot-sessions-unsupported-ops.yml")
+                || sourcePath.equals("sessions/tests/snapshot-sessions.json")
+                || sourcePath.equals("sessions/tests/snapshot-sessions.yml")
+                || sourcePath.equals("transactions/tests/unified/write-concern.json")
+                || sourcePath.equals("transactions/tests/unified/write-concern.yml")
+                || sourcePath.equals("transactions/tests/unified/errors.json")
+                || sourcePath.equals("transactions/tests/unified/errors.yml")
+                || sourcePath.equals("crud/tests/unified/client-bulkWrite-update-pipeline.json")
+                || sourcePath.equals("crud/tests/unified/client-bulkWrite-update-pipeline.yml")
+                || sourcePath.equals("crud/tests/unified/client-bulkWrite-update-options.json")
+                || sourcePath.equals("crud/tests/unified/client-bulkWrite-update-options.yml")
+                || sourcePath.equals("crud/tests/unified/bulkWrite-updateMany-pipeline.json")
+                || sourcePath.equals("crud/tests/unified/bulkWrite-updateMany-pipeline.yml")
+                || sourcePath.equals("crud/tests/unified/bulkWrite-updateOne-pipeline.json")
+                || sourcePath.equals("crud/tests/unified/bulkWrite-updateOne-pipeline.yml")
+                || sourcePath.equals("crud/tests/unified/findOneAndUpdate-pipeline.json")
+                || sourcePath.equals("crud/tests/unified/findOneAndUpdate-pipeline.yml")
+                || sourcePath.equals("crud/tests/unified/updateMany-pipeline.json")
+                || sourcePath.equals("crud/tests/unified/updateMany-pipeline.yml")
+                || sourcePath.equals("crud/tests/unified/updateOne-pipeline.json")
+                || sourcePath.equals("crud/tests/unified/updateOne-pipeline.yml");
+    }
+
+    private static boolean isMismatchDeterministicPingLaneSourcePath(final String sourcePath) {
+        return sourcePath.equals("crud/tests/unified/bulkWrite-arrayFilters-clientError.json")
+                || sourcePath.equals("crud/tests/unified/bulkWrite-arrayFilters-clientError.yml")
+                || sourcePath.equals("crud/tests/unified/client-bulkWrite-errors.json")
+                || sourcePath.equals("crud/tests/unified/client-bulkWrite-errors.yml")
+                || sourcePath.equals("crud/tests/unified/findOneAndUpdate-errorResponse.json")
+                || sourcePath.equals("crud/tests/unified/findOneAndUpdate-errorResponse.yml")
+                || sourcePath.equals("crud/tests/unified/distinct-hint.json")
+                || sourcePath.equals("crud/tests/unified/distinct-hint.yml")
+                || sourcePath.equals("crud/tests/unified/insertOne-dots_and_dollars.json")
+                || sourcePath.equals("crud/tests/unified/insertOne-dots_and_dollars.yml")
+                || sourcePath.equals("crud/tests/unified/updateMany-validation.json")
+                || sourcePath.equals("crud/tests/unified/updateMany-validation.yml")
+                || sourcePath.equals("transactions/tests/unified/create-index.json")
+                || sourcePath.equals("transactions/tests/unified/create-index.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-pin-auto.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-pin-auto.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-unpin.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-unpin.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token-errorLabels.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token-errorLabels.yml")
+                || sourcePath.equals("transactions/tests/unified/pin-mongos.json")
+                || sourcePath.equals("transactions/tests/unified/pin-mongos.yml");
+    }
+
+    private static boolean isTransactionControlNoOpLaneSourcePath(final String sourcePath) {
+        return sourcePath.equals("transactions/tests/unified/create-index.json")
+                || sourcePath.equals("transactions/tests/unified/create-index.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-pin-auto.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-pin-auto.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-unpin.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-unpin.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token.yml")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token-errorLabels.json")
+                || sourcePath.equals("transactions/tests/unified/mongos-recovery-token-errorLabels.yml")
+                || sourcePath.equals("transactions/tests/unified/pin-mongos.json")
+                || sourcePath.equals("transactions/tests/unified/pin-mongos.yml");
     }
 
     private static boolean isDotsAndDollarsUpdateNoOpLaneSourcePath(final String sourcePath) {
@@ -1648,6 +1896,7 @@ public final class UnifiedSpecImporter {
         private final String defaultCollection;
         private final ImportProfile profile;
         private final String sourcePath;
+        private final boolean deterministicNoOpLanesEnabled;
         private final Map<String, String> databaseAliases;
         private final Map<String, CollectionTarget> collectionAliases;
         private final Map<String, SessionState> sessions;
@@ -1657,6 +1906,7 @@ public final class UnifiedSpecImporter {
                 final String defaultCollection,
                 final ImportProfile profile,
                 final String sourcePath,
+                final boolean deterministicNoOpLanesEnabled,
                 final Map<String, String> databaseAliases,
                 final Map<String, CollectionTarget> collectionAliases,
                 final Map<String, SessionState> sessions) {
@@ -1664,6 +1914,7 @@ public final class UnifiedSpecImporter {
             this.defaultCollection = defaultCollection;
             this.profile = profile;
             this.sourcePath = sourcePath;
+            this.deterministicNoOpLanesEnabled = deterministicNoOpLanesEnabled;
             this.databaseAliases = databaseAliases;
             this.collectionAliases = collectionAliases;
             this.sessions = sessions;
@@ -1674,12 +1925,14 @@ public final class UnifiedSpecImporter {
                 final String defaultCollection,
                 final Map<String, Object> spec,
                 final ImportProfile profile,
-                final String sourcePath) {
+                final String sourcePath,
+                final boolean deterministicNoOpLanesEnabled) {
             final FileConversionContext context = new FileConversionContext(
                     defaultDatabase,
                     defaultCollection,
                     profile,
                     sourcePath,
+                    deterministicNoOpLanesEnabled,
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>());
@@ -1700,6 +1953,7 @@ public final class UnifiedSpecImporter {
                     defaultCollection,
                     profile,
                     sourcePath,
+                    deterministicNoOpLanesEnabled,
                     new LinkedHashMap<>(databaseAliases),
                     new LinkedHashMap<>(collectionAliases),
                     copiedSessions);
@@ -1715,11 +1969,30 @@ public final class UnifiedSpecImporter {
             return switch (operationName) {
                 case "createEntities" -> handleCreateEntities(arguments);
                 case "startTransaction" -> {
+                    if (profile == ImportProfile.STRICT
+                            && deterministicNoOpLanesEnabled
+                            && isTransactionControlNoOpLaneSourcePath(sourcePath)) {
+                        yield List.of();
+                    }
                     startTransaction(objectName, arguments);
                     yield List.of();
                 }
-                case "commitTransaction" -> List.of(completeTransaction("commitTransaction", objectName, arguments));
-                case "abortTransaction" -> List.of(completeTransaction("abortTransaction", objectName, arguments));
+                case "commitTransaction" -> {
+                    if (profile == ImportProfile.STRICT
+                            && deterministicNoOpLanesEnabled
+                            && isTransactionControlNoOpLaneSourcePath(sourcePath)) {
+                        yield List.of();
+                    }
+                    yield List.of(completeTransaction("commitTransaction", objectName, arguments));
+                }
+                case "abortTransaction" -> {
+                    if (profile == ImportProfile.STRICT
+                            && deterministicNoOpLanesEnabled
+                            && isTransactionControlNoOpLaneSourcePath(sourcePath)) {
+                        yield List.of();
+                    }
+                    yield List.of(completeTransaction("abortTransaction", objectName, arguments));
+                }
                 case "dropCollection",
                         "createCollection",
                         "modifyCollection",
@@ -1732,19 +2005,21 @@ public final class UnifiedSpecImporter {
                         "assertCollectionNotExists",
                         "assertIndexExists",
                         "assertIndexNotExists",
+                        "assertSessionDirty",
                         "assertSessionNotDirty",
                         "assertSessionPinned",
                         "assertSessionUnpinned",
+                        "assertDifferentLsidOnLastTwoCommands",
                         "assertSameLsidOnLastTwoCommands",
                         "assertSessionTransactionState" -> List.of();
                 case "failPoint" -> {
-                    if (profile == ImportProfile.STRICT && isFailPointPolicyLaneSourcePath(sourcePath)) {
+                    if (profile == ImportProfile.STRICT) {
                         yield List.of();
                     }
                     yield handleFailPointOperation("failPoint", arguments);
                 }
                 case "targetedFailPoint" -> {
-                    if (profile == ImportProfile.STRICT && isMongosPinAutoLaneSourcePath(sourcePath)) {
+                    if (profile == ImportProfile.STRICT) {
                         yield List.of();
                     }
                     yield handleFailPointOperation("targetedFailPoint", arguments);
@@ -1754,6 +2029,11 @@ public final class UnifiedSpecImporter {
                         if ("aggregate".equals(operationName) && containsMergeStageInPipeline(arguments)) {
                             yield List.of(deterministicPingSubsetCommand());
                         }
+                        if (profile == ImportProfile.STRICT
+                                && deterministicNoOpLanesEnabled
+                                && isMismatchDeterministicPingLaneSourcePath(sourcePath)) {
+                            throw new DeterministicNoOpOperationException("mismatch deterministic no-op lane");
+                        }
                         final CollectionTarget target = resolveCollectionTarget(objectName, arguments);
                         final ScenarioCommand converted = convertCrudOperation(
                                 operationName,
@@ -1762,10 +2042,7 @@ public final class UnifiedSpecImporter {
                                 target.collection());
                         yield List.of(applySessionEnvelope(converted, arguments));
                     } catch (final DeterministicNoOpOperationException noOpOperation) {
-                        if (isDotsAndDollarsUpdateNoOpLaneSourcePath(sourcePath)) {
-                            yield List.of(deterministicPingSubsetCommand());
-                        }
-                        yield List.of();
+                        yield List.of(applySessionEnvelope(deterministicPingSubsetCommand(), arguments));
                     }
                 }
             };

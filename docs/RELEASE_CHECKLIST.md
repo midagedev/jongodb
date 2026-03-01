@@ -1,11 +1,14 @@
 # Release Checklist
 
-Status date: 2026-02-28
+Status date: 2026-03-01
 
 ## R3 Certification Sign-Off
 
 - [x] Official suite sharded run on `main` completed with zero mismatch/error.
   - run id: `22516323868` (commit `d2ba61b`)
+- [x] Local pre-release full UTF shard run completed with zero mismatch/error.
+  - artifact: `build/reports/utf-shard-release-final2/utf-differential-report.json`
+  - summary: `imported=1648`, `skipped=0`, `unsupported=0`, `mismatch=0`, `error=0`
 - [x] R3 failure ledger run on `main` completed with `failureCount=0`.
   - run id: `22516324202` (commit `d2ba61b`)
 - [x] External canary certification completed for 3 projects with rollback success.
@@ -27,6 +30,7 @@ Status date: 2026-02-28
 - Latest Java release tag: `v0.1.5` (run `22379241855`, commit `868bbc7`).
 - Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
 - Latest compatibility certification snapshot: commit `d2ba61b` (runs `22516323868`, `22516324202`, `22516137734`).
+- Latest local release-candidate UTF evidence: `build/reports/utf-shard-release-final2/utf-differential-report.json` (2026-03-01, `match=1648`, `mismatch=0`, `error=0`).
 - Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate

@@ -131,10 +131,11 @@ OpMsg res = codec.decode(ingress.handle(codec.encode(req)));
 
 ## Verification and Evidence Tasks
 
-Current certified reference runs (as of 2026-02-28):
-- Official Suite Sharded: `22516323868` (`total=508`, `mismatch=0`, `error=0`)
-- R3 Failure Ledger: `22516324202` (`failureCount=0`)
-- Complex Query Certification: `22516137734` (`packVersion=complex-query-pack-v3`)
+Current certified reference runs (as of 2026-03-01):
+- Local pre-release UTF full shard: `build/reports/utf-shard-release-final2/utf-differential-report.json` (`imported=1648`, `skipped=0`, `unsupported=0`, `match=1648`, `mismatch=0`, `error=0`)
+- Official Suite Sharded (`main`): `22516323868` (`total=508`, `mismatch=0`, `error=0`)
+- R3 Failure Ledger (`main`): `22516324202` (`failureCount=0`)
+- Complex Query Certification (`main`): `22516137734` (`packVersion=complex-query-pack-v3`)
 - R3 External Canary Certification (latest success): `22378993613` (2026-02-25)
 
 Official Suite Sharded UTF gate modes:

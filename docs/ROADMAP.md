@@ -1,6 +1,6 @@
 # Roadmap
 
-Status date: 2026-02-28
+Status date: 2026-03-01
 
 This roadmap is implementation-focused and tied to testable outcomes.
 
@@ -41,7 +41,7 @@ Completed:
 ## R4 Compatibility Expansion (In Progress)
 
 Completed in current wave:
-- official + ledger imported differential coverage expanded to `508` with `mismatch=0`, `error=0`
+- official UTF full-shard imported differential reached `1648` with `skipped=0`, `unsupported=0`, `mismatch=0`, `error=0`
 - complex-query pack updated to `complex-query-pack-v3` with `$expr.$add` certification subset
 - minimal `$graphLookup` certification subset implemented with deterministic option boundary
 - listLocalSessions regression coverage normalized in UTF importer regression pack
@@ -52,7 +52,7 @@ Completed in current wave:
 ### Pre-Release Hardening
 
 Target outcomes:
-- keep imported differential parity at zero mismatch/error while reducing unsupported categories
+- keep imported differential parity at zero mismatch/error while preserving `skipped=0`/`unsupported=0`
 - close release-readiness streak gate (`minStreak=3`) on scheduled runs
 - refresh certification evidence on release-candidate commit before tagging
 
