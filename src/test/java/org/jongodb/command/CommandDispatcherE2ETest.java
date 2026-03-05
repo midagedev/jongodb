@@ -156,6 +156,17 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void insertCommandRejectsDollarPrefixedFieldInsideIdDocument() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new RecordingStore());
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":{\"$a\":1}}]}"));
+
+        assertEquals(0.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(52, response.getInt32("code").getValue());
+    }
+
+    @Test
     void findCommandCallsStoreAndReturnsCursorBatch() {
         final RecordingStore store = new RecordingStore();
         store.findResult = List.of(BsonDocument.parse("{\"_id\":1,\"name\":\"a\"}"));
@@ -1403,7 +1414,11 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument replacementMultiTrue = dispatcher.dispatch(
                 BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"name\":\"a\"},\"multi\":true}]}"));
-        assertCommandError(replacementMultiTrue, "BadValue");
+        assertEquals(0.0, replacementMultiTrue.get("ok").asNumber().doubleValue());
+        assertEquals(9, replacementMultiTrue.getInt32("code").getValue());
+        assertEquals(
+                "multi update is not supported for replacement-style update",
+                replacementMultiTrue.getString("errmsg").getValue());
     }
 
     @Test
@@ -1489,6 +1504,19 @@ class CommandDispatcherE2ETest {
         final BsonDocument secondCommitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-1\"},\"txnNumber\":1,\"autocommit\":false}"));
         assertEquals(1.0, secondCommitResponse.get("ok").asNumber().doubleValue());
+    }
+
+    @Test
+    void createIndexesCanParticipateInTransactionLifecycle() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument createInTxn = dispatcher.dispatch(BsonDocument.parse(
+                "{\"createIndexes\":\"users\",\"$db\":\"app\",\"indexes\":[{\"name\":\"email_1\",\"key\":{\"email\":1}}],\"lsid\":{\"id\":\"session-create-index\"},\"txnNumber\":1,\"autocommit\":false,\"startTransaction\":true}"));
+        assertEquals(1.0, createInTxn.get("ok").asNumber().doubleValue());
+
+        final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-create-index\"},\"txnNumber\":1,\"autocommit\":false}"));
+        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
     }
 
     @Test

@@ -2,6 +2,7 @@ package org.jongodb.command;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
@@ -49,7 +50,12 @@ public final class InsertCommandHandler implements CommandHandler {
             if (!value.isDocument()) {
                 return CommandErrors.typeMismatch("all entries in documents must be BSON documents");
             }
-            documents.add(value.asDocument());
+            final BsonDocument document = value.asDocument();
+            final BsonDocument idFieldValidationError = validateIdField(document);
+            if (idFieldValidationError != null) {
+                return idFieldValidationError;
+            }
+            documents.add(document);
         }
 
         final int insertedCount;
@@ -77,5 +83,33 @@ public final class InsertCommandHandler implements CommandHandler {
             return null;
         }
         return bsonString.getValue();
+    }
+
+    private static BsonDocument validateIdField(final BsonDocument document) {
+        final BsonValue idValue = document.get("_id");
+        if (idValue == null || !idValue.isDocument()) {
+            return null;
+        }
+        return findDollarPrefixedFieldInId(idValue.asDocument());
+    }
+
+    private static BsonDocument findDollarPrefixedFieldInId(final BsonDocument idDocument) {
+        for (final Map.Entry<String, BsonValue> entry : idDocument.entrySet()) {
+            final String fieldName = entry.getKey();
+            if (fieldName.startsWith("$")) {
+                return CommandErrors.dollarPrefixedFieldName(
+                        "_id fields may not contain '$'-prefixed fields: "
+                                + fieldName
+                                + " is not valid for storage.");
+            }
+            final BsonValue value = entry.getValue();
+            if (value.isDocument()) {
+                final BsonDocument nestedError = findDollarPrefixedFieldInId(value.asDocument());
+                if (nestedError != null) {
+                    return nestedError;
+                }
+            }
+        }
+        return null;
     }
 }

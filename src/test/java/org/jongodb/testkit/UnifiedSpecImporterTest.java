@@ -1,6 +1,7 @@
 package org.jongodb.testkit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -2881,10 +2882,12 @@ class UnifiedSpecImporterTest {
 
         final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
         final ScenarioOutcome outcome = backend.execute(scenario);
-        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
-        final Map<String, Object> countResult = outcome.commandResults().get(1);
-        assertEquals(1L, ((Number) countResult.get("n")).longValue());
-        assertEquals(1L, ((Number) countResult.get("count")).longValue());
+        assertFalse(outcome.success(), "expected insertOne to reject _id.$-prefixed key");
+        final String errorMessage = outcome.errorMessage().orElse("");
+        assertTrue(
+                errorMessage.contains("_id fields may not contain '$'-prefixed fields"),
+                "unexpected error message: " + errorMessage);
+        assertTrue(errorMessage.contains("(code=52)"), "unexpected error message: " + errorMessage);
     }
 
     @Test

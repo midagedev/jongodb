@@ -11,6 +11,8 @@ import org.bson.BsonString;
  * Catalog of wire-compatible command errors used by command handlers.
  */
 final class CommandErrors {
+    private static final int CODE_FAILED_TO_PARSE = 9;
+    private static final int CODE_DOLLAR_PREFIXED_FIELD_NAME = 52;
     private static final int CODE_COMMAND_NOT_FOUND = 59;
     private static final int CODE_INVALID_ARGUMENT = 14;
     private static final int CODE_NOT_IMPLEMENTED = 238;
@@ -28,6 +30,14 @@ final class CommandErrors {
 
     static BsonDocument badValue(final String message) {
         return error(message, CODE_INVALID_ARGUMENT, "BadValue");
+    }
+
+    static BsonDocument failedToParse(final String message) {
+        return errorWithoutCodeName(message, CODE_FAILED_TO_PARSE);
+    }
+
+    static BsonDocument dollarPrefixedFieldName(final String message) {
+        return errorWithoutCodeName(message, CODE_DOLLAR_PREFIXED_FIELD_NAME);
     }
 
     static BsonDocument typeMismatch(final String message) {
@@ -80,6 +90,13 @@ final class CommandErrors {
                 .append("errmsg", new BsonString(message))
                 .append("code", new BsonInt32(code))
                 .append("codeName", new BsonString(codeName));
+    }
+
+    private static BsonDocument errorWithoutCodeName(final String message, final int code) {
+        return new BsonDocument()
+                .append("ok", new BsonDouble(0.0))
+                .append("errmsg", new BsonString(message))
+                .append("code", new BsonInt32(code));
     }
 
     private static BsonDocument errorWithLabels(

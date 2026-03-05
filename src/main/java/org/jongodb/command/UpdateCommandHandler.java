@@ -171,7 +171,7 @@ public final class UpdateCommandHandler implements CommandHandler {
                 return CommandErrors.badValue("arrayFilters is only supported for operator updates");
             }
             if (multi) {
-                return CommandErrors.badValue("replacement update requires multi=false");
+                return CommandErrors.failedToParse("multi update is not supported for replacement-style update");
             }
             return null;
         }

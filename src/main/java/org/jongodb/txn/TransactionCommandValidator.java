@@ -21,6 +21,7 @@ public final class TransactionCommandValidator {
     private static final Set<String> TRANSACTIONAL_COMMANDS =
             Set.of(
                     "insert",
+                    "createindexes",
                     "update",
                     "delete",
                     "bulkwrite",
