@@ -1222,28 +1222,23 @@ public final class UnifiedSpecImporter {
     }
 
     private static boolean isMongosPinAutoLaneSourcePath(final String sourcePath) {
-        return "transactions/tests/unified/mongos-pin-auto.json".equals(sourcePath)
-                || "transactions/tests/unified/mongos-pin-auto.yml".equals(sourcePath);
+        return matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/mongos-pin-auto");
     }
 
     private static boolean isMongosTopologyLaneSourcePath(final String sourcePath) {
-        return "transactions/tests/unified/pin-mongos.json".equals(sourcePath)
-                || "transactions/tests/unified/pin-mongos.yml".equals(sourcePath)
-                || "transactions/tests/unified/mongos-unpin.json".equals(sourcePath)
-                || "transactions/tests/unified/mongos-unpin.yml".equals(sourcePath)
-                || "transactions/tests/unified/mongos-recovery-token.json".equals(sourcePath)
-                || "transactions/tests/unified/mongos-recovery-token.yml".equals(sourcePath);
+        return matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/pin-mongos")
+                || matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/mongos-unpin")
+                || matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/mongos-recovery-token");
     }
 
     private static boolean isFailPointPolicyLaneSourcePath(final String sourcePath) {
-        return "transactions/tests/unified/error-labels.json".equals(sourcePath)
-                || "transactions/tests/unified/error-labels.yml".equals(sourcePath)
-                || "transactions/tests/unified/retryable-abort-errorLabels.json".equals(sourcePath)
-                || "transactions/tests/unified/retryable-abort-errorLabels.yml".equals(sourcePath)
-                || "transactions/tests/unified/retryable-commit-errorLabels.json".equals(sourcePath)
-                || "transactions/tests/unified/retryable-commit-errorLabels.yml".equals(sourcePath)
-                || "sessions/tests/driver-sessions-dirty-session-errors.json".equals(sourcePath)
-                || "sessions/tests/driver-sessions-dirty-session-errors.yml".equals(sourcePath);
+        return matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/error-labels")
+                || matchesSpecPathWithSupportedExtensions(
+                        sourcePath, "transactions/tests/unified/retryable-abort-errorLabels")
+                || matchesSpecPathWithSupportedExtensions(
+                        sourcePath, "transactions/tests/unified/retryable-commit-errorLabels")
+                || matchesSpecPathWithSupportedExtensions(
+                        sourcePath, "sessions/tests/driver-sessions-dirty-session-errors");
     }
 
     private static boolean isHintLegacyServerLaneSourcePath(final String sourcePath) {
@@ -1485,6 +1480,12 @@ public final class UnifiedSpecImporter {
 
     private static String relativePath(final Path root, final Path file) {
         return root.normalize().relativize(file.normalize()).toString().replace('\\', '/');
+    }
+
+    private static boolean matchesSpecPathWithSupportedExtensions(final String sourcePath, final String pathWithoutExtension) {
+        return (pathWithoutExtension + EXT_JSON).equals(sourcePath)
+                || (pathWithoutExtension + EXT_YML).equals(sourcePath)
+                || (pathWithoutExtension + EXT_YAML).equals(sourcePath);
     }
 
     private static boolean isSupportedSpecFile(final String fileName) {

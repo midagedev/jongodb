@@ -350,6 +350,37 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void appliesMongosTopologyLaneOverrideForPinMongosYamlSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("pin-mongos.yaml"),
+                """
+                database_name: app
+                collection_name: users
+                tests:
+                  - description: pin mongos topology lane yaml
+                    runOnRequirements:
+                      - minServerVersion: "4.1.8"
+                        topologies: ["sharded", "load-balanced"]
+                    operations:
+                      - name: find
+                        arguments:
+                          filter:
+                            _id: 1
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.skippedCount());
+        assertEquals(0, result.unsupportedCount());
+    }
+
+    @Test
     void appliesMongosTopologyLaneOverrideForMongosUnpinSourcePath() throws IOException {
         final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
         Files.createDirectories(suiteRoot);
@@ -2769,6 +2800,40 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
+    void strictProfileTreatsFailPointAsNoOpInPolicyLaneForYamlSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("error-labels.yaml"),
+                """
+                database_name: app
+                collection_name: users
+                tests:
+                  - description: failPoint policy lane yaml
+                    operations:
+                      - object: testRunner
+                        name: failPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: alwaysOn
+                      - name: find
+                        arguments:
+                          filter:
+                            _id: 1
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
     void strictProfileMarksTargetedFailPointAsUnsupported() throws IOException {
         Files.writeString(
                 tempDir.resolve("targeted-failpoint-strict.yml"),
@@ -2824,6 +2889,45 @@ class UnifiedSpecImporterTest {
                     }
                   ]
                 }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(
+                tempDir,
+                UnifiedSpecImporter.RunOnContext.evaluated("7.0.25", "replicaset", false, false));
+
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(1, scenario.commands().size());
+        assertEquals("find", scenario.commands().get(0).commandName());
+    }
+
+    @Test
+    void strictProfileTreatsTargetedFailPointAsNoOpInMongosPinAutoLaneForYamlSourcePath() throws IOException {
+        final Path suiteRoot = tempDir.resolve("transactions/tests/unified");
+        Files.createDirectories(suiteRoot);
+        Files.writeString(
+                suiteRoot.resolve("mongos-pin-auto.yaml"),
+                """
+                database_name: app
+                collection_name: users
+                tests:
+                  - description: targeted failpoint no-op lane yaml
+                    runOnRequirements:
+                      - minServerVersion: "7.0"
+                        topologies: ["sharded"]
+                    operations:
+                      - object: testRunner
+                        name: targetedFailPoint
+                        arguments:
+                          failPoint:
+                            configureFailPoint: failCommand
+                            mode: off
+                      - name: find
+                        arguments:
+                          filter:
+                            _id: 1
                 """);
 
         final UnifiedSpecImporter importer = new UnifiedSpecImporter();
