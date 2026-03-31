@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added regression coverage for `findOneAndUpdate`/upsert duplicate-key behavior when `_id` matches an existing document but other predicates do not.
 - Added declarative fixture manifest schema (`fixture-manifest.v1`) with standardized `dev`/`smoke`/`full` profile model.
 - Added fixture manifest loader/validator with path-aware aggregated validation errors.
 - Added deterministic fixture extraction planner + profile fingerprint generation.

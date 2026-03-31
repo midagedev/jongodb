@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.bson.BsonArray;
+import org.bson.BsonBoolean;
+import org.bson.BsonDateTime;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
 import org.bson.BsonInt64;
@@ -1184,6 +1186,36 @@ class CommandDispatcherE2ETest {
         assertEquals(1.0, response.get("ok").asNumber().doubleValue());
         assertEquals("Neo", response.getDocument("value").getString("name").getValue());
         assertEquals("inserted", response.getDocument("value").getString("createdAt").getValue());
+    }
+
+    @Test
+    void findOneAndUpdateCommandRejectsUpsertWhenExistingIdFailsPredicate() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        final long existingLockUntil = 1775001600000L;
+        final long now = 1774968000000L;
+
+        dispatcher.dispatch(new BsonDocument("insert", new BsonString("locks"))
+                .append("$db", new BsonString("app"))
+                .append("documents", new BsonArray(List.of(new BsonDocument("_id", new BsonString("myLock"))
+                        .append("lockUntil", new BsonDateTime(existingLockUntil))))));
+
+        final BsonDocument response = dispatcher.dispatch(new BsonDocument("findOneAndUpdate", new BsonString("locks"))
+                .append("$db", new BsonString("app"))
+                .append("filter", new BsonDocument("_id", new BsonString("myLock"))
+                        .append("lockUntil", new BsonDocument("$lte", new BsonDateTime(now))))
+                .append("update", new BsonDocument(
+                        "$set",
+                        new BsonDocument("lockUntil", new BsonDateTime(1775005200000L))
+                                .append("lockedBy", new BsonString("host-2"))))
+                .append("upsert", BsonBoolean.TRUE));
+        assertDuplicateKeyError(response);
+
+        final BsonDocument findResponse = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"locks\",\"$db\":\"app\",\"filter\":{\"_id\":\"myLock\"}}"));
+        final BsonDocument document =
+                findResponse.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals(existingLockUntil, document.getDateTime("lockUntil").getValue());
+        assertTrue(!document.containsKey("lockedBy"));
     }
 
     @Test
