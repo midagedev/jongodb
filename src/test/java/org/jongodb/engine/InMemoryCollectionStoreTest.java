@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
@@ -453,6 +454,56 @@ class InMemoryCollectionStoreTest {
         assertEquals(1, all.size());
         assertEquals(1, all.get(0).getInteger("_id"));
         assertEquals("ada@example.com", all.get(0).getString("email"));
+    }
+
+    @Test
+    void upsertWithExistingIdAndUnmatchedPredicateThrowsDuplicateKey() {
+        CollectionStore store = new InMemoryCollectionStore();
+        Date existingLockUntil = new Date(1775001600000L);
+        Date now = new Date(1774968000000L);
+        Date updatedLockUntil = new Date(1775005200000L);
+        store.insertMany(List.of(new Document("_id", "myLock").append("lockUntil", existingLockUntil)));
+
+        assertThrows(
+                DuplicateKeyException.class,
+                () -> store.update(
+                        new Document("_id", "myLock").append("lockUntil", new Document("$lte", now)),
+                        new Document("$set", new Document("lockUntil", updatedLockUntil).append("lockedBy", "host-2")),
+                        false,
+                        true));
+
+        List<Document> all = store.findAll();
+        assertEquals(1, all.size());
+        assertEquals("myLock", all.get(0).getString("_id"));
+        assertEquals(existingLockUntil, all.get(0).getDate("lockUntil"));
+        assertFalse(all.get(0).containsKey("lockedBy"));
+    }
+
+    @Test
+    void upsertWithExistingIdInsideAndClauseThrowsDuplicateKey() {
+        CollectionStore store = new InMemoryCollectionStore();
+        Date existingLockUntil = new Date(1775001600000L);
+        Date now = new Date(1774968000000L);
+        Date updatedLockUntil = new Date(1775005200000L);
+        store.insertMany(List.of(new Document("_id", "myLock").append("lockUntil", existingLockUntil)));
+
+        assertThrows(
+                DuplicateKeyException.class,
+                () -> store.update(
+                        new Document(
+                                "$and",
+                                List.of(
+                                        new Document("_id", "myLock"),
+                                        new Document("lockUntil", new Document("$lte", now)))),
+                        new Document("$set", new Document("lockUntil", updatedLockUntil).append("lockedBy", "host-2")),
+                        false,
+                        true));
+
+        List<Document> all = store.findAll();
+        assertEquals(1, all.size());
+        assertEquals("myLock", all.get(0).getString("_id"));
+        assertEquals(existingLockUntil, all.get(0).getDate("lockUntil"));
+        assertFalse(all.get(0).containsKey("lockedBy"));
     }
 
     @Test

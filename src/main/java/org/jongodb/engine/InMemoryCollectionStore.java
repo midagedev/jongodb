@@ -391,9 +391,23 @@ public final class InMemoryCollectionStore implements CollectionStore {
             return seed;
         }
 
-        for (final Map.Entry<String, Object> entry : filter.entrySet()) {
-            final String key = entry.getKey();
+        appendUpsertSeed(seed, filter);
+        return seed;
+    }
+
+    private static void appendUpsertSeed(final Document seed, final Map<?, ?> filter) {
+        if (filter == null || filter.isEmpty()) {
+            return;
+        }
+
+        for (final Map.Entry<?, ?> entry : filter.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                continue;
+            }
             if (key == null || key.isEmpty() || key.startsWith("$")) {
+                if ("$and".equals(key)) {
+                    appendUpsertSeedFromAndClauses(seed, entry.getValue());
+                }
                 continue;
             }
             if (isOperatorDocument(entry.getValue())) {
@@ -404,7 +418,18 @@ public final class InMemoryCollectionStore implements CollectionStore {
             }
             setPathValue(seed, key, entry.getValue());
         }
-        return seed;
+    }
+
+    private static void appendUpsertSeedFromAndClauses(final Document seed, final Object clausesValue) {
+        if (!(clausesValue instanceof List<?> clauses)) {
+            return;
+        }
+
+        for (final Object clause : clauses) {
+            if (clause instanceof Map<?, ?> clauseMap) {
+                appendUpsertSeed(seed, clauseMap);
+            }
+        }
     }
 
     private static boolean isOperatorDocument(final Object value) {
