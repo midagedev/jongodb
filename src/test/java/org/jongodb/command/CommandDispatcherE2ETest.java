@@ -1189,7 +1189,7 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
-    void findOneAndUpdateCommandRejectsUpsertWhenExistingIdFailsPredicate() {
+    void findOneAndUpdateCommandRejectsUpsertWhenExistingIdFailsPredicateInsideAndClause() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         final long existingLockUntil = 1775001600000L;
         final long now = 1774968000000L;
@@ -1201,8 +1201,13 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument response = dispatcher.dispatch(new BsonDocument("findOneAndUpdate", new BsonString("locks"))
                 .append("$db", new BsonString("app"))
-                .append("filter", new BsonDocument("_id", new BsonString("myLock"))
-                        .append("lockUntil", new BsonDocument("$lte", new BsonDateTime(now))))
+                .append(
+                        "filter",
+                        new BsonDocument(
+                                "$and",
+                                new BsonArray(List.of(
+                                        new BsonDocument("_id", new BsonString("myLock")),
+                                        new BsonDocument("lockUntil", new BsonDocument("$lte", new BsonDateTime(now)))))))
                 .append("update", new BsonDocument(
                         "$set",
                         new BsonDocument("lockUntil", new BsonDateTime(1775005200000L))

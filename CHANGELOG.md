@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
-- Added regression coverage for `findOneAndUpdate`/upsert duplicate-key behavior when `_id` matches an existing document but other predicates do not.
+- Added regression coverage for `findOneAndUpdate`/upsert duplicate-key behavior when `_id` matches an existing document but other predicates do not, including `$and`-wrapped filters.
 - Added declarative fixture manifest schema (`fixture-manifest.v1`) with standardized `dev`/`smoke`/`full` profile model.
 - Added fixture manifest loader/validator with path-aware aggregated validation errors.
 - Added deterministic fixture extraction planner + profile fingerprint generation.
@@ -42,6 +42,9 @@ All notable changes to this project are documented in this file.
 - Added process-exit launcher cleanup hook (`cleanupOnProcessExit`) to reduce orphan runtime processes after abrupt test termination.
 - Added fixed-port collision retry/backoff strategy (`portRetryAttempts`, `portRetryBackoffMs`) with next-port fallback behavior.
 - Added structured runtime logging contract (`onLog`, `logFormat`) with expanded log levels (`error`/`warn`/`info`/`debug`).
+
+### Fixed
+- Fixed upsert seed extraction to honor equality clauses nested inside `$and`, restoring duplicate-key behavior for `findOneAndUpdate` lock-style filters.
 
 ## [0.1.3] - 2026-02-24
 
