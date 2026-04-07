@@ -1,8 +1,16 @@
 # Spring Test Integration Guide
 
-Status date: 2026-02-24
+Status date: 2026-04-07
 
 This guide explains how to use `jongodb` from Spring Boot tests and how to migrate common MongoDB Testcontainers setups.
+
+## Recommended Team Strategy
+
+Treat `jongodb` as the fast default lane, not as the only MongoDB test tool:
+- default lane: use `jongodb` for common Spring Data MongoDB integration tests
+- fallback lane: keep Testcontainers or real `mongod` for parity-sensitive or deployment-sensitive coverage
+
+This gives most suites a faster local/CI loop while preserving a clear escape hatch for unsupported paths.
 
 ## Supported Integration Styles
 
@@ -24,6 +32,8 @@ dependencies {
     testImplementation("io.github.midagedev:jongodb:<version>")
 }
 ```
+
+Replace `<version>` with the latest published version from Maven Central.
 
 ### 2) Replace test bootstrap
 
@@ -98,6 +108,14 @@ Reset caveats:
 - reset clears all databases in the backing in-memory server.
 - avoid concurrent tests calling reset against the same shared server unless you explicitly coordinate isolation.
 
+## Why It Fits Spring Test Suites Well
+
+`jongodb` is strongest when the goal is fast, repeatable service-level integration coverage:
+- Spring wiring is minimal because the test helpers publish the same core MongoDB connection properties
+- in-memory execution removes Docker/container startup from the routine path
+- shared-server mode and reset support help reduce context rebuild cost in large suites
+- unsupported behavior is expected to fail explicitly instead of masquerading as full MongoDB parity
+
 ## Migration from MongoDB Testcontainers
 
 ### Before (typical pattern)
@@ -126,11 +144,16 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 Use `jongodb` when:
 - you need fast in-memory integration tests
 - your tests focus on common CRUD, core aggregation, and single-process transaction paths
+- you want a default fast lane and are willing to keep a smaller fallback lane for parity-critical tests
 
 Keep Testcontainers/real `mongod` for tests that require:
 - full MongoDB feature parity
 - advanced transaction/retry semantics outside current support scope
 - deployment-level behavior
+
+Adoption rule of thumb:
+- if the suite mostly validates service/repository behavior, start with `jongodb`
+- if a test exists to validate MongoDB-specific semantics, topology behavior, or exact parity, keep it on Testcontainers/real `mongod`
 
 ## Transaction Contract (Current)
 

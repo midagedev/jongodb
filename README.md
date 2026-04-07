@@ -2,12 +2,13 @@
 
 In-memory MongoDB-compatible backend for fast Spring integration tests.
 
-`jongodb` targets fast, deterministic Spring Boot test execution without Docker/container bootstrap.
+`jongodb` is designed for the fast path in local development and routine CI:
+- use `jongodb` as the default test backend for common Spring Data MongoDB paths
+- keep Testcontainers or real `mongod` as the high-fidelity fallback profile
+
+It targets fast, deterministic Spring Boot test execution without Docker/container bootstrap.
 It supports both in-process test bootstrap and standalone TCP launcher mode.
 It is not a production MongoDB replacement.
-
-Latest release: `0.1.5`  
-Maven coordinate: `io.github.midagedev:jongodb:0.1.5`
 
 ## Why This Project Exists
 
@@ -17,6 +18,14 @@ Container-based integration tests are useful for production fidelity, but they a
 - faster local/CI test feedback
 - deterministic in-process behavior
 - explicit support boundary for unsupported MongoDB features
+
+## Recommended Adoption Model
+
+Use two lanes instead of forcing one tool to satisfy every test:
+- default lane: `jongodb` for common CRUD, repository/template, and single-process transaction flows
+- fallback lane: Testcontainers or real `mongod` for unsupported features and deployment-level behavior
+
+This keeps the common suite fast without pretending partial compatibility is full parity.
 
 ## Value for Spring Boot Test Suites
 
@@ -45,6 +54,14 @@ Recommended strategy:
 - default profile: `jongodb`
 - high-fidelity profile: Testcontainers/real `mongod` for unsupported or deployment-level behavior
 
+## Why This Can Work As A Default Lane
+
+`jongodb` is optimized around test-suite ergonomics, not full database emulation:
+- direct Spring test wiring via annotation, initializer, or `@DynamicPropertySource`
+- explicit compatibility boundary documented in `docs/COMPATIBILITY.md`
+- deterministic unsupported-path signaling instead of silent behavioral drift
+- standalone launcher mode for tools that expect a `mongodb://` URI
+
 ## When to Use / Not Use
 
 | Decision | Use when... |
@@ -60,9 +77,11 @@ Recommended strategy:
 
 ```kotlin
 dependencies {
-    testImplementation("io.github.midagedev:jongodb:0.1.5")
+    testImplementation("io.github.midagedev:jongodb:<version>")
 }
 ```
+
+Replace `<version>` with the latest published version from Maven Central.
 
 ### 2) Spring Boot integration
 
@@ -116,7 +135,6 @@ For detailed launcher usage (Java/binary runtime selection and framework example
 ## Node Adapter
 
 Node adapter package: `@jongodb/memory-server` (source under `packages/memory-server`).
-Latest npm release: `0.1.4`.
 
 Current state:
 - framework-agnostic runtime helper (`./runtime`)
@@ -131,6 +149,7 @@ Node runtime note:
 - default `auto` mode: binary first, then Java classpath fallback
 - Java runtime requires `classpath` option or `JONGODB_CLASSPATH`
 - detailed usage/examples: `packages/memory-server/README.md`
+- migration guide from `mongodb-memory-server`: `docs/NODE_MIGRATION_FROM_MONGODB_MEMORY_SERVER.md`
 
 ## Transaction Contract (Current)
 
