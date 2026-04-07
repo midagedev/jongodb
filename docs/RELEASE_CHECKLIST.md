@@ -45,7 +45,7 @@ Before creating a release tag:
 Use this when publishing `@jongodb/memory-server`:
 
 1. Confirm `Node Adapter Release` workflow verify job is green.
-2. Confirm package version is set explicitly (tag `node-vX.Y.Z` or manual input).
+2. Confirm package version is set explicitly (`vX.Y.Z` shared release tag, `node-vX.Y.Z` node-only tag, or manual input).
 3. Confirm version bump rationale aligns with `docs/NODE_SEMVER_POLICY.md` (patch/minor/major classification).
 4. Confirm npm scope ownership for `@jongodb` and valid `NPM_TOKEN` in GitHub repository secrets.
 5. Confirm GraalVM native-image is available in workflow runners (linux, macOS, windows) for binary jobs.

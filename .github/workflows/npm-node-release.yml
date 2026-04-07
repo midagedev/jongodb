@@ -14,6 +14,7 @@ on:
         type: boolean
   push:
     tags:
+      - "v*.*.*"
       - "node-v*.*.*"
 
 permissions:
@@ -38,7 +39,16 @@ jobs:
         shell: bash
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            VERSION="${GITHUB_REF_NAME#node-v}"
+            TAG="${GITHUB_REF_NAME}"
+            if [[ "$TAG" == node-v* ]]; then
+              VERSION="${TAG#node-v}"
+            elif [[ "$TAG" == v* ]]; then
+              VERSION="${TAG#v}"
+            else
+              echo "Unsupported push tag format for Node release: $TAG"
+              echo "Expected vX.Y.Z or node-vX.Y.Z"
+              exit 1
+            fi
             SHOULD_PUBLISH=true
           else
             VERSION="${{ inputs.version }}"
