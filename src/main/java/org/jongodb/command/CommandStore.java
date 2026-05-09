@@ -8,6 +8,18 @@ import org.jongodb.engine.CollationSupport;
 public interface CommandStore {
     int insert(String database, String collection, List<BsonDocument> documents);
 
+    default List<CollectionMetadata> listCollections(final String database) {
+        return List.of();
+    }
+
+    default DropCollectionResult dropCollection(final String database, final String collection) {
+        return new DropCollectionResult(false, 0);
+    }
+
+    default int dropDatabase(final String database) {
+        return 0;
+    }
+
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
 
     default List<BsonDocument> find(
@@ -159,6 +171,10 @@ public interface CommandStore {
     }
 
     record DeleteRequest(BsonDocument query, int limit) {}
+
+    record CollectionMetadata(String name) {}
+
+    record DropCollectionResult(boolean dropped, int nIndexesWas) {}
 
     record Upserted(int index, BsonValue id) {}
 

@@ -1470,7 +1470,7 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument replacementMultiTrue = dispatcher.dispatch(
                 BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"name\":\"a\"},\"multi\":true}]}"));
-        assertCommandError(replacementMultiTrue, "BadValue");
+        assertCommandError(replacementMultiTrue, 9, "FailedToParse");
     }
 
     @Test

@@ -1,6 +1,8 @@
 package org.jongodb.engine;
 
+import java.time.Clock;
 import java.util.HashSet;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -13,11 +15,20 @@ import java.util.concurrent.ConcurrentMap;
  */
 public final class InMemoryEngineStore implements EngineStore {
     private final ConcurrentMap<Namespace, InMemoryCollectionStore> collections = new ConcurrentHashMap<>();
+    private final Clock clock;
+
+    public InMemoryEngineStore() {
+        this(Clock.systemUTC());
+    }
+
+    public InMemoryEngineStore(final Clock clock) {
+        this.clock = Objects.requireNonNull(clock, "clock");
+    }
 
     @Override
     public CollectionStore collection(Namespace namespace) {
         Objects.requireNonNull(namespace, "namespace");
-        return collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore());
+        return collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore(clock));
     }
 
     @Override
@@ -26,8 +37,35 @@ public final class InMemoryEngineStore implements EngineStore {
         return collections.containsKey(namespace);
     }
 
+    @Override
+    public synchronized List<String> listCollectionNames(final String database) {
+        Objects.requireNonNull(database, "database");
+        return collections.keySet().stream()
+                .filter(namespace -> namespace.database().equals(database))
+                .map(Namespace::collection)
+                .sorted()
+                .toList();
+    }
+
+    @Override
+    public synchronized boolean dropCollection(final String database, final String collection) {
+        return collections.remove(Namespace.of(database, collection)) != null;
+    }
+
+    @Override
+    public synchronized int dropDatabase(final String database) {
+        Objects.requireNonNull(database, "database");
+        int dropped = 0;
+        for (final Namespace namespace : List.copyOf(collections.keySet())) {
+            if (namespace.database().equals(database) && collections.remove(namespace) != null) {
+                dropped++;
+            }
+        }
+        return dropped;
+    }
+
     public synchronized InMemoryEngineStore snapshot() {
-        final InMemoryEngineStore snapshot = new InMemoryEngineStore();
+        final InMemoryEngineStore snapshot = new InMemoryEngineStore(clock);
         for (final var entry : collections.entrySet()) {
             snapshot.collections.put(entry.getKey(), entry.getValue().snapshot());
         }
@@ -68,7 +106,8 @@ public final class InMemoryEngineStore implements EngineStore {
                 final InMemoryCollectionStore.CollectionState currentState = currentStates.get(namespace);
                 final InMemoryCollectionStore.CollectionState mergedState =
                         InMemoryCollectionStore.mergeTransactionState(baselineState, transactionState, currentState);
-                collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore()).replaceState(mergedState);
+                collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore(clock))
+                        .replaceState(mergedState);
             }
         }
     }

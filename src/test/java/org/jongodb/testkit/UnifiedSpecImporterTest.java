@@ -1,6 +1,7 @@
 package org.jongodb.testkit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -1894,7 +1895,7 @@ class UnifiedSpecImporterTest {
     }
 
     @Test
-    void importsRunCommandListCollectionsAsDeterministicPingSubset() throws IOException {
+    void importsRunCommandListCollectionsSubset() throws IOException {
         Files.writeString(
                 tempDir.resolve("run-command-listcollections-subset.json"),
                 """
@@ -1903,7 +1904,7 @@ class UnifiedSpecImporterTest {
                   "collection_name": "users",
                   "tests": [
                     {
-                      "description": "runCommand listCollections deterministic subset",
+                      "description": "runCommand listCollections subset",
                       "operations": [
                         {"name": "runCommand", "arguments": {"command": {"listCollections": 1}}}
                       ]
@@ -1919,11 +1920,12 @@ class UnifiedSpecImporterTest {
 
         final Scenario scenario = result.importedScenarios().get(0).scenario();
         assertEquals(1, scenario.commands().size());
-        assertEquals("ping", scenario.commands().get(0).commandName());
+        assertEquals("listCollections", scenario.commands().get(0).commandName());
 
         final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
         final ScenarioOutcome outcome = backend.execute(scenario);
         assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+        assertTrue(outcome.commandResults().get(0).containsKey("cursor"));
     }
 
     @Test
@@ -1964,6 +1966,54 @@ class UnifiedSpecImporterTest {
         final Map<String, Object> buildInfoResult = outcome.commandResults().get(1);
         assertEquals(1.0, ((Number) buildInfoResult.get("ok")).doubleValue());
         assertTrue(outcome.commandResults().get(2).containsKey("cursor"));
+    }
+
+    @Test
+    void importsRunCommandDistinctAndLifecycleSubset() throws IOException {
+        Files.writeString(
+                tempDir.resolve("run-command-distinct-lifecycle.json"),
+                """
+                {
+                  "database_name": "app",
+                  "collection_name": "users",
+                  "tests": [
+                    {
+                      "description": "runCommand distinct and lifecycle subset",
+                      "operations": [
+                        {"name": "insertMany", "arguments": {"documents": [
+                          {"_id": 1, "tag": "a"},
+                          {"_id": 2, "tag": "a"},
+                          {"_id": 3, "tag": "b"}
+                        ]}},
+                        {"name": "runCommand", "arguments": {"command": {"distinct": "users", "key": "tag"}}},
+                        {"name": "runCommand", "arguments": {"command": {"drop": "users"}}},
+                        {"name": "runCommand", "arguments": {"command": {"dropDatabase": 1}}}
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        final UnifiedSpecImporter importer = new UnifiedSpecImporter();
+        final UnifiedSpecImporter.ImportResult result = importer.importCorpus(tempDir);
+        assertEquals(1, result.importedCount());
+        assertEquals(0, result.unsupportedCount());
+
+        final Scenario scenario = result.importedScenarios().get(0).scenario();
+        assertEquals(4, scenario.commands().size());
+        assertEquals("distinct", scenario.commands().get(1).commandName());
+        assertEquals("drop", scenario.commands().get(2).commandName());
+        assertEquals("dropDatabase", scenario.commands().get(3).commandName());
+
+        final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
+        final ScenarioOutcome outcome = backend.execute(scenario);
+        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
+
+        @SuppressWarnings("unchecked")
+        final List<Object> values = (List<Object>) outcome.commandResults().get(1).get("values");
+        assertEquals(List.of("a", "b"), values);
+        assertEquals("app.users", outcome.commandResults().get(2).get("ns"));
+        assertEquals("app", outcome.commandResults().get(3).get("dropped"));
     }
 
     @Test
@@ -2402,10 +2452,10 @@ class UnifiedSpecImporterTest {
 
         final WireCommandIngressBackend backend = new WireCommandIngressBackend("wire");
         final ScenarioOutcome outcome = backend.execute(scenario);
-        assertTrue(outcome.success(), outcome.errorMessage().orElse("expected success"));
-        final Map<String, Object> countResult = outcome.commandResults().get(1);
-        assertEquals(1L, ((Number) countResult.get("n")).longValue());
-        assertEquals(1L, ((Number) countResult.get("count")).longValue());
+        assertFalse(outcome.success());
+        assertTrue(outcome.errorMessage()
+                .orElse("")
+                .contains("_id fields may not contain '$'-prefixed fields: $a is not valid for storage"));
     }
 
     @Test

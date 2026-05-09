@@ -49,7 +49,12 @@ public final class InsertCommandHandler implements CommandHandler {
             if (!value.isDocument()) {
                 return CommandErrors.typeMismatch("all entries in documents must be BSON documents");
             }
-            documents.add(value.asDocument());
+            final BsonDocument document = value.asDocument();
+            final BsonDocument idValidationError = validateIdDocument(document);
+            if (idValidationError != null) {
+                return idValidationError;
+            }
+            documents.add(document);
         }
 
         final int insertedCount;
@@ -77,5 +82,18 @@ public final class InsertCommandHandler implements CommandHandler {
             return null;
         }
         return bsonString.getValue();
+    }
+
+    private static BsonDocument validateIdDocument(final BsonDocument document) {
+        final BsonValue idValue = document.get("_id");
+        if (idValue == null || !idValue.isDocument()) {
+            return null;
+        }
+        for (final String key : idValue.asDocument().keySet()) {
+            if (key.startsWith("$")) {
+                return CommandErrors.dollarPrefixedIdField(key);
+            }
+        }
+        return null;
     }
 }

@@ -46,26 +46,29 @@ Completed in current wave:
 - minimal `$graphLookup` certification subset implemented with deterministic option boundary
 - listLocalSessions regression coverage normalized in UTF importer regression pack
 - release-readiness streak artifacts added (`utf-shard-streak`, `r3-release-readiness-streak`)
+- `listCollections`, `drop`, and `dropDatabase` command subsets added for fixture discovery/cleanup
+- tier-0 TTL runtime pruning added for single-field non-partial TTL indexes
+- deterministic R3 ledger mismatches reduced for `_id` dollar subfields, `updateMany` replacement validation, and transactional `createIndexes`
 
 ## Current Focus
 
 ### Pre-Release Hardening
 
 Target outcomes:
-- keep imported differential parity at zero mismatch/error while reducing unsupported categories
+- keep imported differential parity moving toward zero mismatch/error while reducing unsupported categories
 - close release-readiness streak gate (`minStreak=3`) on scheduled runs
 - refresh certification evidence on release-candidate commit before tagging
 
 Primary measures:
-- preserve `mismatch=0`, `error=0` across Official Suite and R3 Ledger
+- preserve or restore `mismatch=0`, `error=0` across release-candidate Official Suite and R3 Ledger runs
 - increase zero-result streak counters (`officialZeroMismatchStreak`, `r3LedgerZeroFailureStreak`)
 - maintain green canary certification for at least 3 external projects
 
 ## Planned Next
 
-- close remaining aggregate-stage unsupported surface (`$merge` and advanced non-alias stages)
+- close remaining aggregate-stage unsupported surface beyond the current `$merge` terminal subset
 - expand collation semantics beyond current subset (`locale`/`strength`/`caseLevel`)
-- implement TTL runtime behavior beyond index metadata registration
+- expand TTL runtime behavior beyond the current single-field lazy-prune subset
 - expand update/operator coverage beyond current `arrayFilters` subset (advanced positional/pipeline expressions)
 - expand supported transaction operations in unified suites while preserving deterministic behavior
 

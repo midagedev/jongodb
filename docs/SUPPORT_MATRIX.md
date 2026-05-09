@@ -1,6 +1,6 @@
 # Support Matrix
 
-Status date: 2026-02-28
+Status date: 2026-05-09
 
 This matrix is a versioned support boundary for integration-test usage.
 Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
@@ -10,7 +10,7 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 | Status | Count |
 | --- | --- |
 | Supported | 7 |
-| Partial | 6 |
+| Partial | 7 |
 | Unsupported | 0 |
 
 ## Feature-Level Matrix
@@ -26,6 +26,7 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 | `index.unique-sparse-partial` | index | Supported | Unique/sparse/partial |
 | `index.collation-metadata` | index | Supported | Collation metadata round-trip |
 | `index.collation-semantic` | index | Partial | Subset: locale/strength/caseLevel on query-sort-distinct and unique index checks |
+| `index.ttl-runtime-tier0` | index | Partial | Lazy pruning for single-field non-partial TTL indexes with date-like values |
 | `transactions-single-session` | transaction | Supported | Session + txn flow with namespace-aware commit merge and deterministic same-`_id` resolution |
 | `transactions-retryable-advanced` | transaction | Partial | Deterministic retry contract for commit/abort replay and transaction error-label semantics (`TransientTransactionError`, `UnknownTransactionCommitResult`) within single-process scope |
 | `deployment.single-node-replicaset-profile` | deployment | Partial | Optional single-node replica-set semantic profile (replica-set URI/hello shape, primary-only readPreference contract, constrained concern levels) |

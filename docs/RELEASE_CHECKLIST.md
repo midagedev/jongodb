@@ -1,12 +1,12 @@
 # Release Checklist
 
-Status date: 2026-02-28
+Status date: 2026-05-09
 
 ## R3 Certification Sign-Off
 
-- [x] Official suite sharded run on `main` completed with zero mismatch/error.
+- [ ] Official suite sharded run on the release-candidate commit completed with zero mismatch/error.
   - run id: `22516323868` (commit `d2ba61b`)
-- [x] R3 failure ledger run on `main` completed with `failureCount=0`.
+- [ ] R3 failure ledger run on the release-candidate commit completed with `failureCount=0`.
   - run id: `22516324202` (commit `d2ba61b`)
 - [x] External canary certification completed for 3 projects with rollback success.
   - latest success run id: `22378993613` (commit `868bbc7`)
@@ -20,14 +20,14 @@ Status date: 2026-02-28
 - [x] Support boundary documents are updated.
   - `docs/SUPPORT_MATRIX.md`
   - `docs/COMPATIBILITY_SCORECARD.md`
-- [x] README certification snapshot is updated and links current evidence docs.
+- [ ] README certification snapshot is updated and links current release-candidate evidence docs.
 
 ## Current Release-Line Notes
 
 - Latest Java release tag: `v0.1.5` (run `22379241855`, commit `868bbc7`).
 - Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
 - Latest compatibility certification snapshot: commit `d2ba61b` (runs `22516323868`, `22516324202`, `22516137734`).
-- Next tag candidate should regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
+- Next Java tag candidate: `v0.1.6`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate
 

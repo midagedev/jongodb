@@ -1,16 +1,28 @@
 # Node Compatibility Smoke
 
-Status date: 2026-02-24
+Status date: 2026-05-09
 
 This suite validates practical Node ecosystem compatibility on top of `@jongodb/memory-server`:
 
 - official `mongodb` Node driver
+- Express route handler using the official driver
+- Koa route handler using the official driver
+- TypeORM MongoDB repository
+- Prisma MongoDB provider
 - `mongoose`
 
 Current scenario set:
-- CRUD baseline
-- transaction commit
-- transaction rollback
+- `mongodb.crud`
+- `express.mongodb.route`
+- `koa.mongodb.route`
+- `typeorm.mongodb.repository`
+- `prisma.mongodb.provider`
+- `mongodb.transaction.commit`
+- `mongodb.transaction.rollback`
+- `mongoose.crud`
+- `mongoose.session.with-transaction`
+- `mongoose.transaction.commit`
+- `mongoose.transaction.rollback`
 
 Execution:
 - local command: `npm --prefix testkit/node-compat test`
