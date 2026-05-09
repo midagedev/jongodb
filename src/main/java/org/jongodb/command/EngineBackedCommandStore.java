@@ -110,6 +110,29 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public List<CollectionMetadata> listCollections(final String database) {
+        final List<String> collectionNames = engineStore.listCollectionNames(database);
+        final List<CollectionMetadata> converted = new ArrayList<>(collectionNames.size());
+        for (final String collectionName : collectionNames) {
+            converted.add(new CollectionMetadata(collectionName));
+        }
+        return List.copyOf(converted);
+    }
+
+    @Override
+    public DropCollectionResult dropCollection(final String database, final String collection) {
+        final int nIndexesWas = engineStore.collectionExists(database, collection)
+                ? engineStore.collection(database, collection).listIndexes().size()
+                : 0;
+        return new DropCollectionResult(engineStore.dropCollection(database, collection), nIndexesWas);
+    }
+
+    @Override
+    public int dropDatabase(final String database) {
+        return engineStore.dropDatabase(database);
+    }
+
+    @Override
     public List<BsonDocument> find(final String database, final String collection, final BsonDocument filter) {
         return find(database, collection, filter, CollationSupport.Config.simple());
     }
@@ -538,6 +561,21 @@ public final class EngineBackedCommandStore implements CommandStore {
         @Override
         public int insert(final String database, final String collection, final List<BsonDocument> documents) {
             return materializeWriteDelegate().insert(database, collection, documents);
+        }
+
+        @Override
+        public List<CollectionMetadata> listCollections(final String database) {
+            return activeReadDelegate().listCollections(database);
+        }
+
+        @Override
+        public DropCollectionResult dropCollection(final String database, final String collection) {
+            return materializeWriteDelegate().dropCollection(database, collection);
+        }
+
+        @Override
+        public int dropDatabase(final String database) {
+            return materializeWriteDelegate().dropDatabase(database);
         }
 
         @Override

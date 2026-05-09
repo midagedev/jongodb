@@ -174,7 +174,7 @@ This project targets integration-test compatibility for common Spring data paths
 
 | Area | Current level | Notes |
 | --- | --- | --- |
-| Command surface | 22 handlers | Mix of `Supported` and `Partial` |
+| Command surface | 25 handlers | Mix of `Supported` and `Partial` |
 | Query language | Core comparison/logical/array/regex + partial `$expr` (including `$add` subset) | Advanced parity incomplete |
 | Aggregation | Core stages + selected Tier-2 stages + minimal `$graphLookup` subset | Full operator coverage not implemented |
 | Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) + deterministic retry labels/contracts |
@@ -183,10 +183,10 @@ This project targets integration-test compatibility for common Spring data paths
 
 Support manifest summary:
 - `Supported`: 7
-- `Partial`: 6
+- `Partial`: 7
 - `Unsupported`: 0
 
-Latest certification evidence (2026-02-28):
+Historical certification evidence (2026-02-28; refresh on the release-candidate commit before tagging):
 - Official Suite Sharded: run `22516323868` (`total=508`, `mismatch=0`, `error=0`)
 - R3 Failure Ledger: run `22516324202` (`failureCount=0`)
 - Complex Query Certification: run `22516137734` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
@@ -224,15 +224,16 @@ static void mongoProps(DynamicPropertyRegistry registry) {
 ## Implemented Command Handlers
 
 - `hello`, `isMaster`, `ping`, `buildInfo`, `getParameter`
-- `insert`, `find`, `aggregate`, `getMore`, `killCursors`
-- `createIndexes`, `listIndexes`, `update`, `delete`, `bulkWrite`
+- `insert`, `find`, `distinct`, `aggregate`, `getMore`, `killCursors`
+- `createIndexes`, `listIndexes`, `listCollections`, `drop`, `dropDatabase`
+- `update`, `delete`, `bulkWrite`
 - `findAndModify`, `countDocuments`, `replaceOne`, `findOneAndUpdate`, `findOneAndReplace`
 - `commitTransaction`, `abortTransaction`
 
 ## Known Limitations
 
 - partial query and aggregation parity
-- collation/TTL are currently metadata-focused, not full runtime parity
+- collation and TTL runtime semantics are subset-only, not full server parity
 - limited update operator coverage
 - no multi-node replica-set or sharded topology semantics
 

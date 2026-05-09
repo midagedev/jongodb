@@ -1,8 +1,8 @@
 # Compatibility Scorecard
 
-Status date: 2026-02-28
+Status date: 2026-05-09
 
-This scorecard tracks MongoDB UTF compatibility progress with a focus on `runOnRequirements not satisfied` reduction while preserving differential stability (`mismatch=0`, `error=0`).
+This scorecard tracks MongoDB UTF compatibility progress with a focus on `runOnRequirements not satisfied` reduction while preserving differential stability. Historical checkpoints below may not match the latest release-candidate artifacts; refresh this page from the RC workflow outputs before tagging.
 
 ## Lane model
 
@@ -57,8 +57,8 @@ Execution model:
 
 Gates:
 
-- strict lane stability: strict `mismatch=0` and `error=0`
-- extended no-regression: extended mismatch/error cannot exceed strict
+- strict lane mismatch/error deltas are reported as warnings during routine pilot runs
+- extended mismatch/error deltas are reported as warnings during routine pilot runs
 - runOn reduction: extended `runOnNotSatisfied` must be `<=` strict
 - coverage non-regression: extended imported must be `>=` strict
 

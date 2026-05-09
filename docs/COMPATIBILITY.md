@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Status date: 2026-02-28
+Status date: 2026-05-09
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
@@ -25,13 +25,16 @@ Certification context:
 | `killCursors` | Supported | Cursor cancellation |
 | `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
 | `listIndexes` | Partial | Metadata round-trip |
+| `listCollections` | Partial | Cursor-shaped collection metadata subset for fixture discovery |
+| `drop` | Partial | Collection cleanup subset with deterministic `NamespaceNotFound` error |
+| `dropDatabase` | Partial | Database-scoped cleanup subset |
 | `update` | Partial | Operator set intentionally limited; update pipeline subset supports `$set`/`$unset` stages without expression evaluation |
 | `delete` | Supported | `limit` 0/1 behavior |
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
 | `count` | Partial | Alias path routed through `countDocuments` semantics in the test-backend profile |
 | `countDocuments` | Partial | Filter + skip/limit + hint/readConcern; collation subset applied to filter comparison |
-| `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `count`; other command names fail with deterministic unsupported reasons |
+| `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`, `distinct`, `drop`, `dropDatabase`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator updates plus update-pipeline subset (`$set`/`$unset`, no expression evaluation), `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
@@ -80,13 +83,14 @@ Implemented stages:
 - `$unionWith`
 - `$graphLookup` (minimal subset: `from`, `startWith`, `connectFromField`, `connectToField`, `as`, optional `maxDepth`)
 - `$out` (terminal string-target subset: replaces target collection contents and returns empty result set)
+- `$merge` (terminal string-target or `{into: <collection>}` subset; merges by `_id`)
 
 Not implemented or partial:
 - unsupported stages return deterministic fail-fast
 - many advanced expression operators are still missing
 - `$group` accumulators other than `$sum` are not available
 - `$unwind.includeArrayIndex` is not available
-- `$merge` stage is excluded from current differential corpus
+- `$merge` options beyond the terminal string / `{into: <collection>}` subset are deterministic unsupported paths
 - `$graphLookup` options outside current subset (for example `depthField`, `restrictSearchWithMatch`) are deterministic unsupported paths
 - `bypassDocumentValidation` for aggregate is excluded from current differential corpus
 
@@ -116,8 +120,8 @@ differential parity counts:
 - unordered `insertMany` (`ordered=false`)
 - unordered `bulkWrite` (`ordered=false`)
 - `clientBulkWrite` with mixed namespaces, `ordered=false`, or `verboseResults=true`
-- documents containing dot or dollar-prefixed field paths in insert payloads
-- `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `count`)
+- dot/dollar insert payload forms outside the deterministic insert subset; dollar-prefixed subfields under `_id` fail with `code=52`
+- `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`, `distinct`, `drop`, `dropDatabase`)
 - update operations using unsupported `arrayFilters` forms (outside `$set`/`$unset` subset)
 - update pipeline forms outside the supported subset (`$set`/`$unset` stages with literal values)
 - replacement updates requested with `multi=true`
@@ -140,10 +144,11 @@ Supported metadata paths:
 - `partialFilterExpression`
 - `collation` metadata
 - `expireAfterSeconds` metadata
+- tier-0 TTL pruning for single-field non-partial TTL indexes
 
 Current limitations:
 - collation runtime semantics are subset-only (`locale`/`strength`/`caseLevel`)
-- TTL expiration loop/clock behavior is not fully implemented
+- TTL runtime behavior is lazy, in-process, and limited to date-like values on single-field non-partial indexes
 
 ## Transactions
 
@@ -183,6 +188,9 @@ Not in scope for this profile:
 Known deterministic error classes:
 - unknown command: `CommandNotFound` (`code=59`)
 - validation failures: `BadValue` / `TypeMismatch` (`code=14`)
+- parse parity failures: `FailedToParse` (`code=9`)
+- invalid dollar-prefixed `_id` subfields: `DollarPrefixedFieldName` (`code=52`)
+- missing namespace on cleanup commands: `NamespaceNotFound` (`code=26`)
 - duplicate index/key: `DuplicateKey` (`code=11000`)
 - cursor lifecycle: `CursorNotFound` (`code=43`)
 - transaction state: `NoSuchTransaction` (`code=251`)

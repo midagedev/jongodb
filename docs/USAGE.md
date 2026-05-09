@@ -131,7 +131,7 @@ OpMsg res = codec.decode(ingress.handle(codec.encode(req)));
 
 ## Verification and Evidence Tasks
 
-Current certified reference runs (as of 2026-02-28):
+Historical certified reference runs (as of 2026-02-28; refresh on the release-candidate commit before tagging):
 - Official Suite Sharded: `22516323868` (`total=508`, `mismatch=0`, `error=0`)
 - R3 Failure Ledger: `22516324202` (`failureCount=0`)
 - Complex Query Certification: `22516137734` (`packVersion=complex-query-pack-v3`)
@@ -287,7 +287,7 @@ Manual fallback command:
 
 ```bash
 gradle \
-  -PpublishVersion=0.1.5 \
+  -PpublishVersion=0.1.6 \
   -PpublishGroup=io.github.midagedev \
   -PpublishArtifactId=jongodb \
   centralRelease

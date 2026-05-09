@@ -49,11 +49,14 @@ public final class CommandDispatcher {
         configuredHandlers.put("insert", new InsertCommandHandler(routedStore));
         configuredHandlers.put("find", new FindCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("distinct", new DistinctCommandHandler(routedStore));
+        configuredHandlers.put("listcollections", new ListCollectionsCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry));
         configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry));
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(routedStore));
         configuredHandlers.put("listindexes", new ListIndexesCommandHandler(routedStore, cursorRegistry));
+        configuredHandlers.put("drop", new DropCommandHandler(routedStore));
+        configuredHandlers.put("dropdatabase", new DropDatabaseCommandHandler(routedStore));
         configuredHandlers.put("update", new UpdateCommandHandler(routedStore));
         configuredHandlers.put("delete", new DeleteCommandHandler(routedStore));
         configuredHandlers.put("bulkwrite", new BulkWriteCommandHandler(routedStore));
@@ -173,6 +176,21 @@ public final class CommandDispatcher {
         @Override
         public int insert(final String database, final String collection, final java.util.List<BsonDocument> documents) {
             return delegate().insert(database, collection, documents);
+        }
+
+        @Override
+        public java.util.List<CollectionMetadata> listCollections(final String database) {
+            return delegate().listCollections(database);
+        }
+
+        @Override
+        public DropCollectionResult dropCollection(final String database, final String collection) {
+            return delegate().dropCollection(database, collection);
+        }
+
+        @Override
+        public int dropDatabase(final String database) {
+            return delegate().dropDatabase(database);
         }
 
         @Override

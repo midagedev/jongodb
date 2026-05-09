@@ -1,7 +1,10 @@
 package org.jongodb.engine;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
@@ -19,8 +22,14 @@ import org.bson.types.ObjectId;
 public final class InMemoryCollectionStore implements CollectionStore {
     private final List<Document> documents = new ArrayList<>();
     private final Map<String, IndexMetadata> indexesByName = new LinkedHashMap<>();
+    private final Clock clock;
 
     InMemoryCollectionStore() {
+        this(Clock.systemUTC());
+    }
+
+    InMemoryCollectionStore(final Clock clock) {
+        this.clock = Objects.requireNonNull(clock, "clock");
         final Document idIndexKey = new Document("_id", 1);
         indexesByName.put(
                 "_id_",
@@ -28,6 +37,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
     }
 
     private InMemoryCollectionStore(final InMemoryCollectionStore source) {
+        this.clock = source.clock;
         for (final Document sourceDocument : source.documents) {
             this.documents.add(DocumentCopies.copy(sourceDocument));
         }
@@ -50,10 +60,12 @@ public final class InMemoryCollectionStore implements CollectionStore {
     }
 
     synchronized InMemoryCollectionStore snapshot() {
+        pruneExpiredDocuments();
         return new InMemoryCollectionStore(this);
     }
 
     synchronized CollectionState snapshotState() {
+        pruneExpiredDocuments();
         return new CollectionState(copyDocuments(documents), listIndexes());
     }
 
@@ -120,6 +132,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
     @Override
     public synchronized void insertMany(List<Document> documents) {
         Objects.requireNonNull(documents, "documents");
+        pruneExpiredDocuments();
 
         List<Document> copiedDocuments = new ArrayList<>(documents.size());
         for (Document document : documents) {
@@ -140,6 +153,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
     @Override
     public synchronized CreateIndexesResult createIndexes(List<IndexDefinition> indexes) {
         Objects.requireNonNull(indexes, "indexes");
+        pruneExpiredDocuments();
 
         final int numIndexesBefore = indexesByName.size();
         final Map<String, IndexMetadata> candidateIndexes = new LinkedHashMap<>(indexesByName);
@@ -180,6 +194,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     @Override
     public synchronized List<IndexDefinition> listIndexes() {
+        pruneExpiredDocuments();
         final List<IndexDefinition> listed = new ArrayList<>(indexesByName.size());
         for (final IndexMetadata metadata : indexesByName.values()) {
             listed.add(new IndexDefinition(
@@ -196,11 +211,13 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     @Override
     public synchronized List<Document> findAll() {
+        pruneExpiredDocuments();
         return copyMatchingDocuments(new Document(), CollationSupport.Config.simple());
     }
 
     @Override
     public synchronized Iterable<Document> scanAll() {
+        pruneExpiredDocuments();
         final List<Document> snapshot = List.copyOf(documents);
         return () -> new Iterator<>() {
             private int index = 0;
@@ -227,6 +244,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     @Override
     public synchronized List<Document> find(final Document filter, final CollationSupport.Config collation) {
+        pruneExpiredDocuments();
         final Document effectiveFilter = filter == null ? new Document() : filter;
         final CollationSupport.Config effectiveCollation =
                 collation == null ? CollationSupport.Config.simple() : collation;
@@ -236,6 +254,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
     @Override
     public synchronized List<Document> aggregate(final List<Document> pipeline) {
         Objects.requireNonNull(pipeline, "pipeline");
+        pruneExpiredDocuments();
 
         final List<Document> copiedPipeline = new ArrayList<>(pipeline.size());
         for (final Document stage : pipeline) {
@@ -265,6 +284,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             final boolean multi,
             final boolean upsert,
             final List<Document> arrayFilters) {
+        pruneExpiredDocuments();
         final Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
         final Document effectiveUpdate = update == null ? null : DocumentCopies.copy(update);
         final List<Document> effectiveArrayFilters = copyArrayFilters(arrayFilters);
@@ -340,6 +360,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
     @Override
     public synchronized DeleteManyResult deleteMany(Document filter) {
+        pruneExpiredDocuments();
         Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
 
         long deletedCount = 0;
@@ -363,6 +384,52 @@ public final class InMemoryCollectionStore implements CollectionStore {
             }
         }
         return matches;
+    }
+
+    private void pruneExpiredDocuments() {
+        final List<TtlRule> ttlRules = ttlRules();
+        if (ttlRules.isEmpty() || documents.isEmpty()) {
+            return;
+        }
+
+        final long nowMillis = clock.millis();
+        final Iterator<Document> iterator = documents.iterator();
+        while (iterator.hasNext()) {
+            final Document document = iterator.next();
+            for (final TtlRule ttlRule : ttlRules) {
+                if (ttlRule.isExpired(document, nowMillis)) {
+                    iterator.remove();
+                    break;
+                }
+            }
+        }
+    }
+
+    private List<TtlRule> ttlRules() {
+        final List<TtlRule> rules = new ArrayList<>();
+        for (final IndexMetadata index : indexesByName.values()) {
+            if (index.expireAfterSeconds() == null
+                    || index.key().size() != 1
+                    || index.partialFilterExpression() != null) {
+                continue;
+            }
+            final String fieldPath = index.key().keySet().iterator().next();
+            if (fieldPath == null || fieldPath.isBlank()) {
+                continue;
+            }
+            rules.add(new TtlRule(fieldPath, index.expireAfterSeconds() * 1000L));
+        }
+        return rules;
+    }
+
+    private static Long dateLikeMillis(final Object value) {
+        if (value instanceof Date dateValue) {
+            return dateValue.getTime();
+        }
+        if (value instanceof Instant instantValue) {
+            return instantValue.toEpochMilli();
+        }
+        return null;
     }
 
     private UpdateManyResult applyUpsert(final Document filter, final UpdateApplier.ParsedUpdate parsedUpdate) {
@@ -791,6 +858,13 @@ public final class InMemoryCollectionStore implements CollectionStore {
     }
 
     private record UpdatePreview(Document updatedDocument, boolean modified) {}
+
+    private record TtlRule(String fieldPath, long expireAfterMillis) {
+        private boolean isExpired(final Document document, final long nowMillis) {
+            final Long fieldMillis = dateLikeMillis(resolvePathValue(document, fieldPath));
+            return fieldMillis != null && fieldMillis + expireAfterMillis <= nowMillis;
+        }
+    }
 
     record CollectionState(List<Document> documents, List<CollectionStore.IndexDefinition> indexes) {
         CollectionState {

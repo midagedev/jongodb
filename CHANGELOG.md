@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added `listCollections`, `drop`, and `dropDatabase` command handlers for metadata lookup and fixture cleanup flows.
+- Added UTF `runCommand` importer support for `listCollections`, `distinct`, `drop`, and `dropDatabase`.
+- Added tier-0 TTL runtime pruning for single-field `expireAfterSeconds` indexes using deterministic lazy cleanup.
 - Added regression coverage for `findOneAndUpdate`/upsert duplicate-key behavior when `_id` matches an existing document but other predicates do not, including `$and`-wrapped filters.
 - Added declarative fixture manifest schema (`fixture-manifest.v1`) with standardized `dev`/`smoke`/`full` profile model.
 - Added fixture manifest loader/validator with path-aware aggregated validation errors.
@@ -44,7 +47,11 @@ All notable changes to this project are documented in this file.
 - Added structured runtime logging contract (`onLog`, `logFormat`) with expanded log levels (`error`/`warn`/`info`/`debug`).
 
 ### Fixed
+- Fixed deterministic R3 parity mismatches for dollar-prefixed `_id` subfields, replacement-style `updateMany`, and `createIndexes` inside transactions.
 - Fixed upsert seed extraction to honor equality clauses nested inside `$and`, restoring duplicate-key behavior for `findOneAndUpdate` lock-style filters.
+
+### Changed
+- Default local project version moved to `0.1.6-SNAPSHOT`.
 
 ## [0.1.3] - 2026-02-24
 

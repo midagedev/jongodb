@@ -12,8 +12,11 @@ import org.bson.BsonString;
  */
 final class CommandErrors {
     private static final int CODE_COMMAND_NOT_FOUND = 59;
+    private static final int CODE_DOLLAR_PREFIXED_FIELD_NAME = 52;
+    private static final int CODE_FAILED_TO_PARSE = 9;
     private static final int CODE_INVALID_ARGUMENT = 14;
     private static final int CODE_NOT_IMPLEMENTED = 238;
+    private static final int CODE_NAMESPACE_NOT_FOUND = 26;
     private static final int CODE_CURSOR_NOT_FOUND = 43;
     private static final int CODE_NO_SUCH_TRANSACTION = 251;
     private static final int CODE_TRANSACTION_COMMITTED = 256;
@@ -30,8 +33,19 @@ final class CommandErrors {
         return error(message, CODE_INVALID_ARGUMENT, "BadValue");
     }
 
+    static BsonDocument failedToParse(final String message) {
+        return error(message, CODE_FAILED_TO_PARSE, "FailedToParse");
+    }
+
     static BsonDocument typeMismatch(final String message) {
         return error(message, CODE_INVALID_ARGUMENT, "TypeMismatch");
+    }
+
+    static BsonDocument dollarPrefixedIdField(final String fieldName) {
+        return error(
+                "_id fields may not contain '$'-prefixed fields: " + fieldName + " is not valid for storage",
+                CODE_DOLLAR_PREFIXED_FIELD_NAME,
+                "DollarPrefixedFieldName");
     }
 
     static BsonDocument notImplemented(final String message) {
@@ -68,6 +82,10 @@ final class CommandErrors {
 
     static BsonDocument duplicateKey(final String message) {
         return error(message, CODE_DUPLICATE_KEY, "DuplicateKey");
+    }
+
+    static BsonDocument namespaceNotFound(final String namespace) {
+        return error("ns not found: " + namespace, CODE_NAMESPACE_NOT_FOUND, "NamespaceNotFound");
     }
 
     static BsonDocument cursorNotFound(final long cursorId) {

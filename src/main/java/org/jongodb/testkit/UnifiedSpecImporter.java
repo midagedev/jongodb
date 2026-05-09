@@ -31,8 +31,10 @@ public final class UnifiedSpecImporter {
             "ping", "ping",
             "buildinfo", "buildInfo",
             "listindexes", "listIndexes",
-            // listCollections is currently treated as a deterministic control subset.
-            "listcollections", "ping",
+            "listcollections", "listCollections",
+            "distinct", "distinct",
+            "drop", "drop",
+            "dropdatabase", "dropDatabase",
             "insert", "insert",
             "find", "find",
             "count", "count");

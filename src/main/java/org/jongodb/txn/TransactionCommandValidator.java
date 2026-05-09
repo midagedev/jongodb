@@ -24,6 +24,7 @@ public final class TransactionCommandValidator {
                     "update",
                     "delete",
                     "bulkwrite",
+                    "createindexes",
                     "find",
                     "distinct",
                     "aggregate",
