@@ -139,7 +139,11 @@ public final class InMemoryCollectionStore implements CollectionStore {
             if (document == null) {
                 throw new IllegalArgumentException("documents must not contain null");
             }
-            copiedDocuments.add(DocumentCopies.copy(document));
+            final Document copiedDocument = DocumentCopies.copy(document);
+            if (!copiedDocument.containsKey("_id")) {
+                copiedDocument.put("_id", new ObjectId());
+            }
+            copiedDocuments.add(copiedDocument);
         }
 
         List<Document> candidateDocuments = new ArrayList<>(this.documents.size() + copiedDocuments.size());
