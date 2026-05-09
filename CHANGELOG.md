@@ -48,6 +48,8 @@ All notable changes to this project are documented in this file.
 - Added structured runtime logging contract (`onLog`, `logFormat`) with expanded log levels (`error`/`warn`/`info`/`debug`).
 
 ### Fixed
+- Fixed insert parity for documents missing `_id` by assigning an `ObjectId` before unique-index validation.
+- Fixed release-gate runOn lanes to keep `mongos-unpin` and `client-bulkWrite-errors*` suites gated until their exact differential contracts are implemented.
 - Fixed deterministic R3 parity mismatches for dollar-prefixed `_id` subfields, replacement-style `updateMany`, and `createIndexes` inside transactions.
 - Fixed upsert seed extraction to honor equality clauses nested inside `$and`, restoring duplicate-key behavior for `findOneAndUpdate` lock-style filters.
 

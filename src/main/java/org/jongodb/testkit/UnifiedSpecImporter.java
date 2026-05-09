@@ -1229,7 +1229,6 @@ public final class UnifiedSpecImporter {
 
     private static boolean isMongosTopologyLaneSourcePath(final String sourcePath) {
         return matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/pin-mongos")
-                || matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/mongos-unpin")
                 || matchesSpecPathWithSupportedExtensions(sourcePath, "transactions/tests/unified/mongos-recovery-token");
     }
 
@@ -1262,7 +1261,8 @@ public final class UnifiedSpecImporter {
         if (!clientBulkWriteSource) {
             return false;
         }
-        return !sourcePath.contains("client-bulkWrite-errorResponse");
+        return !sourcePath.contains("client-bulkWrite-errors")
+                && !sourcePath.contains("client-bulkWrite-errorResponse");
     }
 
     private static boolean isSnapshotSessionsNotSupportedClientErrorLaneSourcePath(final String sourcePath) {

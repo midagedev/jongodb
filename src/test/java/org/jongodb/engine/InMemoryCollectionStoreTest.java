@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 
 class InMemoryCollectionStoreTest {
@@ -28,6 +29,20 @@ class InMemoryCollectionStoreTest {
         assertEquals(2, found.size());
         assertEquals("Ada", found.get(0).getString("name"));
         assertEquals("Linus", found.get(1).getString("name"));
+    }
+
+    @Test
+    void insertManyAssignsObjectIdWhenIdIsMissing() {
+        CollectionStore store = new InMemoryCollectionStore();
+        final Document source = new Document("name", "Ada");
+
+        store.insertMany(List.of(source));
+
+        final List<Document> found = store.findAll();
+        assertEquals(1, found.size());
+        assertFalse(source.containsKey("_id"));
+        assertTrue(found.get(0).get("_id") instanceof ObjectId);
+        assertEquals("Ada", found.get(0).getString("name"));
     }
 
     @Test
