@@ -70,7 +70,7 @@ Implemented stages:
 - `$group` (subset: `$sum`, `$first`, `$addToSet`)
 - `$sort`
 - `$limit`, `$skip`
-- `$unwind` (without `includeArrayIndex`)
+- `$unwind` (including `includeArrayIndex`)
 - `$count`
 - `$addFields`
 - `$set` (alias subset of `$addFields`)
@@ -89,7 +89,6 @@ Not implemented or partial:
 - unsupported stages return deterministic fail-fast
 - many advanced expression operators are still missing
 - `$group` accumulators other than `$sum` are not available
-- `$unwind.includeArrayIndex` is not available
 - `$merge` options beyond the terminal string / `{into: <collection>}` subset are deterministic unsupported paths
 - `$graphLookup` options outside current subset (for example `depthField`, `restrictSearchWithMatch`) are deterministic unsupported paths
 - `bypassDocumentValidation` for aggregate is excluded from current differential corpus

@@ -24,10 +24,10 @@ Status date: 2026-05-09
 
 ## Current Release-Line Notes
 
-- Latest Java release tag: `v0.1.5` (run `22379241855`, commit `868bbc7`).
+- Latest Java release tag: `v0.1.8` (run `23785415137`, commit `7b8ef1f`).
 - Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
 - Latest compatibility certification snapshot: commit `d2ba61b` (runs `22516323868`, `22516324202`, `22516137734`).
-- Next Java tag candidate: `v0.1.6`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
+- Next Java tag candidate: `v0.1.9`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate
 
@@ -76,6 +76,9 @@ Use this when validating `@jongodb/memory-server` canary automation:
 
 | Version | Date (UTC) | Commit | Maven | GitHub Actions |
 | --- | --- | --- | --- | --- |
+| `0.1.8` | `2026-03-31` | `7b8ef1f` | `io.github.midagedev:jongodb:0.1.8` | run `23785415137` |
+| `0.1.7` | `2026-03-05` | `b7c4a13` | `io.github.midagedev:jongodb:0.1.7` | run `22723048147` |
+| `0.1.6` | `2026-03-01` | `12a259c` | `io.github.midagedev:jongodb:0.1.6` | run `22541258962` |
 | `0.1.5` | `2026-02-25` | `868bbc7` | `io.github.midagedev:jongodb:0.1.5` | run `22379241855` |
 | `0.1.4` | `2026-02-24` | `e6f6bbf` | `io.github.midagedev:jongodb:0.1.4` | run `22355417610` |
 | `0.1.3` | `2026-02-24` | `61cfa03` | `io.github.midagedev:jongodb:0.1.3` | run `22341381717` |

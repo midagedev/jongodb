@@ -20,7 +20,7 @@ Source artifact: `build/reports/r2-compatibility/r2-support-manifest.json`.
 | `query.eq-ne-compare` | query | Supported | Core comparison operators |
 | `query.elemMatch-all-regex` | query | Supported | Array and regex operators |
 | `query.expr-subset` | query | Partial | Subset: eq/ne/gt/gte/lt/lte/and/or/not/literal/add |
-| `aggregation.match-project-group` | aggregation | Supported | Tier-1 pipeline stages |
+| `aggregation.match-project-group` | aggregation | Supported | Tier-1 pipeline stages, including `$unwind.includeArrayIndex` |
 | `aggregation.lookup-union-facet` | aggregation | Partial | Tier-2 subset without full expression parity (includes minimal `$graphLookup` option subset) |
 | `aggregation.expression-operators` | aggregation | Partial | Limited expression coverage |
 | `index.unique-sparse-partial` | index | Supported | Unique/sparse/partial |

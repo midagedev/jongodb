@@ -176,7 +176,7 @@ This project targets integration-test compatibility for common Spring data paths
 | --- | --- | --- |
 | Command surface | 25 handlers | Mix of `Supported` and `Partial` |
 | Query language | Core comparison/logical/array/regex + partial `$expr` (including `$add` subset) | Advanced parity incomplete |
-| Aggregation | Core stages + selected Tier-2 stages + minimal `$graphLookup` subset | Full operator coverage not implemented |
+| Aggregation | Core stages, `$unwind.includeArrayIndex`, selected Tier-2 stages + minimal `$graphLookup` subset | Full operator coverage not implemented |
 | Transactions | Single-process session/transaction flow | Namespace-aware commit merge + snapshot reads (`find`/`aggregate`/`countDocuments`) + deterministic retry labels/contracts |
 | Deployment profile | Standalone + single-node replica-set semantic profile | Replica-set profile exposes primary-only handshake/URI semantics for driver compatibility |
 | Wire protocol | `OP_MSG` + `OP_QUERY` | In-process ingress and standalone TCP launcher mode, with OP_QUERY namespace-based `$db` fallback |
