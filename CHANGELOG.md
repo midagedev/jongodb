@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added `$unwind.includeArrayIndex` support, including MongoDB-compatible `null` index handling for scalar and preserved null/missing/empty inputs.
 - Added `listCollections`, `drop`, and `dropDatabase` command handlers for metadata lookup and fixture cleanup flows.
 - Added UTF `runCommand` importer support for `listCollections`, `distinct`, `drop`, and `dropDatabase`.
 - Added tier-0 TTL runtime pruning for single-field `expireAfterSeconds` indexes using deterministic lazy cleanup.
@@ -51,7 +52,7 @@ All notable changes to this project are documented in this file.
 - Fixed upsert seed extraction to honor equality clauses nested inside `$and`, restoring duplicate-key behavior for `findOneAndUpdate` lock-style filters.
 
 ### Changed
-- Default local project version moved to `0.1.6-SNAPSHOT`.
+- Default local project version moved to `0.1.9-SNAPSHOT`.
 
 ## [0.1.3] - 2026-02-24
 

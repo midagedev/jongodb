@@ -575,7 +575,9 @@ public final class AggregationPipeline {
             final PathValue pathValue = resolvePath(source, unwindSpec.path());
             if (!pathValue.present() || pathValue.value() == null) {
                 if (unwindSpec.preserveNullAndEmptyArrays()) {
-                    output.add(DocumentCopies.copy(source));
+                    final Document preserved = DocumentCopies.copy(source);
+                    setUnwindArrayIndex(preserved, unwindSpec, null);
+                    output.add(preserved);
                 }
                 continue;
             }
@@ -583,14 +585,19 @@ public final class AggregationPipeline {
             if (pathValue.value() instanceof List<?> listValue) {
                 if (listValue.isEmpty()) {
                     if (unwindSpec.preserveNullAndEmptyArrays()) {
-                        output.add(DocumentCopies.copy(source));
+                        final Document preserved = DocumentCopies.copy(source);
+                        removePath(preserved, unwindSpec.path());
+                        setUnwindArrayIndex(preserved, unwindSpec, null);
+                        output.add(preserved);
                     }
                     continue;
                 }
 
-                for (final Object item : listValue) {
+                for (int index = 0; index < listValue.size(); index++) {
+                    final Object item = listValue.get(index);
                     final Document expanded = DocumentCopies.copy(source);
                     setPath(expanded, unwindSpec.path(), item);
+                    setUnwindArrayIndex(expanded, unwindSpec, Long.valueOf(index));
                     output.add(expanded);
                 }
                 continue;
@@ -598,14 +605,24 @@ public final class AggregationPipeline {
 
             final Document expanded = DocumentCopies.copy(source);
             setPath(expanded, unwindSpec.path(), pathValue.value());
+            setUnwindArrayIndex(expanded, unwindSpec, null);
             output.add(expanded);
         }
         return output;
     }
 
+    private static void setUnwindArrayIndex(
+            final Document target,
+            final UnwindSpec unwindSpec,
+            final Long arrayIndex) {
+        if (unwindSpec.includeArrayIndex() != null) {
+            setPath(target, unwindSpec.includeArrayIndex(), arrayIndex);
+        }
+    }
+
     private static UnwindSpec parseUnwindSpec(final Object stageDefinition) {
         if (stageDefinition instanceof String pathExpression) {
-            return new UnwindSpec(unwindPath(pathExpression), false);
+            return new UnwindSpec(unwindPath(pathExpression), false, null);
         }
 
         final Document unwindDocument = requireDocument(stageDefinition, "$unwind stage requires a string or document");
@@ -622,12 +639,18 @@ public final class AggregationPipeline {
             }
             preserveNullAndEmptyArrays = preserve;
         }
+        String includeArrayIndex = null;
         if (unwindDocument.containsKey("includeArrayIndex")) {
-            throw new UnsupportedFeatureException(
-                    "aggregation.unwind.includeArrayIndex",
-                    "$unwind includeArrayIndex is not supported yet");
+            final Object includeArrayIndexValue = unwindDocument.get("includeArrayIndex");
+            if (!(includeArrayIndexValue instanceof String includeArrayIndexName)
+                    || includeArrayIndexName.isBlank()
+                    || includeArrayIndexName.startsWith("$")) {
+                throw new IllegalArgumentException(
+                        "$unwind.includeArrayIndex must be a non-empty field name that does not start with '$'");
+            }
+            includeArrayIndex = includeArrayIndexName;
         }
-        return new UnwindSpec(unwindPath(pathExpression), preserveNullAndEmptyArrays);
+        return new UnwindSpec(unwindPath(pathExpression), preserveNullAndEmptyArrays, includeArrayIndex);
     }
 
     private static String unwindPath(final String pathExpression) {
@@ -1242,7 +1265,7 @@ public final class AggregationPipeline {
 
     private record SortKey(String field, int direction) {}
 
-    private record UnwindSpec(String path, boolean preserveNullAndEmptyArrays) {}
+    private record UnwindSpec(String path, boolean preserveNullAndEmptyArrays, String includeArrayIndex) {}
 
     private record PathValue(boolean present, Object value) {
         private static PathValue missing() {
