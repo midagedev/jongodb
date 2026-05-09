@@ -1,0 +1,36 @@
+name: Z.ai PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: zai-review-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+    uses: midagedev/review-actions/.github/workflows/zai-pr-review.yml@v1
+    with:
+      pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
+      prompt_path: .github/zai-review-prompt.md
+    secrets:
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
