@@ -4,6 +4,13 @@ Status date: 2026-05-09
 
 This scorecard tracks MongoDB UTF compatibility progress with a focus on `runOnRequirements not satisfied` reduction while preserving differential stability. Historical checkpoints below may not match the latest release-candidate artifacts; refresh this page from the RC workflow outputs before tagging.
 
+Latest release-candidate gate (`v0.1.9`, commit `b44be73`, run `25603109902`):
+
+- Official Suite Sharded strict gate: `total=1292`, `match=1292`, `mismatch=0`, `error=0`
+- R3 Failure Ledger: run `25603109886`, `failureCount=0`
+- Complex Query Certification: run `25603109905`, `mismatchCount=0`, `unsupportedByPolicyCount=0`
+- R3 External Canary: run `25603109900`, `projectCount=3`, `canaryFail=0`, `rollbackSuccess=3`
+
 ## Lane model
 
 - Strict lane (baseline): runOn lane overrides disabled.
