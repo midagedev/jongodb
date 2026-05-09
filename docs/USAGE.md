@@ -138,8 +138,8 @@ Current certified reference runs (as of 2026-02-28):
 - R3 External Canary Certification (latest success): `22378993613` (2026-02-25)
 
 Official Suite Sharded UTF gate modes:
-- `warn` (default for `pull_request` and manual dispatch): publish aggregate `total/match/mismatch/error` + pass rate summary, emit warning when mismatch/error remain.
-- `strict` (default for scheduled `main` run): fail workflow when aggregate mismatch/error is non-zero.
+- `warn` (default for `pull_request`, scheduled `main`, and manual dispatch): publish aggregate `total/match/mismatch/error` + pass rate summary, emit warning when mismatch/error remain.
+- `strict`: fail workflow when aggregate mismatch/error is non-zero. Use this for release-candidate certification, not routine nightly signal collection.
 - `off`: summary only, no mismatch/error gate.
 - Manual dispatch input: `utf_gate_mode` (`off | warn | strict`).
 - Workflow streak artifact: `utf-shard-streak.json/.md` exposing `officialZeroMismatchStreak` over recent schedule history.
@@ -208,6 +208,7 @@ R3 Failure Ledger workflow (`.github/workflows/r3-failure-ledger.yml`) also:
 - manual dispatch inputs:
   - `readiness_min_streak` (default `3`)
   - `fail_on_readiness` (`true|false`, default `false`)
+  - `fail_on_failures` (`true|false`, default `false`; set `true` for release-candidate certification)
 
 Run Spring compatibility matrix:
 

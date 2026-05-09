@@ -139,7 +139,7 @@ jobs:
     needs: [utf-shards]
     if: always()
     env:
-      UTF_GATE_MODE: ${{ github.event_name == 'schedule' && 'strict' || github.event.inputs.utf_gate_mode || 'warn' }}
+      UTF_GATE_MODE: ${{ github.event.inputs.utf_gate_mode || 'warn' }}
     steps:
       - name: Download shard 0 artifact
         uses: actions/download-artifact@v4

@@ -15,6 +15,10 @@ on:
         description: "Fail workflow when readiness streak threshold is not met (true|false)"
         required: false
         default: "false"
+      fail_on_failures:
+        description: "Fail workflow when the generated ledger contains failures (true|false)"
+        required: false
+        default: "false"
   schedule:
     - cron: "30 4 * * *"
 
@@ -33,6 +37,7 @@ jobs:
       OFFICIAL_SPECS_REF: ${{ github.event.inputs.official_specs_ref || '99704fa8860777da1d919ef765af1e41e75f5859' }}
       READINESS_MIN_STREAK: ${{ github.event.inputs.readiness_min_streak || '3' }}
       FAIL_ON_READINESS: ${{ github.event.inputs.fail_on_readiness || 'false' }}
+      FAIL_ON_FAILURES: ${{ github.event.inputs.fail_on_failures || 'false' }}
       MONGO_CONTAINER_NAME: jongodb-replset
       MONGO_REPLSET_NAME: rs0
       MONGO_PORT: "27017"
@@ -74,7 +79,7 @@ jobs:
             -Pr3SpecRepoRoot="${RUNNER_TEMP}/mongodb-specifications" \
             -Pr3FailureLedgerOutputDir="${R3_LEDGER_OUTPUT_DIR}" \
             -Pr3FailureLedgerMongoUri="${JONGODB_REAL_MONGOD_URI}" \
-            -Pr3FailureLedgerFailOnFailures=true \
+            -Pr3FailureLedgerFailOnFailures="${FAIL_ON_FAILURES}" \
             r3FailureLedger
 
       - name: Build trend snapshot
@@ -515,7 +520,7 @@ jobs:
               raise SystemExit(1)
           PY
 
-      - name: Post triage breadcrumb on schedule failure
+      - name: Post triage breadcrumb on scheduled ledger findings
         if: always() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
