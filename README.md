@@ -186,11 +186,11 @@ Support manifest summary:
 - `Partial`: 7
 - `Unsupported`: 0
 
-Historical certification evidence (2026-02-28; refresh on the release-candidate commit before tagging):
-- Official Suite Sharded: run `22516323868` (`total=508`, `mismatch=0`, `error=0`)
-- R3 Failure Ledger: run `22516324202` (`failureCount=0`)
-- Complex Query Certification: run `22516137734` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
-- R3 External Canary (latest success): run `22378993613` (2026-02-25)
+Release-candidate certification evidence for `v0.1.9` (2026-05-09; commit `b44be73`):
+- Official Suite Sharded: run `25603109902` (`total=1292`, `mismatch=0`, `error=0`, strict gate)
+- R3 Failure Ledger: run `25603109886` (`failureCount=0`)
+- Complex Query Certification: run `25603109905` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
+- R3 External Canary: run `25603109900` (`projectCount=3`, `canaryFail=0`, `rollbackSuccess=3`)
 
 Details:
 - `docs/SUPPORT_MATRIX.md`

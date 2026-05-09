@@ -131,11 +131,11 @@ OpMsg res = codec.decode(ingress.handle(codec.encode(req)));
 
 ## Verification and Evidence Tasks
 
-Historical certified reference runs (as of 2026-02-28; refresh on the release-candidate commit before tagging):
-- Official Suite Sharded: `22516323868` (`total=508`, `mismatch=0`, `error=0`)
-- R3 Failure Ledger: `22516324202` (`failureCount=0`)
-- Complex Query Certification: `22516137734` (`packVersion=complex-query-pack-v3`)
-- R3 External Canary Certification (latest success): `22378993613` (2026-02-25)
+Release-candidate certification evidence for `v0.1.9` (2026-05-09; commit `b44be73`):
+- Official Suite Sharded: `25603109902` (`total=1292`, `mismatch=0`, `error=0`, strict gate)
+- R3 Failure Ledger: `25603109886` (`failureCount=0`)
+- Complex Query Certification: `25603109905` (`packVersion=complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
+- R3 External Canary Certification: `25603109900` (`projectCount=3`, `canaryFail=0`, `rollbackSuccess=3`)
 
 Official Suite Sharded UTF gate modes:
 - `warn` (default for `pull_request`, scheduled `main`, and manual dispatch): publish aggregate `total/match/mismatch/error` + pass rate summary, emit warning when mismatch/error remain.

@@ -4,29 +4,30 @@ Status date: 2026-05-09
 
 ## R3 Certification Sign-Off
 
-- [ ] Official suite sharded run on the release-candidate commit completed with zero mismatch/error.
-  - run id: `22516323868` (commit `d2ba61b`)
-- [ ] R3 failure ledger run on the release-candidate commit completed with `failureCount=0`.
-  - run id: `22516324202` (commit `d2ba61b`)
+- [x] Official suite sharded run on the release-candidate commit completed with zero mismatch/error.
+  - run id: `25603109902` (commit `b44be73`, `total=1292`, `mismatch=0`, `error=0`, strict gate)
+- [x] R3 failure ledger run on the release-candidate commit completed with `failureCount=0`.
+  - run id: `25603109886` (commit `b44be73`)
 - [x] External canary certification completed for 3 projects with rollback success.
-  - latest success run id: `22378993613` (commit `868bbc7`)
+  - latest success run id: `25603109900` (commit `b44be73`, `projectCount=3`, `canaryFail=0`, `rollbackSuccess=3`)
 - [x] Complex-query certification gate completed on `main` with no supported-subset regressions.
   - workflow: `.github/workflows/complex-query-certification.yml`
-  - run id: `22516137734` (pack `complex-query-pack-v3`)
-- [ ] Release-readiness streak threshold (`readiness_min_streak=3`) is satisfied on `main`.
-  - latest run id: `22516324202`
+  - run id: `25603109905` (pack `complex-query-pack-v3`, `mismatchCount=0`, `unsupportedByPolicyCount=0`)
+- [ ] Scheduled release-readiness streak threshold (`readiness_min_streak=3`) is satisfied on `main`.
+  - latest run id: `25603109886`
   - counters: `officialZeroMismatchStreak=0`, `r3LedgerZeroFailureStreak=1`
   - readiness: `satisfied=false`
+  - note: scheduled-history streak still reflects failures before the `b44be73` gate fix; manual release-candidate gates above are clean.
 - [x] Support boundary documents are updated.
   - `docs/SUPPORT_MATRIX.md`
   - `docs/COMPATIBILITY_SCORECARD.md`
-- [ ] README certification snapshot is updated and links current release-candidate evidence docs.
+- [x] README certification snapshot is updated and links current release-candidate evidence docs.
 
 ## Current Release-Line Notes
 
 - Latest Java release tag: `v0.1.8` (run `23785415137`, commit `7b8ef1f`).
 - Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
-- Latest compatibility certification snapshot: commit `d2ba61b` (runs `22516323868`, `22516324202`, `22516137734`).
+- Latest compatibility certification snapshot: commit `b44be73` (runs `25603109902`, `25603109886`, `25603109905`, `25603109900`).
 - Next Java tag candidate: `v0.1.9`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate
