@@ -1,0 +1,27 @@
+name: Forbidden Keyword Scan
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forbidden-keyword-scan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Forbidden keyword scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: midagedev/review-actions/forbidden-keyword-scan@v1
+        with:
+          keywords: ${{ secrets.FORBIDDEN_KEYWORDS }}
+          fail-on-empty: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
