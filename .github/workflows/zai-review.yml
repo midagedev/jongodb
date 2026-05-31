@@ -1,4 +1,4 @@
-name: Z.ai PR Review
+name: Hermes PR Review
 
 on:
   pull_request:
@@ -13,10 +13,9 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  id-token: write
 
 concurrency:
-  group: zai-review-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  group: hermes-review-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -28,9 +27,19 @@ jobs:
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
-    uses: midagedev/review-actions/.github/workflows/zai-pr-review.yml@v1
+    uses: midagedev/review-actions/.github/workflows/hermes-pr-review.yml@v2
     with:
       pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
       prompt_path: .github/zai-review-prompt.md
-    secrets:
-      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      runner_labels: '["self-hosted","vps-hermes","jongodb"]'
+      approve_when_clean: true
+      context_paths: |
+        README.md
+        docs/README.md
+        docs/SUPPORT_MATRIX.md
+        docs/COMPATIBILITY.md
+        docs/ARCH_MODULE_BOUNDARIES.md
+        docs/SPRING_TESTING.md
+        docs/NODE_MIGRATION_FROM_MONGODB_MEMORY_SERVER.md
+        packages/memory-server/README.md
+        testkit/node-compat/README.md
