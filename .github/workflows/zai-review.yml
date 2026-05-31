@@ -27,7 +27,7 @@ jobs:
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
-    uses: midagedev/review-actions/.github/workflows/hermes-pr-review.yml@v4
+    uses: midagedev/review-actions/.github/workflows/hermes-pr-review.yml@v5
     with:
       pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
       prompt_path: .github/zai-review-prompt.md
