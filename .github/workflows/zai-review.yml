@@ -25,14 +25,16 @@ jobs:
       (
         github.event_name == 'pull_request' &&
         github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login == 'midagedev'
       )
-    uses: midagedev/review-actions/.github/workflows/hermes-pr-review.yml@v5
+    uses: midagedev/review-actions/.github/workflows/hermes-pr-review.yml@v7
     with:
       pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
       prompt_path: .github/zai-review-prompt.md
       runner_labels: '["self-hosted","vps-hermes","jongodb"]'
       approve_when_clean: true
+      allowed_pr_author: midagedev
       context_paths: |
         README.md
         docs/README.md
