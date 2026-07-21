@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Default local project version moved to `0.1.10-SNAPSHOT`.
+
+## [0.1.10] - 2026-07-21
+
+### Added
+- Added MongoDB-style `$min`/`$max` update operators with BSON ordering, mixed numeric types, dates, dotted paths, upserts, and modifier conflict detection.
+- Added expression-based aggregation-pipeline updates for `$addFields`/`$set`, `$project`/`$unset`, and `$replaceRoot`/`$replaceWith`.
+- Added aggregation expressions for conditional/comparison/type/null handling, min/max, basic arithmetic, `$mergeObjects`, and UTC `$dateTrunc` with calendar units and `binSize`.
+- Expanded `$group` with core, set/object merge, percentile/median, and first/last/min/max/top/bottom N accumulators.
+- Added `$setWindowFields` partition/sort support with `$shift`, `$documentNumber`, `$rank`, and `$denseRank`.
+
+## [0.1.9] - 2026-05-09
+
 ### Added
 - Added `$unwind.includeArrayIndex` support, including MongoDB-compatible `null` index handling for scalar and preserved null/missing/empty inputs.
 - Added `listCollections`, `drop`, and `dropDatabase` command handlers for metadata lookup and fixture cleanup flows.
@@ -54,7 +68,7 @@ All notable changes to this project are documented in this file.
 - Fixed upsert seed extraction to honor equality clauses nested inside `$and`, restoring duplicate-key behavior for `findOneAndUpdate` lock-style filters.
 
 ### Changed
-- Default local project version moved to `0.1.9-SNAPSHOT`.
+- Default local project version moved to `0.1.9-SNAPSHOT` before the `v0.1.9` release.
 
 ## [0.1.3] - 2026-02-24
 

@@ -49,6 +49,7 @@ Completed in current wave:
 - `listCollections`, `drop`, and `dropDatabase` command subsets added for fixture discovery/cleanup
 - tier-0 TTL runtime pruning added for single-field non-partial TTL indexes
 - deterministic R3 ledger mismatches reduced for `_id` dollar subfields, `updateMany` replacement validation, and transactional `createIndexes`
+- analytics-oriented update/aggregation parity expanded with `$min`/`$max`, expression-based pipeline updates, `$dateTrunc`, percentile/median and N accumulators, and a deterministic `$setWindowFields` subset
 
 ## Current Focus
 
@@ -69,7 +70,7 @@ Primary measures:
 - close remaining aggregate-stage unsupported surface beyond the current `$merge` terminal subset
 - expand collation semantics beyond current subset (`locale`/`strength`/`caseLevel`)
 - expand TTL runtime behavior beyond the current single-field lazy-prune subset
-- expand update/operator coverage beyond current `arrayFilters` subset (advanced positional/pipeline expressions)
+- expand update/operator coverage beyond current `arrayFilters` and pipeline-expression subsets (advanced positional updates and remaining expressions)
 - expand supported transaction operations in unified suites while preserving deterministic behavior
 
 ## Out of Scope (Current Phase)

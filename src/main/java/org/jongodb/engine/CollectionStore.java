@@ -51,6 +51,14 @@ public interface CollectionStore {
         return update(filter, update, true, false);
     }
 
+    default UpdateManyResult updatePipeline(
+            final Document filter,
+            final List<Document> pipeline,
+            final boolean multi,
+            final boolean upsert) {
+        throw new IllegalArgumentException("aggregation-pipeline updates are not supported yet");
+    }
+
     DeleteManyResult deleteMany(Document filter);
 
     record IndexDefinition(

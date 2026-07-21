@@ -8,7 +8,7 @@ plugins {
 }
 
 group = providers.gradleProperty("publishGroup").orElse("io.github.midagedev").get()
-version = providers.gradleProperty("publishVersion").orElse("0.1.9-SNAPSHOT").get()
+version = providers.gradleProperty("publishVersion").orElse("0.1.10-SNAPSHOT").get()
 
 repositories {
     mavenCentral()
@@ -42,6 +42,7 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("org.mongodb:mongodb-driver-sync:4.11.2")
     testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
     testImplementation("org.springframework:spring-context:6.1.17")

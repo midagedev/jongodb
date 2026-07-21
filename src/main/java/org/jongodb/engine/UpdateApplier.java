@@ -43,12 +43,15 @@ final class UpdateApplier {
         final List<SetOperation> setOperations = new ArrayList<>();
         final List<SetOnInsertOperation> setOnInsertOperations = new ArrayList<>();
         final List<IncOperation> incrementOperations = new ArrayList<>();
+        final List<MinMaxOperation> minMaxOperations = new ArrayList<>();
         final List<String> unsetOperations = new ArrayList<>();
         final List<AddToSetOperation> addToSetOperations = new ArrayList<>();
+        final List<String> claimedPaths = new ArrayList<>();
 
         for (final Map.Entry<String, Object> entry : update.entrySet()) {
             final String operator = entry.getKey();
             final Map<String, Object> definition = readDefinition(operator, entry.getValue(), parsedArrayFilters);
+            validateNoConflictingPaths(definition.keySet(), claimedPaths);
             switch (operator) {
                 case "$set":
                     for (final Map.Entry<String, Object> setEntry : definition.entrySet()) {
@@ -71,6 +74,15 @@ final class UpdateApplier {
                         incrementOperations.add(new IncOperation(incEntry.getKey(), (Number) delta));
                     }
                     break;
+                case "$min":
+                case "$max":
+                    for (final Map.Entry<String, Object> minMaxEntry : definition.entrySet()) {
+                        minMaxOperations.add(new MinMaxOperation(
+                                minMaxEntry.getKey(),
+                                minMaxEntry.getValue(),
+                                "$max".equals(operator)));
+                    }
+                    break;
                 case "$unset":
                     unsetOperations.addAll(definition.keySet());
                     break;
@@ -91,9 +103,25 @@ final class UpdateApplier {
                 setOperations,
                 setOnInsertOperations,
                 incrementOperations,
+                minMaxOperations,
                 unsetOperations,
                 addToSetOperations,
                 parsedArrayFilters);
+    }
+
+    private static void validateNoConflictingPaths(
+            final Set<String> newPaths, final List<String> claimedPaths) {
+        for (final String path : newPaths) {
+            for (final String claimedPath : claimedPaths) {
+                if (path.equals(claimedPath)
+                        || path.startsWith(claimedPath + ".")
+                        || claimedPath.startsWith(path + ".")) {
+                    throw new IllegalArgumentException(
+                            "updating the path '" + path + "' would create a conflict at '" + claimedPath + "'");
+                }
+            }
+            claimedPaths.add(path);
+        }
     }
 
     static void validateApplicable(final Document document, final ParsedUpdate update) {
@@ -130,6 +158,9 @@ final class UpdateApplier {
                 throw new IllegalArgumentException(
                         "$inc target for '" + operation.path() + "' must be numeric");
             }
+        }
+        for (final MinMaxOperation operation : update.minMaxOperations()) {
+            ensureWritablePath(document, operation.path(), update.arrayFilterBindings());
         }
         for (final AddToSetOperation operation : update.addToSetOperations()) {
             ensureWritablePath(document, operation.path(), update.arrayFilterBindings());
@@ -171,6 +202,9 @@ final class UpdateApplier {
         }
         for (final IncOperation operation : update.incrementOperations()) {
             modified |= applyIncrement(document, operation.path(), operation.delta());
+        }
+        for (final MinMaxOperation operation : update.minMaxOperations()) {
+            modified |= applyMinMax(document, operation);
         }
         for (final String path : update.unsetOperations()) {
             modified |= applyUnset(document, path, update.arrayFilterBindings());
@@ -402,6 +436,26 @@ final class UpdateApplier {
         return true;
     }
 
+    private static boolean applyMinMax(final Document document, final MinMaxOperation operation) {
+        final Map<String, Object> parent = getOrCreateParent(document, operation.path());
+        final String leaf = leaf(operation.path());
+        final Object candidate = DocumentCopies.copyAny(operation.value());
+
+        if (!parent.containsKey(leaf)) {
+            parent.put(leaf, candidate);
+            return true;
+        }
+
+        final Object current = parent.get(leaf);
+        final int comparison = MongoValueComparator.compare(candidate, current);
+        final boolean replace = operation.maximum() ? comparison > 0 : comparison < 0;
+        if (!replace) {
+            return false;
+        }
+        parent.put(leaf, candidate);
+        return true;
+    }
+
     private static boolean applyUnset(
             final Document document, final String path, final ArrayFilterBindings arrayFilterBindings) {
         if (pathContainsArrayFilter(path)) {
@@ -521,7 +575,7 @@ final class UpdateApplier {
 
     private static boolean containsByMongoEquality(final List<Object> values, final Object candidate) {
         for (final Object value : values) {
-            if (valueEquals(value, candidate)) {
+            if (MongoValueComparator.equals(value, candidate)) {
                 return true;
             }
         }
@@ -819,6 +873,7 @@ final class UpdateApplier {
         private final List<SetOperation> setOperations;
         private final List<SetOnInsertOperation> setOnInsertOperations;
         private final List<IncOperation> incrementOperations;
+        private final List<MinMaxOperation> minMaxOperations;
         private final List<String> unsetOperations;
         private final List<AddToSetOperation> addToSetOperations;
         private final Document replacementDocument;
@@ -828,6 +883,7 @@ final class UpdateApplier {
                 final List<SetOperation> setOperations,
                 final List<SetOnInsertOperation> setOnInsertOperations,
                 final List<IncOperation> incrementOperations,
+                final List<MinMaxOperation> minMaxOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations,
                 final Document replacementDocument,
@@ -835,6 +891,7 @@ final class UpdateApplier {
             this.setOperations = List.copyOf(setOperations);
             this.setOnInsertOperations = List.copyOf(setOnInsertOperations);
             this.incrementOperations = List.copyOf(incrementOperations);
+            this.minMaxOperations = List.copyOf(minMaxOperations);
             this.unsetOperations = List.copyOf(unsetOperations);
             this.addToSetOperations = List.copyOf(addToSetOperations);
             this.replacementDocument = replacementDocument == null ? null : DocumentCopies.copy(replacementDocument);
@@ -845,6 +902,7 @@ final class UpdateApplier {
                 final List<SetOperation> setOperations,
                 final List<SetOnInsertOperation> setOnInsertOperations,
                 final List<IncOperation> incrementOperations,
+                final List<MinMaxOperation> minMaxOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations,
                 final ArrayFilterBindings arrayFilterBindings) {
@@ -852,6 +910,7 @@ final class UpdateApplier {
                     setOperations,
                     setOnInsertOperations,
                     incrementOperations,
+                    minMaxOperations,
                     unsetOperations,
                     addToSetOperations,
                     null,
@@ -860,6 +919,7 @@ final class UpdateApplier {
 
         static ParsedUpdate replacement(final Document replacementDocument) {
             return new ParsedUpdate(
+                    List.of(),
                     List.of(),
                     List.of(),
                     List.of(),
@@ -887,6 +947,10 @@ final class UpdateApplier {
 
         List<IncOperation> incrementOperations() {
             return Collections.unmodifiableList(incrementOperations);
+        }
+
+        List<MinMaxOperation> minMaxOperations() {
+            return Collections.unmodifiableList(minMaxOperations);
         }
 
         List<String> unsetOperations() {
@@ -986,6 +1050,8 @@ final class UpdateApplier {
     private record SetOnInsertOperation(String path, Object value) {}
 
     private record IncOperation(String path, Number delta) {}
+
+    private record MinMaxOperation(String path, Object value, boolean maximum) {}
 
     private record AddToSetOperation(String path, List<Object> values) {}
 

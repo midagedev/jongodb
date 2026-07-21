@@ -2,7 +2,6 @@ package org.jongodb.engine;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
@@ -107,6 +106,7 @@ public final class AggregationPipeline {
                 case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver, collation);
                 case "$graphLookup" -> applyGraphLookup(working, stageDefinition, collectionResolver);
                 case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver, collation);
+                case "$setWindowFields" -> applySetWindowFields(working, stageDefinition, collation);
                 default -> throw new UnsupportedFeatureException(
                         "aggregation.stage." + stageName,
                         "unsupported aggregation stage: " + stageName);
@@ -197,7 +197,10 @@ public final class AggregationPipeline {
                 continue;
             }
 
-            output.put(field, evaluateExpression(source, entry.getValue()));
+            final Object evaluated = evaluateExpression(source, entry.getValue());
+            if (!AggregationExpressions.isMissing(evaluated)) {
+                output.put(field, evaluated);
+            }
         }
         return output;
     }
@@ -263,53 +266,22 @@ public final class AggregationPipeline {
 
         final Object idExpression = groupDefinition.get("_id");
         final List<GroupAccumulator> accumulators = parseAccumulators(groupDefinition);
-        final Map<GroupKey, Document> grouped = new LinkedHashMap<>();
+        final Map<GroupKey, GroupBucket> grouped = new LinkedHashMap<>();
         for (final Document source : input) {
             final Object id = evaluateGroupId(source, idExpression);
             final GroupKey groupKey = new GroupKey(id);
-            Document aggregate = grouped.get(groupKey);
-            if (aggregate == null) {
-                aggregate = new Document("_id", DocumentCopies.copyAny(id));
-                for (final GroupAccumulator accumulator : accumulators) {
-                    if (accumulator.operator() == GroupAccumulatorOperator.SUM) {
-                        aggregate.put(accumulator.outputField(), 0L);
-                        continue;
-                    }
-                    if (accumulator.operator() == GroupAccumulatorOperator.ADD_TO_SET) {
-                        aggregate.put(accumulator.outputField(), new ArrayList<>());
-                    }
-                }
-                grouped.put(groupKey, aggregate);
-            }
-
-            for (final GroupAccumulator accumulator : accumulators) {
-                if (accumulator.operator() == GroupAccumulatorOperator.SUM) {
-                    final Number increment = accumulator.sumOperand(source);
-                    aggregate.put(
-                            accumulator.outputField(),
-                            addNumbers(aggregate.get(accumulator.outputField()), increment));
-                    continue;
-                }
-
-                if (accumulator.operator() == GroupAccumulatorOperator.FIRST
-                        && !aggregate.containsKey(accumulator.outputField())) {
-                    aggregate.put(accumulator.outputField(), accumulator.firstOperand(source));
-                    continue;
-                }
-
-                if (accumulator.operator() == GroupAccumulatorOperator.ADD_TO_SET) {
-                    @SuppressWarnings("unchecked")
-                    final List<Object> values = (List<Object>) aggregate.computeIfAbsent(
-                            accumulator.outputField(), ignored -> new ArrayList<>());
-                    final Object candidate = accumulator.addToSetOperand(source);
-                    if (!containsByMongoEquality(values, candidate)) {
-                        values.add(candidate);
-                    }
-                }
-            }
+            grouped.computeIfAbsent(groupKey, ignored -> new GroupBucket(id)).sources().add(source);
         }
 
-        return List.copyOf(grouped.values());
+        final List<Document> output = new ArrayList<>(grouped.size());
+        for (final GroupBucket bucket : grouped.values()) {
+            final Document aggregate = new Document("_id", DocumentCopies.copyAny(bucket.id()));
+            for (final GroupAccumulator accumulator : accumulators) {
+                aggregate.put(accumulator.outputField(), evaluateAccumulator(accumulator, bucket.sources()));
+            }
+            output.add(aggregate);
+        }
+        return List.copyOf(output);
     }
 
     private static List<GroupAccumulator> parseAccumulators(final Document groupDefinition) {
@@ -328,8 +300,22 @@ public final class AggregationPipeline {
             final String accumulatorName = accumulatorDefinition.keySet().iterator().next();
             final GroupAccumulatorOperator operator = switch (accumulatorName) {
                 case "$sum" -> GroupAccumulatorOperator.SUM;
+                case "$avg" -> GroupAccumulatorOperator.AVG;
+                case "$min" -> GroupAccumulatorOperator.MIN;
+                case "$max" -> GroupAccumulatorOperator.MAX;
                 case "$first" -> GroupAccumulatorOperator.FIRST;
+                case "$last" -> GroupAccumulatorOperator.LAST;
+                case "$push" -> GroupAccumulatorOperator.PUSH;
                 case "$addToSet" -> GroupAccumulatorOperator.ADD_TO_SET;
+                case "$mergeObjects" -> GroupAccumulatorOperator.MERGE_OBJECTS;
+                case "$percentile" -> GroupAccumulatorOperator.PERCENTILE;
+                case "$median" -> GroupAccumulatorOperator.MEDIAN;
+                case "$firstN" -> GroupAccumulatorOperator.FIRST_N;
+                case "$lastN" -> GroupAccumulatorOperator.LAST_N;
+                case "$minN" -> GroupAccumulatorOperator.MIN_N;
+                case "$maxN" -> GroupAccumulatorOperator.MAX_N;
+                case "$topN" -> GroupAccumulatorOperator.TOP_N;
+                case "$bottomN" -> GroupAccumulatorOperator.BOTTOM_N;
                 default -> throw new UnsupportedFeatureException(
                         "aggregation.group.accumulator." + accumulatorName,
                         "unsupported $group accumulator: " + accumulatorName);
@@ -340,50 +326,33 @@ public final class AggregationPipeline {
     }
 
     private static Object evaluateGroupExpression(final Document source, final Object expression) {
-        if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
-            if ("$$ROOT".equals(pathExpression) || "$$CURRENT".equals(pathExpression)) {
-                return DocumentCopies.copy(source);
-            }
-            final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
-            return pathValue.present() ? DocumentCopies.copyAny(pathValue.value()) : null;
-        }
-        return DocumentCopies.copyAny(expression);
-    }
-
-    private static Number evaluateGroupSumOperand(final Document source, final Object expression) {
-        final Object value = evaluateGroupExpression(source, expression);
-        if (value instanceof Number numberValue) {
-            return numberValue;
-        }
-        return 0L;
+        return AggregationExpressions.nullIfMissing(evaluateExpression(source, expression));
     }
 
     private enum GroupAccumulatorOperator {
         SUM,
+        AVG,
+        MIN,
+        MAX,
         FIRST,
-        ADD_TO_SET
+        LAST,
+        PUSH,
+        ADD_TO_SET,
+        MERGE_OBJECTS,
+        PERCENTILE,
+        MEDIAN,
+        FIRST_N,
+        LAST_N,
+        MIN_N,
+        MAX_N,
+        TOP_N,
+        BOTTOM_N
     }
 
-    private record GroupAccumulator(String outputField, GroupAccumulatorOperator operator, Object expression) {
-        private Number sumOperand(final Document source) {
-            return evaluateGroupSumOperand(source, expression);
-        }
-
-        private Object firstOperand(final Document source) {
-            return evaluateGroupExpression(source, expression);
-        }
-
-        private Object addToSetOperand(final Document source) {
-            return evaluateGroupExpression(source, expression);
-        }
-    }
+    private record GroupAccumulator(String outputField, GroupAccumulatorOperator operator, Object expression) {}
 
     private static Object evaluateGroupId(final Document source, final Object expression) {
-        if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
-            final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
-            return pathValue.present() ? DocumentCopies.copyAny(pathValue.value()) : null;
-        }
-        return DocumentCopies.copyAny(expression);
+        return AggregationExpressions.nullIfMissing(evaluateExpression(source, expression));
     }
 
     private static Number addNumbers(final Object currentValue, final Number increment) {
@@ -395,11 +364,281 @@ public final class AggregationPipeline {
 
     private static boolean containsByMongoEquality(final List<Object> values, final Object candidate) {
         for (final Object value : values) {
-            if (Objects.deepEquals(value, candidate)) {
+            if (MongoValueComparator.equals(value, candidate)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static Object evaluateAccumulator(
+            final GroupAccumulator accumulator, final List<Document> sources) {
+        return switch (accumulator.operator()) {
+            case SUM -> accumulatorSum(sources, accumulator.expression());
+            case AVG -> accumulatorAverage(sources, accumulator.expression());
+            case MIN -> accumulatorMinMax(sources, accumulator.expression(), false);
+            case MAX -> accumulatorMinMax(sources, accumulator.expression(), true);
+            case FIRST -> sources.isEmpty()
+                    ? null
+                    : evaluateGroupExpression(sources.get(0), accumulator.expression());
+            case LAST -> sources.isEmpty()
+                    ? null
+                    : evaluateGroupExpression(sources.get(sources.size() - 1), accumulator.expression());
+            case PUSH -> accumulatorPush(sources, accumulator.expression(), false);
+            case ADD_TO_SET -> accumulatorPush(sources, accumulator.expression(), true);
+            case MERGE_OBJECTS -> accumulatorMergeObjects(sources, accumulator.expression());
+            case PERCENTILE -> accumulatorPercentile(sources, accumulator.expression(), false);
+            case MEDIAN -> accumulatorPercentile(sources, accumulator.expression(), true);
+            case FIRST_N -> accumulatorPositionalN(sources, accumulator.expression(), false);
+            case LAST_N -> accumulatorPositionalN(sources, accumulator.expression(), true);
+            case MIN_N -> accumulatorMinMaxN(sources, accumulator.expression(), false);
+            case MAX_N -> accumulatorMinMaxN(sources, accumulator.expression(), true);
+            case TOP_N -> accumulatorTopBottomN(sources, accumulator.expression(), false);
+            case BOTTOM_N -> accumulatorTopBottomN(sources, accumulator.expression(), true);
+        };
+    }
+
+    private static Object accumulatorSum(final List<Document> sources, final Object expression) {
+        Number sum = 0L;
+        for (final Document source : sources) {
+            final Object value = evaluateGroupExpression(source, expression);
+            if (value instanceof Number number) {
+                sum = addNumbers(sum, number);
+            }
+        }
+        return sum;
+    }
+
+    private static Object accumulatorAverage(final List<Document> sources, final Object expression) {
+        double sum = 0d;
+        long count = 0L;
+        for (final Document source : sources) {
+            final Object value = evaluateGroupExpression(source, expression);
+            if (value instanceof Number number) {
+                sum += number.doubleValue();
+                count++;
+            }
+        }
+        return count == 0 ? null : sum / count;
+    }
+
+    private static Object accumulatorMinMax(
+            final List<Document> sources, final Object expression, final boolean maximum) {
+        Object selected = null;
+        boolean found = false;
+        for (final Document source : sources) {
+            final Object value = evaluateExpression(source, expression);
+            if (value == null || AggregationExpressions.isMissing(value)) {
+                continue;
+            }
+            if (!found) {
+                selected = value;
+                found = true;
+                continue;
+            }
+            final int comparison = MongoValueComparator.compare(value, selected);
+            if ((maximum && comparison > 0) || (!maximum && comparison < 0)) {
+                selected = value;
+            }
+        }
+        return found ? DocumentCopies.copyAny(selected) : null;
+    }
+
+    private static Object accumulatorPush(
+            final List<Document> sources, final Object expression, final boolean unique) {
+        final List<Object> output = new ArrayList<>();
+        for (final Document source : sources) {
+            final Object value = evaluateGroupExpression(source, expression);
+            if (!unique || !containsByMongoEquality(output, value)) {
+                output.add(DocumentCopies.copyAny(value));
+            }
+        }
+        return output;
+    }
+
+    private static Object accumulatorMergeObjects(
+            final List<Document> sources, final Object expression) {
+        final Document merged = new Document();
+        for (final Document source : sources) {
+            final Object value = evaluateGroupExpression(source, expression);
+            if (value == null) {
+                continue;
+            }
+            if (!(value instanceof Map<?, ?> map)) {
+                throw new IllegalArgumentException("$mergeObjects accumulator requires document values");
+            }
+            for (final Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalArgumentException("$mergeObjects document keys must be strings");
+                }
+                merged.put(key, DocumentCopies.copyAny(entry.getValue()));
+            }
+        }
+        return merged;
+    }
+
+    private static Object accumulatorPercentile(
+            final List<Document> sources, final Object rawDefinition, final boolean median) {
+        final Document definition = requireDocument(
+                rawDefinition,
+                median ? "$median requires a document" : "$percentile requires a document");
+        final Set<String> supported = median ? Set.of("input", "method") : Set.of("input", "p", "method");
+        if (!supported.containsAll(definition.keySet())
+                || !definition.containsKey("input")
+                || !definition.containsKey("method")
+                || (!median && !definition.containsKey("p"))) {
+            throw new IllegalArgumentException(
+                    median
+                            ? "$median requires input and method"
+                            : "$percentile requires input, p, and method");
+        }
+        if (!"approximate".equals(definition.get("method"))) {
+            throw new IllegalArgumentException("percentile method must be 'approximate'");
+        }
+
+        final List<Double> samples = new ArrayList<>();
+        for (final Document source : sources) {
+            final Object value = evaluateGroupExpression(source, definition.get("input"));
+            if (value instanceof Number number && Double.isFinite(number.doubleValue())) {
+                samples.add(number.doubleValue());
+            }
+        }
+        samples.sort(Double::compare);
+        if (median) {
+            return exactPercentile(samples, 0.5d);
+        }
+
+        if (!(definition.get("p") instanceof List<?> rawPercentiles) || rawPercentiles.isEmpty()) {
+            throw new IllegalArgumentException("$percentile.p must be a non-empty array");
+        }
+        final List<Object> percentiles = new ArrayList<>(rawPercentiles.size());
+        for (final Object rawPercentile : rawPercentiles) {
+            if (!(rawPercentile instanceof Number number)
+                    || !Double.isFinite(number.doubleValue())
+                    || number.doubleValue() < 0d
+                    || number.doubleValue() > 1d) {
+                throw new IllegalArgumentException("$percentile.p entries must be numbers in [0, 1]");
+            }
+            percentiles.add(exactPercentile(samples, number.doubleValue()));
+        }
+        return percentiles;
+    }
+
+    private static Object exactPercentile(final List<Double> sorted, final double percentile) {
+        if (sorted.isEmpty()) {
+            return null;
+        }
+        if (sorted.size() == 1) {
+            return sorted.get(0);
+        }
+        final double rank = percentile * (sorted.size() - 1d);
+        final int lower = (int) Math.floor(rank);
+        final int upper = (int) Math.ceil(rank);
+        if (lower == upper) {
+            return sorted.get(lower);
+        }
+        final double fraction = rank - lower;
+        return sorted.get(lower) + (sorted.get(upper) - sorted.get(lower)) * fraction;
+    }
+
+    private static Object accumulatorPositionalN(
+            final List<Document> sources, final Object rawDefinition, final boolean fromEnd) {
+        final Document definition = requireNDefinition(rawDefinition, fromEnd ? "$lastN" : "$firstN", Set.of("input", "n"));
+        final int n = evaluateN(definition.get("n"), sources, fromEnd ? "$lastN" : "$firstN");
+        final int start = fromEnd ? Math.max(0, sources.size() - n) : 0;
+        final int end = fromEnd ? sources.size() : Math.min(sources.size(), n);
+        final List<Object> output = new ArrayList<>(Math.max(0, end - start));
+        for (int index = start; index < end; index++) {
+            output.add(DocumentCopies.copyAny(evaluateGroupExpression(sources.get(index), definition.get("input"))));
+        }
+        return output;
+    }
+
+    private static Object accumulatorMinMaxN(
+            final List<Document> sources, final Object rawDefinition, final boolean maximum) {
+        final String operator = maximum ? "$maxN" : "$minN";
+        final Document definition = requireNDefinition(rawDefinition, operator, Set.of("input", "n"));
+        final int n = evaluateN(definition.get("n"), sources, operator);
+        final List<Object> values = new ArrayList<>();
+        for (final Document source : sources) {
+            final Object value = evaluateGroupExpression(source, definition.get("input"));
+            if (value != null) {
+                values.add(value);
+            }
+        }
+        values.sort((left, right) -> maximum
+                ? MongoValueComparator.compare(right, left)
+                : MongoValueComparator.compare(left, right));
+        return new ArrayList<>(values.subList(0, Math.min(n, values.size())));
+    }
+
+    private static Object accumulatorTopBottomN(
+            final List<Document> sources, final Object rawDefinition, final boolean bottom) {
+        final String operator = bottom ? "$bottomN" : "$topN";
+        final Document definition = requireNDefinition(rawDefinition, operator, Set.of("output", "sortBy", "n"));
+        final Document sortBy = requireDocument(definition.get("sortBy"), operator + ".sortBy must be a document");
+        if (sortBy.isEmpty()) {
+            throw new IllegalArgumentException(operator + ".sortBy must not be empty");
+        }
+        final List<SortKey> sortKeys = new ArrayList<>();
+        for (final Map.Entry<String, Object> entry : sortBy.entrySet()) {
+            final int direction = parseSortDirection(entry.getValue());
+            if (direction != 1 && direction != -1) {
+                throw new IllegalArgumentException(operator + ".sortBy directions must be 1 or -1");
+            }
+            sortKeys.add(new SortKey(entry.getKey(), direction));
+        }
+        final int n = evaluateN(definition.get("n"), sources, operator);
+        final List<Document> sorted = new ArrayList<>(sources);
+        sorted.sort((left, right) -> compareSortDocuments(
+                left, right, sortKeys, CollationSupport.Config.simple()));
+        final List<Object> output = new ArrayList<>();
+        final int start = bottom ? Math.max(0, sorted.size() - n) : 0;
+        final int end = bottom ? sorted.size() : Math.min(n, sorted.size());
+        for (int index = start; index < end; index++) {
+            output.add(DocumentCopies.copyAny(evaluateGroupExpression(sorted.get(index), definition.get("output"))));
+        }
+        return output;
+    }
+
+    private static Document requireNDefinition(
+            final Object rawDefinition, final String operator, final Set<String> requiredFields) {
+        final Document definition = requireDocument(rawDefinition, operator + " requires a document");
+        if (!definition.keySet().equals(requiredFields)) {
+            throw new IllegalArgumentException(operator + " requires exactly " + requiredFields);
+        }
+        return definition;
+    }
+
+    private static int evaluateN(
+            final Object expression, final List<Document> sources, final String operator) {
+        final Document context = sources.isEmpty() ? new Document() : sources.get(0);
+        final Object value = evaluateGroupExpression(context, expression);
+        if (!(value instanceof Number number)
+                || !Double.isFinite(number.doubleValue())
+                || Math.rint(number.doubleValue()) != number.doubleValue()
+                || number.doubleValue() < 1d
+                || number.doubleValue() > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(operator + ".n must evaluate to a positive integer");
+        }
+        return number.intValue();
+    }
+
+    private static final class GroupBucket {
+        private final Object id;
+        private final List<Document> sources = new ArrayList<>();
+
+        private GroupBucket(final Object id) {
+            this.id = DocumentCopies.copyAny(id);
+        }
+
+        private Object id() {
+            return id;
+        }
+
+        private List<Document> sources() {
+            return sources;
+        }
     }
 
     private static Number normalizeNumber(final double value) {
@@ -437,6 +676,186 @@ public final class AggregationPipeline {
         return sorted;
     }
 
+    private static List<Document> applySetWindowFields(
+            final List<Document> input,
+            final Object stageDefinition,
+            final CollationSupport.Config collation) {
+        final Document definition =
+                requireDocument(stageDefinition, "$setWindowFields stage requires a document");
+        if (!Set.of("partitionBy", "sortBy", "output").containsAll(definition.keySet())
+                || !definition.containsKey("output")) {
+            throw new IllegalArgumentException(
+                    "$setWindowFields supports partitionBy, sortBy, and requires output");
+        }
+        final Document outputDefinition =
+                requireDocument(definition.get("output"), "$setWindowFields.output must be a document");
+        if (outputDefinition.isEmpty()) {
+            throw new IllegalArgumentException("$setWindowFields.output must not be empty");
+        }
+
+        final List<SortKey> sortKeys = new ArrayList<>();
+        if (definition.containsKey("sortBy")) {
+            final Document sortDefinition =
+                    requireDocument(definition.get("sortBy"), "$setWindowFields.sortBy must be a document");
+            if (sortDefinition.isEmpty()) {
+                throw new IllegalArgumentException("$setWindowFields.sortBy must not be empty");
+            }
+            for (final Map.Entry<String, Object> entry : sortDefinition.entrySet()) {
+                final int direction = parseSortDirection(entry.getValue());
+                if (direction != 1 && direction != -1) {
+                    throw new IllegalArgumentException("$setWindowFields.sortBy directions must be 1 or -1");
+                }
+                sortKeys.add(new SortKey(entry.getKey(), direction));
+            }
+        }
+
+        final Map<GroupKey, List<Document>> partitions = new LinkedHashMap<>();
+        for (final Document source : input) {
+            final Object partitionValue = definition.containsKey("partitionBy")
+                    ? AggregationExpressions.nullIfMissing(evaluateExpression(source, definition.get("partitionBy")))
+                    : null;
+            partitions.computeIfAbsent(new GroupKey(partitionValue), ignored -> new ArrayList<>()).add(source);
+        }
+
+        final List<Document> output = new ArrayList<>(input.size());
+        for (final List<Document> partition : partitions.values()) {
+            if (!sortKeys.isEmpty()) {
+                partition.sort((left, right) -> compareSortDocuments(left, right, sortKeys, collation));
+            }
+            applyWindowOutputs(partition, outputDefinition, sortKeys, collation, output);
+        }
+        return List.copyOf(output);
+    }
+
+    private static void applyWindowOutputs(
+            final List<Document> partition,
+            final Document outputDefinition,
+            final List<SortKey> sortKeys,
+            final CollationSupport.Config collation,
+            final List<Document> output) {
+        long rank = 1L;
+        long denseRank = 1L;
+        for (int index = 0; index < partition.size(); index++) {
+            if (index > 0 && !sortKeys.isEmpty()) {
+                final boolean changed = compareSortDocuments(
+                                partition.get(index - 1), partition.get(index), sortKeys, collation)
+                        != 0;
+                if (changed) {
+                    rank = index + 1L;
+                    denseRank++;
+                }
+            }
+
+            final Document expanded = DocumentCopies.copy(partition.get(index));
+            for (final Map.Entry<String, Object> outputEntry : outputDefinition.entrySet()) {
+                final String outputPath = requireText(outputEntry.getKey(), "$setWindowFields output field");
+                final Document operatorDefinition = requireDocument(
+                        outputEntry.getValue(), "$setWindowFields output definitions must be documents");
+                if (operatorDefinition.size() != 1) {
+                    throw new IllegalArgumentException(
+                            "$setWindowFields output definition must contain exactly one operator");
+                }
+                final String operator = operatorDefinition.keySet().iterator().next();
+                final Object value = switch (operator) {
+                    case "$shift" -> evaluateShift(
+                            partition, index, operatorDefinition.get(operator), sortKeys);
+                    case "$documentNumber" -> {
+                        requireEmptyWindowOperator(operatorDefinition.get(operator), "$documentNumber");
+                        if (sortKeys.isEmpty()) {
+                            throw new IllegalArgumentException("$documentNumber requires sortBy");
+                        }
+                        yield index + 1L;
+                    }
+                    case "$rank" -> {
+                        requireEmptyWindowOperator(operatorDefinition.get(operator), "$rank");
+                        if (sortKeys.isEmpty()) {
+                            throw new IllegalArgumentException("$rank requires sortBy");
+                        }
+                        yield rank;
+                    }
+                    case "$denseRank" -> {
+                        requireEmptyWindowOperator(operatorDefinition.get(operator), "$denseRank");
+                        if (sortKeys.isEmpty()) {
+                            throw new IllegalArgumentException("$denseRank requires sortBy");
+                        }
+                        yield denseRank;
+                    }
+                    default -> throw new UnsupportedFeatureException(
+                            "aggregation.setWindowFields.operator." + operator,
+                            "unsupported $setWindowFields operator: " + operator);
+                };
+                if (AggregationExpressions.isMissing(value)) {
+                    removePath(expanded, outputPath);
+                } else {
+                    setPath(expanded, outputPath, value);
+                }
+            }
+            output.add(expanded);
+        }
+    }
+
+    private static Object evaluateShift(
+            final List<Document> partition,
+            final int index,
+            final Object rawDefinition,
+            final List<SortKey> sortKeys) {
+        if (sortKeys.isEmpty()) {
+            throw new IllegalArgumentException("$shift requires sortBy");
+        }
+        final Document definition = requireDocument(rawDefinition, "$shift requires a document");
+        if (!Set.of("output", "by", "default").containsAll(definition.keySet())
+                || !definition.containsKey("output")
+                || !definition.containsKey("by")) {
+            throw new IllegalArgumentException("$shift requires output and by, with optional default");
+        }
+        final Object byValue = definition.get("by");
+        if (!(byValue instanceof Number number)
+                || !Double.isFinite(number.doubleValue())
+                || Math.rint(number.doubleValue()) != number.doubleValue()
+                || number.doubleValue() < Integer.MIN_VALUE
+                || number.doubleValue() > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("$shift.by must be a non-zero integer constant");
+        }
+        final int targetIndex = index + number.intValue();
+        if (targetIndex < 0 || targetIndex >= partition.size()) {
+            if (!definition.containsKey("default")) {
+                return null;
+            }
+            if (containsFieldReference(definition.get("default"))) {
+                throw new IllegalArgumentException("$shift.default must be a constant expression");
+            }
+            return evaluateExpression(partition.get(index), definition.get("default"));
+        }
+        return evaluateExpression(partition.get(targetIndex), definition.get("output"));
+    }
+
+    private static void requireEmptyWindowOperator(final Object value, final String operator) {
+        if (!(value instanceof Map<?, ?> map) || !map.isEmpty()) {
+            throw new IllegalArgumentException(operator + " requires an empty document");
+        }
+    }
+
+    private static boolean containsFieldReference(final Object value) {
+        if (value instanceof String stringValue) {
+            return stringValue.startsWith("$") && !stringValue.startsWith("$$");
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (final Object nested : map.values()) {
+                if (containsFieldReference(nested)) {
+                    return true;
+                }
+            }
+        }
+        if (value instanceof List<?> list) {
+            for (final Object nested : list) {
+                if (containsFieldReference(nested)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static int parseSortDirection(final Object value) {
         if (!(value instanceof Number numberValue)) {
             throw new IllegalArgumentException("$sort directions must be numeric");
@@ -467,37 +886,9 @@ public final class AggregationPipeline {
         return 0;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static int compareSortValues(
             final Object left, final Object right, final CollationSupport.Config collation) {
-        if (left == right) {
-            return 0;
-        }
-        if (left == null) {
-            return -1;
-        }
-        if (right == null) {
-            return 1;
-        }
-        if (left instanceof Number leftNumber && right instanceof Number rightNumber) {
-            return Double.compare(leftNumber.doubleValue(), rightNumber.doubleValue());
-        }
-        if (left instanceof String leftString && right instanceof String rightString) {
-            return collation.compareStrings(leftString, rightString);
-        }
-        if (left instanceof Boolean leftBoolean && right instanceof Boolean rightBoolean) {
-            return Boolean.compare(leftBoolean, rightBoolean);
-        }
-        if (left.getClass().equals(right.getClass()) && left instanceof Comparable leftComparable) {
-            return leftComparable.compareTo(right);
-        }
-
-        final int leftRank = sortTypeRank(left);
-        final int rightRank = sortTypeRank(right);
-        if (leftRank != rightRank) {
-            return Integer.compare(leftRank, rightRank);
-        }
-        return stableSortValue(left).compareTo(stableSortValue(right));
+        return MongoValueComparator.compare(left, right, collation);
     }
 
     private static int sortTypeRank(final Object value) {
@@ -694,7 +1085,12 @@ public final class AggregationPipeline {
             final Document expanded = DocumentCopies.copy(source);
             for (final Map.Entry<String, Object> entry : assignments.entrySet()) {
                 final String fieldName = requireText(entry.getKey(), stageName + " field");
-                setPath(expanded, fieldName, evaluateExpression(source, entry.getValue()));
+                final Object value = evaluateExpression(source, entry.getValue());
+                if (AggregationExpressions.isMissing(value)) {
+                    removePath(expanded, fieldName);
+                } else {
+                    setPath(expanded, fieldName, value);
+                }
             }
             output.add(expanded);
         }
@@ -756,7 +1152,8 @@ public final class AggregationPipeline {
             final CollationSupport.Config collation) {
         final Map<GroupKey, CountBucket> buckets = new LinkedHashMap<>();
         for (final Document source : input) {
-            final Object bucketValue = evaluateExpression(source, stageDefinition);
+            final Object bucketValue = AggregationExpressions.nullIfMissing(
+                    evaluateExpression(source, stageDefinition));
             final GroupKey bucketKey = new GroupKey(bucketValue);
             final CountBucket existing = buckets.get(bucketKey);
             if (existing == null) {
@@ -1032,14 +1429,7 @@ public final class AggregationPipeline {
     }
 
     private static Object evaluateExpression(final Document source, final Object expression) {
-        if (expression instanceof String pathExpression && pathExpression.startsWith("$")) {
-            if ("$$ROOT".equals(pathExpression) || "$$CURRENT".equals(pathExpression)) {
-                return DocumentCopies.copy(source);
-            }
-            final PathValue pathValue = resolvePath(source, pathExpression.substring(1));
-            return pathValue.present() ? DocumentCopies.copyAny(pathValue.value()) : null;
-        }
-        return DocumentCopies.copyAny(expression);
+        return AggregationExpressions.evaluate(source, expression);
     }
 
     private static PathValue resolvePath(final Object source, final String path) {
@@ -1311,7 +1701,7 @@ public final class AggregationPipeline {
 
         private GroupKey(final Object value) {
             this.value = DocumentCopies.copyAny(value);
-            this.hashCode = Arrays.deepHashCode(new Object[] {this.value});
+            this.hashCode = MongoValueComparator.hash(this.value);
         }
 
         @Override
@@ -1322,7 +1712,7 @@ public final class AggregationPipeline {
             if (!(other instanceof GroupKey that)) {
                 return false;
             }
-            return Objects.deepEquals(value, that.value);
+            return MongoValueComparator.equals(value, that.value);
         }
 
         @Override

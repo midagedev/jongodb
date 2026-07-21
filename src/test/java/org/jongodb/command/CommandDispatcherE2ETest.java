@@ -883,6 +883,104 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void updateCommandSupportsMinMaxWithUpsertNumbersDatesAndInc() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+
+        final BsonDocument upsert = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "update": "rollups",
+                  "$db": "app",
+                  "updates": [{
+                    "q": {"_id": "bucket"},
+                    "u": {
+                      "$inc": {"count": 3},
+                      "$max": {"durationMaxMs": 4000.0, "lastEventAt": {"$date": "2026-07-21T09:30:00Z"}},
+                      "$min": {"durationMinMs": 40.0}
+                    },
+                    "upsert": true
+                  }]
+                }
+                """));
+        assertEquals(1.0d, upsert.get("ok").asNumber().doubleValue());
+        assertEquals(1, upsert.getArray("upserted").size());
+
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "update": "rollups",
+                  "$db": "app",
+                  "updates": [{
+                    "q": {"_id": "bucket"},
+                    "u": {
+                      "$inc": {"count": 2},
+                      "$max": {"durationMaxMs": 2000.0, "lastEventAt": {"$date": "2026-07-21T09:00:00Z"}},
+                      "$min": {"durationMinMs": 80}
+                    }
+                  }]
+                }
+                """));
+        dispatcher.dispatch(BsonDocument.parse(
+                """
+                {"update":"rollups","$db":"app","updates":[{
+                  "q":{"_id":"bucket"},
+                  "u":{"$max":{"durationMaxMs":5000.0,"lastEventAt":{"$date":"2026-07-21T10:00:00Z"}},"$min":{"durationMinMs":20}}
+                }]}
+                """));
+
+        final BsonDocument found = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"rollups\",\"$db\":\"app\",\"filter\":{\"_id\":\"bucket\"}}"));
+        final BsonDocument rollup = found.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals(5, rollup.getInt32("count").getValue());
+        assertEquals(5000.0d, rollup.getDouble("durationMaxMs").getValue());
+        assertEquals(20, rollup.getInt32("durationMinMs").getValue());
+        assertEquals(1784628000000L, rollup.getDateTime("lastEventAt").getValue());
+    }
+
+    @Test
+    void updateCommandEvaluatesConditionalAggregationPipelineAtomically() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        final String updateTemplate = """
+                {
+                  "update": "activity",
+                  "$db": "app",
+                  "updates": [{
+                    "q": {"_id": "bucket|account"},
+                    "u": [{
+                      "$set": {
+                        "lastEventAt": {"$max": ["$lastEventAt", {"$date": "%s"}]},
+                        "lastEvent": {"$cond": [
+                          {"$or": [
+                            {"$eq": [{"$type": "$lastEventAt"}, "missing"]},
+                            {"$lt": ["$lastEventAt", {"$date": "%s"}]}
+                          ]},
+                          "%s",
+                          "$lastEvent"
+                        ]}
+                      }
+                    }, {"$replaceWith": {"$mergeObjects": ["$$ROOT", {"updated": true}]}}],
+                    "upsert": true
+                  }]
+                }
+                """;
+
+        final BsonDocument inserted = dispatcher.dispatch(BsonDocument.parse(
+                updateTemplate.formatted("2026-07-21T09:30:00Z", "2026-07-21T09:30:00Z", "batch.run")));
+        assertEquals(1.0d, inserted.get("ok").asNumber().doubleValue());
+        dispatcher.dispatch(BsonDocument.parse(
+                updateTemplate.formatted("2026-07-21T09:00:00Z", "2026-07-21T09:00:00Z", "older.run")));
+        dispatcher.dispatch(BsonDocument.parse(
+                updateTemplate.formatted("2026-07-21T10:00:00Z", "2026-07-21T10:00:00Z", "newer.run")));
+
+        final BsonDocument found = dispatcher.dispatch(BsonDocument.parse(
+                "{\"find\":\"activity\",\"$db\":\"app\",\"filter\":{\"_id\":\"bucket|account\"}}"));
+        final BsonDocument activity = found.getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals("newer.run", activity.getString("lastEvent").getValue());
+        assertEquals(1784628000000L, activity.getDateTime("lastEventAt").getValue());
+        assertTrue(activity.getBoolean("updated").getValue());
+    }
+
+    @Test
     void updateCommandSupportsReplaceOneSemantics() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(
@@ -1453,16 +1551,20 @@ class CommandDispatcherE2ETest {
         assertCommandError(arrayFilterWithUnsupportedOperator, "BadValue");
 
         final BsonDocument unsupportedPipelineStage = dispatcher.dispatch(BsonDocument.parse(
-                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":[{\"$replaceRoot\":{\"newRoot\":{\"x\":1}}}]}]}"));
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":[{\"$match\":{\"x\":1}}]}]}"));
         assertCommandError(unsupportedPipelineStage, "BadValue");
 
-        final BsonDocument pipelineExpressionNotSupported = dispatcher.dispatch(BsonDocument.parse(
+        final BsonDocument pipelineExpressionSupported = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":[{\"$set\":{\"a\":\"$other\"}}]}]}"));
-        assertCommandError(pipelineExpressionNotSupported, "BadValue");
+        assertEquals(1.0d, pipelineExpressionSupported.get("ok").asNumber().doubleValue());
 
         final BsonDocument unsupportedPositionalPath = dispatcher.dispatch(BsonDocument.parse(
                 "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"items.$.qty\":1}}}]}"));
         assertCommandError(unsupportedPositionalPath, "BadValue");
+
+        final BsonDocument conflictingUpdatePaths = dispatcher.dispatch(BsonDocument.parse(
+                "{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$set\":{\"stats\":1},\"$max\":{\"stats.maximum\":2}}}]}"));
+        assertCommandError(conflictingUpdatePaths, "BadValue");
 
         final BsonDocument setOnInsertTypeMismatch = dispatcher.dispatch(
                 BsonDocument.parse("{\"update\":\"users\",\"updates\":[{\"q\":{},\"u\":{\"$setOnInsert\":1}}]}"));

@@ -1,6 +1,7 @@
 package org.jongodb.command;
 
 import java.util.List;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
 import org.jongodb.engine.CollationSupport;
@@ -146,13 +147,43 @@ public interface CommandStore {
     }
 
     record UpdateRequest(
-            BsonDocument query, BsonDocument update, boolean multi, boolean upsert, List<BsonDocument> arrayFilters) {
+            BsonDocument query,
+            BsonDocument update,
+            BsonArray updatePipeline,
+            boolean multi,
+            boolean upsert,
+            List<BsonDocument> arrayFilters) {
         public UpdateRequest(final BsonDocument query, final BsonDocument update, final boolean multi, final boolean upsert) {
-            this(query, update, multi, upsert, List.of());
+            this(query, update, null, multi, upsert, List.of());
+        }
+
+        public UpdateRequest(
+                final BsonDocument query,
+                final BsonDocument update,
+                final boolean multi,
+                final boolean upsert,
+                final List<BsonDocument> arrayFilters) {
+            this(query, update, null, multi, upsert, arrayFilters);
+        }
+
+        public UpdateRequest(
+                final BsonDocument query,
+                final BsonArray updatePipeline,
+                final boolean multi,
+                final boolean upsert) {
+            this(query, null, updatePipeline, multi, upsert, List.of());
         }
 
         public UpdateRequest {
+            if ((update == null) == (updatePipeline == null)) {
+                throw new IllegalArgumentException("exactly one of update or updatePipeline must be specified");
+            }
+            update = update == null ? null : update.clone();
+            updatePipeline = updatePipeline == null ? null : updatePipeline.clone();
             arrayFilters = copyArrayFilters(arrayFilters);
+            if (updatePipeline != null && !arrayFilters.isEmpty()) {
+                throw new IllegalArgumentException("arrayFilters is not allowed with pipeline updates");
+            }
         }
 
         private static List<BsonDocument> copyArrayFilters(final List<BsonDocument> source) {

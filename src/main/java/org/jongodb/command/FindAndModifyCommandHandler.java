@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import org.bson.BsonArray;
 import org.bson.BsonBoolean;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
@@ -101,10 +102,20 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
                 return CommandErrors.badValue("upsert is not allowed when remove=true");
             }
         }
-        if (!remove && (updateValue == null || !updateValue.isDocument())) {
-            return CommandErrors.typeMismatch("update must be a document");
+        if (!remove && (updateValue == null || (!updateValue.isDocument() && !updateValue.isArray()))) {
+            return CommandErrors.typeMismatch("update must be a document or array");
         }
         final BsonDocument update = updateValue != null && updateValue.isDocument() ? updateValue.asDocument() : null;
+        final BsonArray updatePipeline;
+        if (updateValue != null && updateValue.isArray()) {
+            final UpdatePipelineSubset.ParseResult parsedPipeline = UpdatePipelineSubset.parse(updateValue.asArray());
+            if (parsedPipeline.error() != null) {
+                return parsedPipeline.error();
+            }
+            updatePipeline = parsedPipeline.updatePipeline();
+        } else {
+            updatePipeline = null;
+        }
         final UpdateArrayFiltersSubset.ParseResult parsedArrayFilters =
                 UpdateArrayFiltersSubset.parse(command.get("arrayFilters"));
         if (parsedArrayFilters.error() != null) {
@@ -112,6 +123,9 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         }
         if (remove && !parsedArrayFilters.parsed().isEmpty()) {
             return CommandErrors.badValue("arrayFilters is not allowed when remove=true");
+        }
+        if (updatePipeline != null && !parsedArrayFilters.parsed().isEmpty()) {
+            return CommandErrors.badValue("arrayFilters is not allowed with pipeline updates");
         }
 
         final List<BsonDocument> matches;
@@ -132,6 +146,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
                     collection,
                     query,
                     update,
+                    updatePipeline,
                     selected,
                     upsert,
                     returnNew,
@@ -167,6 +182,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             final String collection,
             final BsonDocument query,
             final BsonDocument update,
+            final BsonArray updatePipeline,
             final BsonDocument selected,
             final boolean upsert,
             final boolean returnNew,
@@ -178,7 +194,9 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             final CommandStore.UpdateResult result = store.update(
                     database,
                     collection,
-                    List.of(new CommandStore.UpdateRequest(oneFilter, update, false, false, arrayFilters)));
+                    List.of(updatePipeline == null
+                            ? new CommandStore.UpdateRequest(oneFilter, update, false, false, arrayFilters)
+                            : new CommandStore.UpdateRequest(oneFilter, updatePipeline, false, false)));
             final BsonDocument selectedValue = returnNew ? firstMatch(database, collection, oneFilter, collation) : selected;
             final BsonDocument value = applyProjection(selectedValue, projectionSpec);
             return successResponse(result.matchedCount() > 0 ? 1 : 0, result.matchedCount() > 0, null, value);
@@ -191,7 +209,9 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         final CommandStore.UpdateResult result = store.update(
                 database,
                 collection,
-                List.of(new CommandStore.UpdateRequest(query, update, false, true, arrayFilters)));
+                List.of(updatePipeline == null
+                        ? new CommandStore.UpdateRequest(query, update, false, true, arrayFilters)
+                        : new CommandStore.UpdateRequest(query, updatePipeline, false, true)));
         final BsonValue upsertedId =
                 result.upserted().isEmpty() ? null : result.upserted().get(0).id();
 
