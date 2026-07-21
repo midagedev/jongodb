@@ -8,7 +8,8 @@ import org.bson.BsonValue;
 import org.jongodb.command.CommandCanonicalizer.ValidationException;
 
 public final class FindOneAndUpdateCommandHandler implements CommandHandler {
-    private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$setOnInsert", "$inc", "$unset", "$addToSet");
+    private static final Set<String> SUPPORTED_OPERATORS =
+            Set.of("$set", "$setOnInsert", "$inc", "$min", "$max", "$unset", "$addToSet");
 
     private final FindAndModifyCommandHandler findAndModifyCommandHandler;
 
@@ -49,17 +50,20 @@ public final class FindOneAndUpdateCommandHandler implements CommandHandler {
         }
 
         final BsonValue updateValue = command.get("update");
-        final BsonDocument update;
+        final BsonValue update;
+        final boolean pipelineUpdate;
         if (updateValue == null) {
             return CommandErrors.typeMismatch("update must be a document or array");
         } else if (updateValue.isDocument()) {
             update = updateValue.asDocument();
+            pipelineUpdate = false;
         } else if (updateValue.isArray()) {
             final UpdatePipelineSubset.ParseResult parsedPipeline = UpdatePipelineSubset.parse(updateValue.asArray());
             if (parsedPipeline.error() != null) {
                 return parsedPipeline.error();
             }
-            update = parsedPipeline.updateDocument();
+            update = parsedPipeline.updatePipeline();
+            pipelineUpdate = true;
         } else {
             return CommandErrors.typeMismatch("update must be a document or array");
         }
@@ -85,10 +89,15 @@ public final class FindOneAndUpdateCommandHandler implements CommandHandler {
         if (parsedArrayFilters.error() != null) {
             return parsedArrayFilters.error();
         }
+        if (pipelineUpdate && !parsedArrayFilters.parsed().isEmpty()) {
+            return CommandErrors.badValue("arrayFilters is not allowed with pipeline updates");
+        }
 
-        optionError = validateOperatorUpdateDocument(update, parsedArrayFilters.parsed());
-        if (optionError != null) {
-            return optionError;
+        if (!pipelineUpdate) {
+            optionError = validateOperatorUpdateDocument(update.asDocument(), parsedArrayFilters.parsed());
+            if (optionError != null) {
+                return optionError;
+            }
         }
 
         final boolean returnNew;
@@ -156,6 +165,16 @@ public final class FindOneAndUpdateCommandHandler implements CommandHandler {
         final BsonValue incValue = update.get("$inc");
         if (incValue != null && !incValue.isDocument()) {
             return CommandErrors.typeMismatch("$inc must be a document");
+        }
+
+        final BsonValue minValue = update.get("$min");
+        if (minValue != null && !minValue.isDocument()) {
+            return CommandErrors.typeMismatch("$min must be a document");
+        }
+
+        final BsonValue maxValue = update.get("$max");
+        if (maxValue != null && !maxValue.isDocument()) {
+            return CommandErrors.typeMismatch("$max must be a document");
         }
 
         final BsonValue unsetValue = update.get("$unset");

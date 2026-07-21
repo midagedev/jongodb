@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Status date: 2026-05-09
+Status date: 2026-07-21
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
@@ -28,7 +28,7 @@ Certification context:
 | `listCollections` | Partial | Cursor-shaped collection metadata subset for fixture discovery |
 | `drop` | Partial | Collection cleanup subset with deterministic `NamespaceNotFound` error |
 | `dropDatabase` | Partial | Database-scoped cleanup subset |
-| `update` | Partial | Operator set intentionally limited; update pipeline subset supports `$set`/`$unset` stages without expression evaluation |
+| `update` | Partial | Supports `$min`/`$max` and core modifiers; aggregation-pipeline updates support MongoDB's update-stage allowlist with the expression subset below |
 | `delete` | Supported | `limit` 0/1 behavior |
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
@@ -36,7 +36,7 @@ Certification context:
 | `countDocuments` | Partial | Filter + skip/limit + hint/readConcern; collation subset applied to filter comparison |
 | `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`, `distinct`, `drop`, `dropDatabase`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
-| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator updates plus update-pipeline subset (`$set`/`$unset`, no expression evaluation), `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
+| `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator and expression-based pipeline updates, `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
 
@@ -67,7 +67,7 @@ Not implemented:
 Implemented stages:
 - `$match`
 - `$project`
-- `$group` (subset: `$sum`, `$first`, `$addToSet`)
+- `$group` with `$sum`, `$avg`, `$min`, `$max`, `$first`, `$last`, `$push`, `$addToSet`, `$mergeObjects`, `$percentile`, `$median`, `$firstN`, `$lastN`, `$minN`, `$maxN`, `$topN`, and `$bottomN`
 - `$sort`
 - `$limit`, `$skip`
 - `$unwind` (including `includeArrayIndex`)
@@ -82,13 +82,16 @@ Implemented stages:
 - `$lookup` (local/foreign and pipeline+let subset)
 - `$unionWith`
 - `$graphLookup` (minimal subset: `from`, `startWith`, `connectFromField`, `connectToField`, `as`, optional `maxDepth`)
+- `$setWindowFields` subset with `partitionBy`, `sortBy`, `$shift`, `$documentNumber`, `$rank`, and `$denseRank`
 - `$out` (terminal string-target subset: replaces target collection contents and returns empty result set)
 - `$merge` (terminal string-target or `{into: <collection>}` subset; merges by `_id`)
 
 Not implemented or partial:
 - unsupported stages return deterministic fail-fast
-- many advanced expression operators are still missing
-- `$group` accumulators other than `$sum` are not available
+- expression support includes field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
+- `$dateTrunc` supports second through year units, `binSize`, `startOfWeek`, and UTC timezone aliases; non-UTC timezones fail explicitly
+- `$percentile`/`$median` accept `method: "approximate"` and use deterministic exact interpolation internally
+- window accumulators and range/time windows beyond the listed `$setWindowFields` subset are not implemented
 - `$merge` options beyond the terminal string / `{into: <collection>}` subset are deterministic unsupported paths
 - `$graphLookup` options outside current subset (for example `depthField`, `restrictSearchWithMatch`) are deterministic unsupported paths
 - `bypassDocumentValidation` for aggregate is excluded from current differential corpus
@@ -96,9 +99,10 @@ Not implemented or partial:
 ## Update Semantics
 
 Supported:
-- operator updates: `$set`, `$inc`, `$unset`
+- operator updates: `$set`, `$setOnInsert`, `$inc`, `$min`, `$max`, `$unset`, `$addToSet`
 - `arrayFilters` subset for `$set`/`$unset` paths using `$[identifier]` bindings
-- update pipeline subset: `$set`/`$unset` stages with literal values
+- update pipeline stages: `$addFields`/`$set`, `$project`/`$unset`, and `$replaceRoot`/`$replaceWith`
+- update pipeline expressions: field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
 - replacement updates (with `multi=false`)
 - upsert for operator and replacement forms
 - same update constraints apply to `bulkWrite` update/replace operations
@@ -107,8 +111,8 @@ Not supported:
 - advanced `arrayFilters` forms (unsupported operators, missing bindings, unsupported path/operator combinations)
 - positional updates (`$`, `$[]`)
 - update operators outside the supported set
-- update pipeline stages outside `$set`/`$unset`
-- update pipeline expressions (field references/operator expressions inside stage values)
+- update pipeline stages outside MongoDB's update-stage allowlist
+- aggregation expressions outside the listed subset
 - replacement updates with `multi=true`
 
 ## R3 Query/Update Corpus Exclusions
@@ -122,7 +126,7 @@ differential parity counts:
 - dot/dollar insert payload forms outside the deterministic insert subset; dollar-prefixed subfields under `_id` fail with `code=52`
 - `runCommand` command names outside the imported subset (`ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`, `distinct`, `drop`, `dropDatabase`)
 - update operations using unsupported `arrayFilters` forms (outside `$set`/`$unset` subset)
-- update pipeline forms outside the supported subset (`$set`/`$unset` stages with literal values)
+- update pipeline forms outside the supported stage/expression subsets listed above
 - replacement updates requested with `multi=true`
 
 ## UTF Import Profiles

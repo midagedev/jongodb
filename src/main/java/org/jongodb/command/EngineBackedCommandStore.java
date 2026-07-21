@@ -246,14 +246,24 @@ public final class EngineBackedCommandStore implements CommandStore {
         for (int index = 0; index < updates.size(); index++) {
             final UpdateRequest updateRequest = updates.get(index);
             final Document query = toDocument(Objects.requireNonNull(updateRequest.query(), "query"));
-            final Document update = toDocument(Objects.requireNonNull(updateRequest.update(), "update"));
             final List<Document> arrayFilters = new ArrayList<>(updateRequest.arrayFilters().size());
             for (final BsonDocument arrayFilter : updateRequest.arrayFilters()) {
                 arrayFilters.add(toDocument(Objects.requireNonNull(arrayFilter, "arrayFilters entries must not be null")));
             }
 
-            final UpdateManyResult result = collectionStore.update(
-                    query, update, updateRequest.multi(), updateRequest.upsert(), List.copyOf(arrayFilters));
+            final UpdateManyResult result;
+            if (updateRequest.updatePipeline() != null) {
+                final List<Document> pipeline = new ArrayList<>(updateRequest.updatePipeline().size());
+                for (final BsonValue stageValue : updateRequest.updatePipeline()) {
+                    pipeline.add(toDocument(stageValue.asDocument()));
+                }
+                result = collectionStore.updatePipeline(
+                        query, List.copyOf(pipeline), updateRequest.multi(), updateRequest.upsert());
+            } else {
+                final Document update = toDocument(Objects.requireNonNull(updateRequest.update(), "update"));
+                result = collectionStore.update(
+                        query, update, updateRequest.multi(), updateRequest.upsert(), List.copyOf(arrayFilters));
+            }
             matchedCount += toBoundedInt(result.matchedCount());
             modifiedCount += toBoundedInt(result.modifiedCount());
             if (result.upserted()) {

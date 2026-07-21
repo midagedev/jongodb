@@ -351,6 +351,103 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return new UpdateManyResult(matchedDocuments.size(), modifiedCount);
     }
 
+    @Override
+    public synchronized UpdateManyResult updatePipeline(
+            final Document filter,
+            final List<Document> pipeline,
+            final boolean multi,
+            final boolean upsert) {
+        pruneExpiredDocuments();
+        final Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
+        final List<Document> effectivePipeline = new ArrayList<>();
+        for (final Document stage : Objects.requireNonNull(pipeline, "pipeline")) {
+            effectivePipeline.add(DocumentCopies.copy(Objects.requireNonNull(stage, "pipeline stage")));
+        }
+        if (effectivePipeline.isEmpty()) {
+            throw new IllegalArgumentException("update pipeline must not be empty");
+        }
+
+        final List<Document> matchedDocuments = new ArrayList<>();
+        for (final Document document : documents) {
+            if (QueryMatcher.matches(document, effectiveFilter)) {
+                matchedDocuments.add(document);
+                if (!multi) {
+                    break;
+                }
+            }
+        }
+
+        if (matchedDocuments.isEmpty()) {
+            if (!upsert) {
+                return new UpdateManyResult(0, 0);
+            }
+            return applyPipelineUpsert(effectiveFilter, effectivePipeline);
+        }
+
+        final IdentityHashMap<Document, UpdatePreview> previewsByDocument =
+                new IdentityHashMap<>(matchedDocuments.size());
+        long modifiedCount = 0L;
+        for (final Document document : matchedDocuments) {
+            final Document updated = applyPipelineToDocument(document, effectivePipeline);
+            final boolean modified = !Objects.deepEquals(document, updated);
+            previewsByDocument.put(document, new UpdatePreview(updated, modified));
+            if (modified) {
+                modifiedCount++;
+            }
+        }
+
+        if (modifiedCount > 0) {
+            final List<Document> candidateDocuments = new ArrayList<>(documents.size());
+            for (final Document document : documents) {
+                final UpdatePreview preview = previewsByDocument.get(document);
+                candidateDocuments.add(preview == null || !preview.modified()
+                        ? document
+                        : preview.updatedDocument());
+            }
+            validateUniqueConstraints(candidateDocuments, indexesByName.values());
+        }
+
+        for (final Document document : matchedDocuments) {
+            final UpdatePreview preview = previewsByDocument.get(document);
+            if (preview == null || !preview.modified()) {
+                continue;
+            }
+            document.clear();
+            document.putAll(preview.updatedDocument());
+        }
+        return new UpdateManyResult(matchedDocuments.size(), modifiedCount);
+    }
+
+    private static Document applyPipelineToDocument(
+            final Document source, final List<Document> pipeline) {
+        final List<Document> results = AggregationPipeline.execute(List.of(DocumentCopies.copy(source)), pipeline);
+        if (results.size() != 1) {
+            throw new IllegalArgumentException("update pipeline must produce exactly one document per input document");
+        }
+        final Document updated = results.get(0);
+        if (source.containsKey("_id")
+                && (!updated.containsKey("_id")
+                        || !Objects.deepEquals(source.get("_id"), updated.get("_id")))) {
+            throw new IllegalArgumentException("update pipeline cannot change immutable field '_id'");
+        }
+        return DocumentCopies.copy(updated);
+    }
+
+    private UpdateManyResult applyPipelineUpsert(
+            final Document filter, final List<Document> pipeline) {
+        final Document upsertedDocument = applyPipelineToDocument(upsertSeed(filter), pipeline);
+        if (!upsertedDocument.containsKey("_id")) {
+            upsertedDocument.put("_id", new ObjectId());
+        }
+
+        final List<Document> candidateDocuments = new ArrayList<>(documents.size() + 1);
+        candidateDocuments.addAll(documents);
+        candidateDocuments.add(upsertedDocument);
+        validateUniqueConstraints(candidateDocuments, indexesByName.values());
+        documents.add(upsertedDocument);
+        return new UpdateManyResult(0, 0, DocumentCopies.copyAny(upsertedDocument.get("_id")));
+    }
+
     private static List<Document> copyArrayFilters(final List<Document> arrayFilters) {
         if (arrayFilters == null || arrayFilters.isEmpty()) {
             return List.of();

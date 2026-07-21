@@ -62,6 +62,7 @@ final class UpdateArrayFiltersSubset {
         Objects.requireNonNull(parsedArrayFilters, "parsedArrayFilters");
 
         final Set<String> usedIdentifiers = new LinkedHashSet<>();
+        final List<String> claimedPaths = new ArrayList<>();
         for (final String operator : updateDocument.keySet()) {
             final BsonValue operatorDefinition = updateDocument.get(operator);
             if (operatorDefinition == null || !operatorDefinition.isDocument()) {
@@ -77,6 +78,15 @@ final class UpdateArrayFiltersSubset {
                     return CommandErrors.badValue(
                             "positional and array filter updates are not supported for path '" + path + "'");
                 }
+                for (final String claimedPath : claimedPaths) {
+                    if (path.equals(claimedPath)
+                            || path.startsWith(claimedPath + ".")
+                            || claimedPath.startsWith(path + ".")) {
+                        return CommandErrors.badValue(
+                                "updating the path '" + path + "' would create a conflict at '" + claimedPath + "'");
+                    }
+                }
+                claimedPaths.add(path);
                 if (analysis.identifiers().isEmpty()) {
                     continue;
                 }

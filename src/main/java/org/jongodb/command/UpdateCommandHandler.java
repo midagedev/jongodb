@@ -12,7 +12,8 @@ import org.bson.BsonValue;
 import org.jongodb.engine.DuplicateKeyException;
 
 public final class UpdateCommandHandler implements CommandHandler {
-    private static final Set<String> SUPPORTED_OPERATORS = Set.of("$set", "$setOnInsert", "$inc", "$unset", "$addToSet");
+    private static final Set<String> SUPPORTED_OPERATORS =
+            Set.of("$set", "$setOnInsert", "$inc", "$min", "$max", "$unset", "$addToSet");
 
     private final CommandStore store;
 
@@ -65,16 +66,19 @@ public final class UpdateCommandHandler implements CommandHandler {
 
             final BsonValue updateValue = updateSpec.get("u");
             final BsonDocument updateDocument;
+            final BsonArray updatePipeline;
             if (updateValue == null) {
                 return CommandErrors.typeMismatch("u must be a document or array");
             } else if (updateValue.isDocument()) {
                 updateDocument = updateValue.asDocument();
+                updatePipeline = null;
             } else if (updateValue.isArray()) {
                 final UpdatePipelineSubset.ParseResult parsedPipeline = UpdatePipelineSubset.parse(updateValue.asArray());
                 if (parsedPipeline.error() != null) {
                     return parsedPipeline.error();
                 }
-                updateDocument = parsedPipeline.updateDocument();
+                updateDocument = null;
+                updatePipeline = parsedPipeline.updatePipeline();
             } else {
                 return CommandErrors.typeMismatch("u must be a document or array");
             }
@@ -113,15 +117,22 @@ public final class UpdateCommandHandler implements CommandHandler {
             if (parsedArrayFilters.error() != null) {
                 return parsedArrayFilters.error();
             }
-
-            final BsonDocument updateValidationError =
-                    validateUpdateDocument(updateDocument, multi, parsedArrayFilters.parsed());
-            if (updateValidationError != null) {
-                return updateValidationError;
+            if (updatePipeline != null && !parsedArrayFilters.parsed().isEmpty()) {
+                return CommandErrors.badValue("arrayFilters is not allowed with pipeline updates");
             }
 
-            updates.add(new CommandStore.UpdateRequest(
-                    query, updateDocument, multi, upsert, parsedArrayFilters.parsed().filters()));
+            if (updateDocument != null) {
+                final BsonDocument updateValidationError =
+                        validateUpdateDocument(updateDocument, multi, parsedArrayFilters.parsed());
+                if (updateValidationError != null) {
+                    return updateValidationError;
+                }
+            }
+
+            updates.add(updatePipeline == null
+                    ? new CommandStore.UpdateRequest(
+                            query, updateDocument, multi, upsert, parsedArrayFilters.parsed().filters())
+                    : new CommandStore.UpdateRequest(query, updatePipeline, multi, upsert));
         }
 
         final CommandStore.UpdateResult result;
@@ -195,6 +206,16 @@ public final class UpdateCommandHandler implements CommandHandler {
         final BsonValue incValue = updateDocument.get("$inc");
         if (incValue != null && !incValue.isDocument()) {
             return CommandErrors.typeMismatch("$inc must be a document");
+        }
+
+        final BsonValue minValue = updateDocument.get("$min");
+        if (minValue != null && !minValue.isDocument()) {
+            return CommandErrors.typeMismatch("$min must be a document");
+        }
+
+        final BsonValue maxValue = updateDocument.get("$max");
+        if (maxValue != null && !maxValue.isDocument()) {
+            return CommandErrors.typeMismatch("$max must be a document");
         }
 
         final BsonValue unsetValue = updateDocument.get("$unset");

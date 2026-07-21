@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Date;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 
@@ -33,10 +34,10 @@ class UpdateApplierTest {
 
     @Test
     void applyReturnsFalseWhenUpdateDoesNotChangeDocument() {
-        Document target = new Document("count", 5);
+        Document target = new Document("count", 5).append("offset", 2);
         Document update =
                 new Document("$set", new Document("count", 5))
-                        .append("$inc", new Document("count", 0))
+                        .append("$inc", new Document("offset", 0))
                         .append("$unset", new Document("missing", true));
 
         UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update);
@@ -44,6 +45,53 @@ class UpdateApplierTest {
 
         assertFalse(UpdateApplier.apply(target, parsed));
         assertEquals(5, target.getInteger("count"));
+    }
+
+    @Test
+    void applySupportsMinMaxForMissingMixedNumbersDatesAndDottedPaths() {
+        final Date older = new Date(1_000L);
+        final Date newer = new Date(2_000L);
+        final Document target = new Document("duration", 3_000)
+                .append("lastEventAt", older)
+                .append("stats", new Document("minimum", 8.0d));
+        final Document update = new Document("$inc", new Document("count", 3L))
+                .append("$max", new Document("duration", 4_000.0d).append("lastEventAt", newer))
+                .append("$min", new Document("stats.minimum", 5).append("firstSeenAt", older));
+
+        final UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update);
+        UpdateApplier.validateApplicable(target, parsed);
+
+        assertTrue(UpdateApplier.apply(target, parsed));
+        assertEquals(4_000.0d, target.getDouble("duration"));
+        assertEquals(newer, target.getDate("lastEventAt"));
+        assertEquals(5, target.get("stats", Document.class).getInteger("minimum"));
+        assertEquals(older, target.getDate("firstSeenAt"));
+        assertEquals(3L, target.getLong("count"));
+
+        final Document noOp = new Document("$max", new Document("duration", 2_000.0d).append("lastEventAt", older))
+                .append("$min", new Document("stats.minimum", 9.0d));
+        assertFalse(UpdateApplier.apply(target, UpdateApplier.parse(noOp)));
+    }
+
+    @Test
+    void applyForUpsertInsertCreatesMinAndMaxFields() {
+        final Document target = new Document("_id", "rollup");
+        final Document update = new Document("$max", new Document("durationMaxMs", 4_000.0d))
+                .append("$min", new Document("durationMinMs", 40.0d));
+
+        assertTrue(UpdateApplier.applyForUpsertInsert(target, UpdateApplier.parse(update)));
+        assertEquals(4_000.0d, target.getDouble("durationMaxMs"));
+        assertEquals(40.0d, target.getDouble("durationMinMs"));
+    }
+
+    @Test
+    void parseRejectsConflictingUpdatePathsAcrossOperators() {
+        final IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$set", new Document("stats", 1))
+                        .append("$max", new Document("stats.maximum", 2))));
+
+        assertTrue(error.getMessage().contains("would create a conflict"));
     }
 
     @Test
