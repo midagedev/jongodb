@@ -4,8 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added administrative and diagnostic commands for `mongosh`/GUI tools: `listDatabases`, `create`, `dropIndexes`, `renameCollection`, `collMod` (TTL), `dbStats`/`collStats`/`$collStats`, `serverStatus`, `hostInfo`, `connectionStatus`, `explain` (honest `COLLSCAN`), `replSetGetStatus`, session commands that abort open transactions, and `$currentOp`/`killOp`; reads of a missing collection no longer create it.
+- Added `$changeStream` cursors (collection, database, and cluster scope) with resume tokens, `fullDocument: updateLookup`, `getMore` await, and events for transactional commits and TTL deletes.
+- Added `$push` (with `$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`, `$mul`, `$rename`, and `$currentDate` update operators.
+- Added `jongodbState` (named snapshots, `mongodump`-layout export/import), launcher `--load`/`--persist`, and `JongodbEmbeddedInitializer` for running jongodb inside an application's JVM with persisted state.
+
+- Added timezone-aware `$dateToString` and date-part expressions, string expressions (`$concat`, `$toLower`, `$toUpper`, `$toString`, `$substrCP`, `$split`, `$strLenCP`, `$trim`), `$size`, `$$NOW`, and `$$CLUSTER_TIME`; `$dateTrunc` accepts non-UTC timezones.
+- Added `find` projection, `$jsonSchema` queries, unordered `insert`, and transaction `WriteConflict` (112, `TransientTransactionError`) on concurrent commits.
+
 ### Changed
 - Default local project version moved to `0.1.10-SNAPSHOT`.
+- `findAndModify` selects and writes under the collection lock, so concurrent `findOneAndUpdate` calls claim each document once; its `sort` now orders like `find`.
+- Query equality, `$in`/`$nin`, and unique index keys compare numbers by value across int/long/double/decimal.
+- `find` sort ranks null and missing equally and orders arrays by their min/max element.
+- `$group` keys compare numbers by value.
+- Duplicate-key inserts return `ok: 1` with `writeErrors` instead of a command error.
+- `createIndexes` returns 85/86 for conflicting specs and treats an identical spec as a no-op.
+- int32 `$inc` overflow promotes to int64.
+- The single-node replica-set profile accepts `primaryPreferred`, `secondaryPreferred`, and `nearest` read preferences.
 
 ## [0.1.10] - 2026-07-21
 

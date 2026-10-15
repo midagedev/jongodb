@@ -1,6 +1,11 @@
 package org.jongodb.server;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Objects;
+import org.jongodb.command.EngineBackedCommandStore;
+import org.jongodb.engine.EngineStateFiles;
+import org.jongodb.engine.InMemoryEngineStore;
 import java.util.concurrent.CountDownLatch;
 import org.jongodb.command.TopologyProfile;
 
@@ -20,7 +25,15 @@ public final class TcpMongoServerLauncher {
         final CountDownLatch stopLatch = new CountDownLatch(1);
         final TcpMongoServer server;
         try {
+            final InMemoryEngineStore engine = new InMemoryEngineStore();
+            final Path initialState = config.loadPath() != null
+                    ? config.loadPath()
+                    : config.persistPath() != null && Files.isDirectory(config.persistPath()) ? config.persistPath() : null;
+            if (initialState != null) {
+                EngineStateFiles.load(engine, initialState);
+            }
             server = new TcpMongoServer(
+                    new EngineBackedCommandStore(engine),
                     config.host(),
                     config.port(),
                     config.topologyProfile(),
@@ -29,6 +42,9 @@ public final class TcpMongoServerLauncher {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
                     server.close();
+                    if (config.persistPath() != null) {
+                        EngineStateFiles.export(engine, config.persistPath());
+                    }
                 } finally {
                     stopLatch.countDown();
                 }
@@ -55,13 +71,17 @@ public final class TcpMongoServerLauncher {
             int port,
             String database,
             TopologyProfile topologyProfile,
-            String replicaSetName) {
+            String replicaSetName,
+            Path loadPath,
+            Path persistPath) {
         private static LaunchConfig parse(final String[] args) {
             String host = "127.0.0.1";
             int port = 0;
             String database = "test";
             TopologyProfile topologyProfile = TopologyProfile.STANDALONE;
             String replicaSetName = "jongodb-rs0";
+            Path loadPath = null;
+            Path persistPath = null;
 
             for (final String arg : args) {
                 if (arg == null || arg.isBlank()) {
@@ -87,10 +107,18 @@ public final class TcpMongoServerLauncher {
                     replicaSetName = requireValue(arg, "--replica-set-name=");
                     continue;
                 }
+                if (arg.startsWith("--load=")) {
+                    loadPath = Path.of(requireValue(arg, "--load="));
+                    continue;
+                }
+                if (arg.startsWith("--persist=")) {
+                    persistPath = Path.of(requireValue(arg, "--persist="));
+                    continue;
+                }
                 throw new IllegalArgumentException("unsupported argument: " + arg);
             }
 
-            return new LaunchConfig(host, port, database, topologyProfile, replicaSetName);
+            return new LaunchConfig(host, port, database, topologyProfile, replicaSetName, loadPath, persistPath);
         }
 
         private static String requireValue(final String arg, final String prefix) {

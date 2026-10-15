@@ -20,8 +20,16 @@ final class CommandErrors {
     private static final int CODE_CURSOR_NOT_FOUND = 43;
     private static final int CODE_NO_SUCH_TRANSACTION = 251;
     private static final int CODE_TRANSACTION_COMMITTED = 256;
+    private static final int CODE_INDEX_OPTIONS_CONFLICT = 85;
+    private static final int CODE_INDEX_KEY_SPECS_CONFLICT = 86;
     private static final int CODE_WRITE_CONFLICT = 112;
     private static final int CODE_DUPLICATE_KEY = 11000;
+    private static final int CODE_NAMESPACE_EXISTS = 48;
+    private static final int CODE_INDEX_NOT_FOUND = 27;
+    private static final int CODE_NO_REPLICATION_ENABLED = 76;
+    private static final int CODE_INVALID_NAMESPACE = 73;
+    private static final int CODE_ILLEGAL_OPERATION = 20;
+    private static final int CODE_INVALID_OPTIONS = 72;
 
     private CommandErrors() {}
 
@@ -77,7 +85,16 @@ final class CommandErrors {
     }
 
     static BsonDocument writeConflict(final String message) {
-        return error(message, CODE_WRITE_CONFLICT, "WriteConflict");
+        return errorWithLabels(
+                message, CODE_WRITE_CONFLICT, "WriteConflict", List.of("TransientTransactionError"));
+    }
+
+    static BsonDocument indexOptionsConflict(final String message) {
+        return error(message, CODE_INDEX_OPTIONS_CONFLICT, "IndexOptionsConflict");
+    }
+
+    static BsonDocument indexKeySpecsConflict(final String message) {
+        return error(message, CODE_INDEX_KEY_SPECS_CONFLICT, "IndexKeySpecsConflict");
     }
 
     static BsonDocument duplicateKey(final String message) {
@@ -86,6 +103,30 @@ final class CommandErrors {
 
     static BsonDocument namespaceNotFound(final String namespace) {
         return error("ns not found: " + namespace, CODE_NAMESPACE_NOT_FOUND, "NamespaceNotFound");
+    }
+
+    static BsonDocument namespaceExists(final String message) {
+        return error(message, CODE_NAMESPACE_EXISTS, "NamespaceExists");
+    }
+
+    static BsonDocument indexNotFound(final String message) {
+        return error(message, CODE_INDEX_NOT_FOUND, "IndexNotFound");
+    }
+
+    static BsonDocument noReplicationEnabled(final String message) {
+        return error(message, CODE_NO_REPLICATION_ENABLED, "NoReplicationEnabled");
+    }
+
+    static BsonDocument invalidNamespace(final String message) {
+        return error(message, CODE_INVALID_NAMESPACE, "InvalidNamespace");
+    }
+
+    static BsonDocument invalidOptions(final String message) {
+        return error(message, CODE_INVALID_OPTIONS, "InvalidOptions");
+    }
+
+    static BsonDocument illegalOperation(final String message) {
+        return error(message, CODE_ILLEGAL_OPERATION, "IllegalOperation");
     }
 
     static BsonDocument cursorNotFound(final long cursorId) {

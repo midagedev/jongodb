@@ -1,15 +1,19 @@
 package org.jongodb.command;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
+import org.bson.BsonInt32;
 import org.bson.BsonInt64;
 import org.bson.BsonString;
 import org.bson.BsonType;
 import org.bson.BsonValue;
+import org.bson.types.Decimal128;
 import org.jongodb.engine.CollationSupport;
+import org.jongodb.engine.Projection;
 
 public final class FindCommandHandler implements CommandHandler {
     private final CommandStore store;
@@ -76,6 +80,20 @@ public final class FindCommandHandler implements CommandHandler {
             return CommandErrors.typeMismatch("limit must be an integer");
         }
 
+        final Projection.Parsed projection;
+        final BsonValue projectionValue = command.get("projection");
+        if (projectionValue == null) {
+            projection = null;
+        } else if (!projectionValue.isDocument()) {
+            return CommandErrors.typeMismatch("projection must be a document");
+        } else {
+            try {
+                projection = Projection.parse(projectionValue.asDocument());
+            } catch (final Projection.Failure failure) {
+                return projectionError(failure);
+            }
+        }
+
         final List<BsonDocument> foundDocuments;
         try {
             foundDocuments = store.find(database, collection, filter, collation);
@@ -84,9 +102,15 @@ public final class FindCommandHandler implements CommandHandler {
         }
 
         final List<BsonDocument> selectedDocuments = applySortSkipLimit(foundDocuments, sortKeys, skip, limit, collation);
+        final List<BsonDocument> projectedDocuments;
+        try {
+            projectedDocuments = applyProjection(selectedDocuments, projection, filter);
+        } catch (final Projection.Failure failure) {
+            return projectionError(failure);
+        }
 
         final BsonValue batchSizeValue = command.get("batchSize");
-        int batchSize = selectedDocuments.size();
+        int batchSize = projectedDocuments.size();
         if (batchSizeValue != null) {
             final Long parsedBatchSize = readIntegralLong(batchSizeValue);
             if (parsedBatchSize == null) {
@@ -99,7 +123,7 @@ public final class FindCommandHandler implements CommandHandler {
         }
 
         final CursorRegistry.FindRegistration registration =
-                cursorRegistry.openCursor(database + "." + collection, selectedDocuments, batchSize);
+                cursorRegistry.openCursor(database + "." + collection, projectedDocuments, batchSize);
         final BsonArray firstBatch = new BsonArray();
         for (final BsonDocument foundDocument : registration.firstBatch()) {
             firstBatch.add(foundDocument);
@@ -196,6 +220,11 @@ public final class FindCommandHandler implements CommandHandler {
         return List.copyOf(sortKeys);
     }
 
+    static List<BsonDocument> sorted(
+            final List<BsonDocument> documents, final BsonDocument sort, final CollationSupport.Config collation) {
+        return applySortSkipLimit(documents, parseSortKeys(sort), 0, null, collation);
+    }
+
     private static List<BsonDocument> applySortSkipLimit(
             final List<BsonDocument> source,
             final List<SortKey> sortKeys,
@@ -215,14 +244,34 @@ public final class FindCommandHandler implements CommandHandler {
         return List.copyOf(working.subList(from, to));
     }
 
+    private static List<BsonDocument> applyProjection(
+            final List<BsonDocument> documents, final Projection.Parsed projection, final BsonDocument filter) {
+        if (projection == null) {
+            return documents;
+        }
+        final List<BsonDocument> projected = new ArrayList<>(documents.size());
+        for (final BsonDocument document : documents) {
+            projected.add(Projection.apply(document, projection, filter));
+        }
+        return projected;
+    }
+
+    private static BsonDocument projectionError(final Projection.Failure failure) {
+        return new BsonDocument()
+                .append("ok", new BsonDouble(0.0))
+                .append("errmsg", new BsonString(failure.getMessage()))
+                .append("code", new BsonInt32(failure.code()))
+                .append("codeName", new BsonString(failure.codeName()));
+    }
+
     private static int compareBySortKeys(
             final BsonDocument left,
             final BsonDocument right,
             final List<SortKey> sortKeys,
             final CollationSupport.Config collation) {
         for (final SortKey sortKey : sortKeys) {
-            final BsonValue leftValue = resolvePath(left, sortKey.field());
-            final BsonValue rightValue = resolvePath(right, sortKey.field());
+            final BsonValue leftValue = sortKey(left, sortKey.field(), sortKey.direction(), collation);
+            final BsonValue rightValue = sortKey(right, sortKey.field(), sortKey.direction(), collation);
             final int compared = compareSortValues(leftValue, rightValue, collation);
             if (compared != 0) {
                 return sortKey.direction() == 1 ? compared : -compared;
@@ -231,35 +280,70 @@ public final class FindCommandHandler implements CommandHandler {
         return 0;
     }
 
-    private static BsonValue resolvePath(final BsonDocument document, final String path) {
+    private static BsonValue sortKey(
+            final BsonDocument document,
+            final String path,
+            final int direction,
+            final CollationSupport.Config collation) {
         if (path == null || path.isEmpty()) {
             return null;
         }
+        final List<BsonValue> values = new ArrayList<>();
+        collectSortValues(document, path.split("\\.", -1), 0, values);
+        return selectSortKey(values, direction, collation);
+    }
 
-        final String[] segments = path.split("\\.");
-        BsonValue current = document;
-        for (final String segment : segments) {
-            if (current == null) {
-                return null;
-            }
-            if (current.isDocument()) {
-                current = current.asDocument().get(segment);
-                continue;
-            }
+    private static void collectSortValues(
+            final BsonValue current, final String[] segments, final int index, final List<BsonValue> values) {
+        if (current == null) {
+            return;
+        }
+        if (index == segments.length) {
             if (current.isArray()) {
-                final BsonArray array = current.asArray();
-                if (array.isEmpty()) {
-                    return null;
+                if (current.asArray().isEmpty()) {
+                    // MongoDB orders an empty array before null and a missing field.
+                    values.add(current);
+                } else {
+                    values.addAll(current.asArray());
                 }
-                current = array.get(0);
-                if (current.isDocument()) {
-                    current = current.asDocument().get(segment);
-                    continue;
-                }
+            } else {
+                values.add(current);
             }
+            return;
+        }
+        if (current.isDocument()) {
+            final BsonDocument document = current.asDocument();
+            final String segment = segments[index];
+            if (!document.containsKey(segment)) {
+                return;
+            }
+            collectSortValues(document.get(segment), segments, index + 1, values);
+            return;
+        }
+        if (current.isArray()) {
+            for (final BsonValue element : current.asArray()) {
+                collectSortValues(element, segments, index, values);
+            }
+        }
+    }
+
+    private static BsonValue selectSortKey(
+            final List<BsonValue> values, final int direction, final CollationSupport.Config collation) {
+        if (values.isEmpty()) {
             return null;
         }
-        return current;
+        BsonValue selected = values.get(0);
+        for (int index = 1; index < values.size(); index++) {
+            final int compared = compareSortValues(selected, values.get(index), collation);
+            if (direction > 0) {
+                if (compared > 0) {
+                    selected = values.get(index);
+                }
+            } else if (compared < 0) {
+                selected = values.get(index);
+            }
+        }
+        return selected;
     }
 
     private static int compareSortValues(
@@ -267,14 +351,23 @@ public final class FindCommandHandler implements CommandHandler {
         if (left == right) {
             return 0;
         }
-        if (left == null) {
+        if (isEmptyArray(left) || isEmptyArray(right)) {
+            if (isEmptyArray(left) && isEmptyArray(right)) {
+                return 0;
+            }
+            return isEmptyArray(left) ? -1 : 1;
+        }
+        if (isNullish(left) && isNullish(right)) {
+            return 0;
+        }
+        if (isNullish(left)) {
             return -1;
         }
-        if (right == null) {
+        if (isNullish(right)) {
             return 1;
         }
         if (left.isNumber() && right.isNumber()) {
-            return Double.compare(left.asNumber().doubleValue(), right.asNumber().doubleValue());
+            return compareSortNumbers(left, right);
         }
         if (left.isString() && right.isString()) {
             return collation.compareStrings(left.asString().getValue(), right.asString().getValue());
@@ -288,6 +381,9 @@ public final class FindCommandHandler implements CommandHandler {
         if (left.isObjectId() && right.isObjectId()) {
             return left.asObjectId().getValue().toHexString().compareTo(right.asObjectId().getValue().toHexString());
         }
+        if (left.isArray() && right.isArray()) {
+            return compareSortArrays(left.asArray(), right.asArray(), collation);
+        }
         if (left.getBsonType() == right.getBsonType()) {
             return left.toString().compareTo(right.toString());
         }
@@ -298,6 +394,64 @@ public final class FindCommandHandler implements CommandHandler {
             return Integer.compare(leftRank, rightRank);
         }
         return left.toString().compareTo(right.toString());
+    }
+
+    private static int compareSortArrays(
+            final BsonArray left, final BsonArray right, final CollationSupport.Config collation) {
+        final int common = Math.min(left.size(), right.size());
+        for (int index = 0; index < common; index++) {
+            final int compared = compareSortValues(left.get(index), right.get(index), collation);
+            if (compared != 0) {
+                return compared;
+            }
+        }
+        return Integer.compare(left.size(), right.size());
+    }
+
+    private static int compareSortNumbers(final BsonValue left, final BsonValue right) {
+        if (isNonFiniteNumber(left) || isNonFiniteNumber(right)) {
+            return Double.compare(left.asNumber().doubleValue(), right.asNumber().doubleValue());
+        }
+        try {
+            return sortNumberToBigDecimal(left).compareTo(sortNumberToBigDecimal(right));
+        } catch (final ArithmeticException | NumberFormatException exception) {
+            return Double.compare(left.asNumber().doubleValue(), right.asNumber().doubleValue());
+        }
+    }
+
+    private static boolean isNonFiniteNumber(final BsonValue value) {
+        if (value.isDouble()) {
+            return !Double.isFinite(value.asDouble().getValue());
+        }
+        if (value.isDecimal128()) {
+            final Decimal128 decimal = value.asDecimal128().getValue();
+            return decimal.isNaN() || decimal.isInfinite();
+        }
+        return false;
+    }
+
+    private static BigDecimal sortNumberToBigDecimal(final BsonValue value) {
+        if (value.isInt32()) {
+            return BigDecimal.valueOf(value.asInt32().getValue());
+        }
+        if (value.isInt64()) {
+            return BigDecimal.valueOf(value.asInt64().getValue());
+        }
+        if (value.isDouble()) {
+            return BigDecimal.valueOf(value.asDouble().getValue());
+        }
+        if (value.isDecimal128()) {
+            return value.asDecimal128().getValue().bigDecimalValue();
+        }
+        return BigDecimal.valueOf(value.asNumber().doubleValue());
+    }
+
+    private static boolean isEmptyArray(final BsonValue value) {
+        return value != null && value.isArray() && value.asArray().isEmpty();
+    }
+
+    private static boolean isNullish(final BsonValue value) {
+        return value == null || value.isNull();
     }
 
     private static int sortTypeRank(final BsonType type) {

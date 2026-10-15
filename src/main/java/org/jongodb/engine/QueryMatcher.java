@@ -61,7 +61,8 @@ final class QueryMatcher {
                 || "$or".equals(key)
                 || "$not".equals(key)
                 || "$nor".equals(key)
-                || "$expr".equals(key);
+                || "$expr".equals(key)
+                || "$jsonSchema".equals(key);
     }
 
     private static boolean matchesTopLevelOperator(Document document, String operator, Object definition) {
@@ -95,6 +96,8 @@ final class QueryMatcher {
                 return !matches(document, toDocument(operator, definition));
             case "$expr":
                 return matchesExpression(document, definition);
+            case "$jsonSchema":
+                return matchesJsonSchema(document, definition);
             default:
                 throw new UnsupportedFeatureException(
                         "query.top_level_operator." + operator,
@@ -652,7 +655,8 @@ final class QueryMatcher {
     private static boolean matchesNin(PathResolution path, Object operand) {
         List<Object> candidates = asOperandList("$nin", operand);
         if (!path.exists()) {
-            return true;
+            // $nin is the complement of $in, and $in: [null] matches a missing field.
+            return !containsNull(candidates);
         }
 
         for (Object candidate : candidates) {
@@ -814,17 +818,86 @@ final class QueryMatcher {
     }
 
     private static boolean matchesElemMatchElement(Object element, Map<?, ?> rawCriteria) {
-        if (isOperatorDocument(rawCriteria)) {
+        final Map<String, Object> criteria = toStringKeyedMap(rawCriteria, "$elemMatch criteria");
+        if (hasLogicalCombinator(criteria)) {
+            for (Map.Entry<String, Object> entry : criteria.entrySet()) {
+                if (!matchesElemMatchClause(element, entry.getKey(), entry.getValue())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (isOperatorDocument(criteria)) {
             return matchesOperatorDocument(
-                    PathResolution.existing(Collections.singletonList(element)),
-                    toStringKeyedMap(rawCriteria, "$elemMatch criteria"));
+                    PathResolution.existing(Collections.singletonList(element)), criteria);
         }
 
         if (!(element instanceof Map<?, ?> elementMap)) {
             return false;
         }
 
-        return matches(toDocument("$elemMatch element", elementMap), toDocument("$elemMatch", rawCriteria));
+        return matches(toDocument("$elemMatch element", elementMap), toDocument("$elemMatch", criteria));
+    }
+
+    private static boolean hasLogicalCombinator(final Map<String, Object> criteria) {
+        return criteria.containsKey("$and") || criteria.containsKey("$or") || criteria.containsKey("$nor");
+    }
+
+    private static boolean matchesElemMatchClause(final Object element, final String operator, final Object operand) {
+        return switch (operator) {
+            case "$and" -> {
+                for (Document clause : toDocumentList("$and", operand)) {
+                    rejectQueryOperator(clause);
+                    if (!matchesElemMatchElement(element, clause)) {
+                        yield false;
+                    }
+                }
+                yield true;
+            }
+            case "$or" -> {
+                final List<Document> clauses = toDocumentList("$or", operand);
+                if (clauses.isEmpty()) {
+                    yield false;
+                }
+                boolean matched = false;
+                for (Document clause : clauses) {
+                    rejectQueryOperator(clause);
+                    if (matchesElemMatchElement(element, clause)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                yield matched;
+            }
+            case "$nor" -> {
+                for (Document clause : toDocumentList("$nor", operand)) {
+                    rejectQueryOperator(clause);
+                    if (matchesElemMatchElement(element, clause)) {
+                        yield false;
+                    }
+                }
+                yield true;
+            }
+            default -> matchesOperatorDocument(
+                    PathResolution.existing(Collections.singletonList(element)), singleOperator(operator, operand));
+        };
+    }
+
+    private static void rejectQueryOperator(final Document clause) {
+        for (final String key : clause.keySet()) {
+            if (key.startsWith("$") && !isTopLevelOperator(key)) {
+                throw new IllegalArgumentException(
+                        "unknown top level operator: "
+                                + key
+                                + ". If you have a field name that starts with a '$' symbol, consider using $getField or $setField.");
+            }
+        }
+    }
+
+    private static Map<String, Object> singleOperator(final String operator, final Object operand) {
+        final Map<String, Object> operatorDocument = new LinkedHashMap<>();
+        operatorDocument.put(operator, operand);
+        return operatorDocument;
     }
 
     private static boolean matchesAll(PathResolution path, Object operand) {
@@ -1118,12 +1191,222 @@ final class QueryMatcher {
     }
 
     private static boolean valueEquals(Object left, Object right) {
-        return currentCollation().valuesEqual(left, right);
+        return valueEquals(left, right, currentCollation());
+    }
+
+    private static boolean valueEquals(final Object left, final Object right, final CollationSupport.Config collation) {
+        if (left == right) {
+            return true;
+        }
+        if (left instanceof Number leftNumber && right instanceof Number rightNumber) {
+            return compareNumbers(leftNumber, rightNumber) == 0;
+        }
+        if (left instanceof String leftString && right instanceof String rightString) {
+            return collation.compareStrings(leftString, rightString) == 0;
+        }
+        if (left instanceof Map<?, ?> leftMap && right instanceof Map<?, ?> rightMap) {
+            if (leftMap.size() != rightMap.size()) {
+                return false;
+            }
+            for (Map.Entry<?, ?> entry : leftMap.entrySet()) {
+                if (!rightMap.containsKey(entry.getKey())) {
+                    return false;
+                }
+                if (!valueEquals(entry.getValue(), rightMap.get(entry.getKey()), collation)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (left instanceof List<?> leftList && right instanceof List<?> rightList) {
+            if (leftList.size() != rightList.size()) {
+                return false;
+            }
+            for (int index = 0; index < leftList.size(); index++) {
+                if (!valueEquals(leftList.get(index), rightList.get(index), collation)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return collation.valuesEqual(left, right);
     }
 
     private static CollationSupport.Config currentCollation() {
         final CollationSupport.Config config = ACTIVE_COLLATION.get();
         return config == null ? CollationSupport.Config.simple() : config;
+    }
+
+    private static boolean matchesJsonSchema(final Document document, final Object schema) {
+        if (!(schema instanceof Map<?, ?> rawSchema)) {
+            throw new IllegalArgumentException("$jsonSchema requires a document");
+        }
+        return jsonSchemaMatches(document, toStringKeyedMap(rawSchema, "$jsonSchema"));
+    }
+
+    private static boolean jsonSchemaMatches(final Object value, final Map<String, Object> schema) {
+        if (schema.containsKey("bsonType") && !jsonSchemaBsonType(value, schema.get("bsonType"))) {
+            return false;
+        }
+        if (schema.containsKey("enum") && !jsonSchemaEnum(value, schema.get("enum"))) {
+            return false;
+        }
+        if (schema.containsKey("minimum") && !jsonSchemaBound(value, schema.get("minimum"), true)) {
+            return false;
+        }
+        if (schema.containsKey("maximum") && !jsonSchemaBound(value, schema.get("maximum"), false)) {
+            return false;
+        }
+        if (!schema.containsKey("required")
+                && !schema.containsKey("properties")
+                && !schema.containsKey("additionalProperties")) {
+            return true;
+        }
+        if (!(value instanceof Map<?, ?> rawObject) || value instanceof List<?>) {
+            return true;
+        }
+        final Map<String, Object> object = toStringKeyedMap(rawObject, "$jsonSchema value");
+        if (schema.containsKey("required") && !jsonSchemaRequired(object, schema.get("required"))) {
+            return false;
+        }
+        final Map<String, Object> properties = schema.containsKey("properties")
+                ? jsonSchemaProperties(schema.get("properties"))
+                : Map.of();
+        for (final Map.Entry<String, Object> property : properties.entrySet()) {
+            if (!object.containsKey(property.getKey())) {
+                continue;
+            }
+            if (!(property.getValue() instanceof Map<?, ?> propertySchema)) {
+                throw new IllegalArgumentException("$jsonSchema properties values must be documents");
+            }
+            if (!jsonSchemaMatches(object.get(property.getKey()), toStringKeyedMap(propertySchema, "$jsonSchema properties"))) {
+                return false;
+            }
+        }
+        if (schema.containsKey("additionalProperties")
+                && !jsonSchemaAdditionalProperties(object, properties, schema.get("additionalProperties"))) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean jsonSchemaBsonType(final Object value, final Object operand) {
+        if (operand instanceof String typeName) {
+            return jsonSchemaBsonTypeName(value, typeName);
+        }
+        if (operand instanceof List<?> typeNames) {
+            if (typeNames.isEmpty()) {
+                return false;
+            }
+            for (final Object typeName : typeNames) {
+                if (!(typeName instanceof String name)) {
+                    throw new IllegalArgumentException("$jsonSchema bsonType array must contain strings");
+                }
+                if (jsonSchemaBsonTypeName(value, name)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        throw new IllegalArgumentException("$jsonSchema bsonType must be a string or an array of strings");
+    }
+
+    private static boolean jsonSchemaBsonTypeName(final Object value, final String typeName) {
+        return switch (typeName) {
+            case "double" -> value instanceof Double || value instanceof Float;
+            case "string" -> value instanceof String;
+            case "object" -> value instanceof Map<?, ?> && !(value instanceof List<?>);
+            case "array" -> value instanceof List<?>;
+            case "binData" -> value instanceof org.bson.types.Binary || value instanceof byte[];
+            case "objectId" -> value instanceof ObjectId;
+            case "bool", "boolean" -> value instanceof Boolean;
+            case "date" -> value instanceof java.util.Date || value instanceof Instant;
+            case "null" -> value == null;
+            case "regex" -> value instanceof Pattern || value instanceof BsonRegularExpression;
+            case "int" -> value instanceof Integer;
+            case "long" -> value instanceof Long;
+            case "decimal" -> value instanceof Decimal128 || value instanceof BigDecimal;
+            case "number" -> value instanceof Number;
+            case "timestamp" -> value instanceof org.bson.BsonTimestamp;
+            case "minKey" -> value instanceof org.bson.types.MinKey;
+            case "maxKey" -> value instanceof org.bson.types.MaxKey;
+            default -> throw new IllegalArgumentException("$jsonSchema bsonType is not supported: " + typeName);
+        };
+    }
+
+    private static boolean jsonSchemaEnum(final Object value, final Object operand) {
+        if (!(operand instanceof List<?> allowed)) {
+            throw new IllegalArgumentException("$jsonSchema enum must be an array");
+        }
+        for (final Object candidate : allowed) {
+            // $jsonSchema enum compares like $_internalSchemaEq: numbers by value, strings ignore the query collation.
+            if (valueEquals(value, candidate, CollationSupport.Config.simple())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean jsonSchemaBound(final Object value, final Object bound, final boolean minimum) {
+        if (!(bound instanceof Number boundNumber)) {
+            throw new IllegalArgumentException(
+                    "$jsonSchema " + (minimum ? "minimum" : "maximum") + " must be a number");
+        }
+        if (!(value instanceof Number valueNumber)) {
+            return true;
+        }
+        final int compared = compareNumbers(valueNumber, boundNumber);
+        return minimum ? compared >= 0 : compared <= 0;
+    }
+
+    private static boolean jsonSchemaRequired(final Map<String, Object> object, final Object operand) {
+        if (!(operand instanceof List<?> requiredNames)) {
+            throw new IllegalArgumentException("$jsonSchema required must be an array of strings");
+        }
+        for (final Object requiredName : requiredNames) {
+            if (!(requiredName instanceof String name)) {
+                throw new IllegalArgumentException("$jsonSchema required must be an array of strings");
+            }
+            if (!object.containsKey(name)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Map<String, Object> jsonSchemaProperties(final Object operand) {
+        if (!(operand instanceof Map<?, ?> rawProperties)) {
+            throw new IllegalArgumentException("$jsonSchema properties must be a document");
+        }
+        return toStringKeyedMap(rawProperties, "$jsonSchema properties");
+    }
+
+    private static boolean jsonSchemaAdditionalProperties(
+            final Map<String, Object> object, final Map<String, Object> properties, final Object operand) {
+        if (operand instanceof Boolean allowed) {
+            if (allowed) {
+                return true;
+            }
+            for (final String key : object.keySet()) {
+                if (!properties.containsKey(key)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (operand instanceof Map<?, ?> rawSchema) {
+            final Map<String, Object> schema = toStringKeyedMap(rawSchema, "$jsonSchema additionalProperties");
+            for (final Map.Entry<String, Object> entry : object.entrySet()) {
+                if (properties.containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (!jsonSchemaMatches(entry.getValue(), schema)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        throw new IllegalArgumentException("$jsonSchema additionalProperties must be a boolean or a document");
     }
 
     private enum ComparisonOperator {

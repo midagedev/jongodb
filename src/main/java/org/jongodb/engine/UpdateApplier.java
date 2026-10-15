@@ -3,12 +3,15 @@ package org.jongodb.engine;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.bson.BsonTimestamp;
 import org.bson.Document;
 
 final class UpdateApplier {
@@ -46,6 +49,7 @@ final class UpdateApplier {
         final List<MinMaxOperation> minMaxOperations = new ArrayList<>();
         final List<String> unsetOperations = new ArrayList<>();
         final List<AddToSetOperation> addToSetOperations = new ArrayList<>();
+        final List<ExtraOperation> extraOperations = new ArrayList<>();
         final List<String> claimedPaths = new ArrayList<>();
 
         for (final Map.Entry<String, Object> entry : update.entrySet()) {
@@ -94,6 +98,22 @@ final class UpdateApplier {
                                         parseAddToSetValues(addToSetEntry.getKey(), addToSetEntry.getValue())));
                     }
                     break;
+                case "$push":
+                case "$pull":
+                case "$pullAll":
+                case "$pop":
+                case "$mul":
+                case "$rename":
+                case "$currentDate":
+                    for (final Map.Entry<String, Object> extraEntry : definition.entrySet()) {
+                        final String path = extraEntry.getKey();
+                        final Object spec = parseExtraSpec(operator, path, extraEntry.getValue());
+                        if ("$rename".equals(operator)) {
+                            validateNoConflictingPaths(Set.of((String) spec), claimedPaths);
+                        }
+                        extraOperations.add(new ExtraOperation(operator, path, spec));
+                    }
+                    break;
                 default:
                     throw new IllegalArgumentException("unsupported update operator: " + operator);
             }
@@ -106,6 +126,7 @@ final class UpdateApplier {
                 minMaxOperations,
                 unsetOperations,
                 addToSetOperations,
+                extraOperations,
                 parsedArrayFilters);
     }
 
@@ -171,6 +192,31 @@ final class UpdateApplier {
                         "$addToSet target for '" + operation.path() + "' must be an array");
             }
         }
+        for (final ExtraOperation operation : update.extraOperations()) {
+            validateExtraApplicable(document, operation, update.arrayFilterBindings());
+        }
+    }
+
+    private static void validateExtraApplicable(
+            final Document document, final ExtraOperation operation, final ArrayFilterBindings bindings) {
+        final String path = operation.path();
+        ensureWritablePath(document, path, bindings);
+        final PathLookup target = lookupPath(document, path);
+        switch (operation.operator()) {
+            case "$push", "$pull", "$pullAll", "$pop" -> {
+                if (target.exists() && !(target.value() instanceof List<?>)) {
+                    throw new IllegalArgumentException(
+                            operation.operator() + " target for '" + path + "' must be an array");
+                }
+            }
+            case "$mul" -> {
+                if (target.exists() && !(target.value() instanceof Number)) {
+                    throw new IllegalArgumentException("$mul target for '" + path + "' must be numeric");
+                }
+            }
+            case "$rename" -> ensureWritablePath(document, (String) operation.spec(), bindings);
+            default -> {}
+        }
     }
 
     static boolean apply(final Document document, final ParsedUpdate update) {
@@ -212,8 +258,277 @@ final class UpdateApplier {
         for (final AddToSetOperation operation : update.addToSetOperations()) {
             modified |= applyAddToSet(document, operation.path(), operation.values());
         }
+        for (final ExtraOperation operation : update.extraOperations()) {
+            modified |= applyExtra(document, operation);
+        }
 
         return modified;
+    }
+
+    private static Object parseExtraSpec(final String operator, final String path, final Object raw) {
+        switch (operator) {
+            case "$push":
+                return parsePushSpec(path, raw);
+            case "$pull":
+                return DocumentCopies.copyAny(raw);
+            case "$pullAll":
+                if (!(raw instanceof List<?> items)) {
+                    throw new IllegalArgumentException("$pullAll value for '" + path + "' must be an array");
+                }
+                return List.copyOf(items.stream().map(DocumentCopies::copyAny).toList());
+            case "$pop":
+                if (!(raw instanceof Number n) || (n.doubleValue() != 1d && n.doubleValue() != -1d)) {
+                    throw new IllegalArgumentException("$pop value for '" + path + "' must be 1 or -1");
+                }
+                return n.intValue();
+            case "$mul":
+                if (!(raw instanceof Number)) {
+                    throw new IllegalArgumentException("$mul value for '" + path + "' must be numeric");
+                }
+                return raw;
+            case "$rename":
+                if (!(raw instanceof String target)) {
+                    throw new IllegalArgumentException("$rename target for '" + path + "' must be a string");
+                }
+                parsePath(target);
+                if (target.equals(path) || target.startsWith(path + ".") || path.startsWith(target + ".")) {
+                    throw new IllegalArgumentException(
+                            "$rename source '" + path + "' must differ from and not overlap target '" + target + "'");
+                }
+                return target;
+            default:
+                return parseCurrentDateTimestamp(path, raw);
+        }
+    }
+
+    private static Boolean parseCurrentDateTimestamp(final String path, final Object raw) {
+        if (raw instanceof Boolean) {
+            return Boolean.FALSE;
+        }
+        if (raw instanceof Map<?, ?> map && map.size() == 1 && map.containsKey("$type")) {
+            final Object type = map.get("$type");
+            if ("date".equals(type)) {
+                return Boolean.FALSE;
+            }
+            if ("timestamp".equals(type)) {
+                return Boolean.TRUE;
+            }
+        }
+        throw new IllegalArgumentException(
+                "$currentDate value for '" + path + "' must be a boolean or {$type: 'date'|'timestamp'}");
+    }
+
+    private static PushSpec parsePushSpec(final String path, final Object raw) {
+        if (!(raw instanceof Map<?, ?> map) || !map.containsKey("$each")) {
+            if (raw instanceof Map<?, ?> m
+                    && (m.containsKey("$position") || m.containsKey("$slice") || m.containsKey("$sort"))) {
+                throw new IllegalArgumentException("$push modifiers for '" + path + "' require $each");
+            }
+            return new PushSpec(List.of(DocumentCopies.copyAny(raw)), null, null, null);
+        }
+        for (final Object key : map.keySet()) {
+            if (!Set.of("$each", "$position", "$slice", "$sort").contains(key)) {
+                throw new IllegalArgumentException("unrecognized $push modifier '" + key + "' for '" + path + "'");
+            }
+        }
+        if (!(map.get("$each") instanceof List<?> each)) {
+            throw new IllegalArgumentException("$push.$each for '" + path + "' must be an array");
+        }
+        final List<Object> values = new ArrayList<>(each.size());
+        for (final Object item : each) {
+            values.add(DocumentCopies.copyAny(item));
+        }
+        final Integer position = map.containsKey("$position") ? pushInteger(path, "$position", map) : null;
+        final Integer slice = map.containsKey("$slice") ? pushInteger(path, "$slice", map) : null;
+        Object sort = null;
+        if (map.containsKey("$sort")) {
+            sort = map.get("$sort");
+            if (sort instanceof Number n) {
+                sort = sortDirection(path, n);
+            } else if (sort instanceof Map<?, ?> fields && !fields.isEmpty()) {
+                final Map<String, Integer> spec = new LinkedHashMap<>();
+                for (final Map.Entry<?, ?> field : fields.entrySet()) {
+                    if (!(field.getKey() instanceof String name) || !(field.getValue() instanceof Number n)) {
+                        throw new IllegalArgumentException("$push.$sort for '" + path + "' must map fields to 1 or -1");
+                    }
+                    spec.put(name, sortDirection(path, n));
+                }
+                sort = spec;
+            } else {
+                throw new IllegalArgumentException("$push.$sort for '" + path + "' must be 1, -1 or a sort document");
+            }
+        }
+        return new PushSpec(values, position, slice, sort);
+    }
+
+    private static int pushInteger(final String path, final String modifier, final Map<?, ?> map) {
+        final Object value = map.get(modifier);
+        if (!(value instanceof Number n) || n.doubleValue() != Math.rint(n.doubleValue())) {
+            throw new IllegalArgumentException("$push." + modifier + " for '" + path + "' must be an integer");
+        }
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, n.longValue()));
+    }
+
+    private static int sortDirection(final String path, final Number value) {
+        if (value.doubleValue() != 1d && value.doubleValue() != -1d) {
+            throw new IllegalArgumentException("$push.$sort for '" + path + "' must use 1 or -1");
+        }
+        return value.intValue();
+    }
+
+    private static boolean applyExtra(final Document document, final ExtraOperation operation) {
+        final String path = operation.path();
+        switch (operation.operator()) {
+            case "$push":
+                return applyPush(document, path, (PushSpec) operation.spec());
+            case "$rename":
+                return applyRename(document, path, (String) operation.spec());
+            case "$mul":
+                return applyMultiply(document, path, (Number) operation.spec());
+            case "$currentDate":
+                return applyCurrentDate(document, path, (Boolean) operation.spec());
+            default:
+                break;
+        }
+
+        final PathLookup target = lookupPath(document, path);
+        if (!target.exists()) {
+            return false;
+        }
+        final List<Object> list = castList((List<?>) target.value());
+        switch (operation.operator()) {
+            case "$pull":
+                return list.removeIf(item -> matchesPull(item, operation.spec()));
+            case "$pullAll":
+                return list.removeIf(item -> containsByMongoEquality(castList((List<?>) operation.spec()), item));
+            default:
+                if (list.isEmpty()) {
+                    return false;
+                }
+                list.remove((Integer) operation.spec() == 1 ? list.size() - 1 : 0);
+                return true;
+        }
+    }
+
+    private static boolean matchesPull(final Object item, final Object condition) {
+        if (condition instanceof Map<?, ?> map) {
+            final boolean operatorCondition = map.keySet().stream().anyMatch(k -> k instanceof String s && s.startsWith("$"));
+            if (operatorCondition) {
+                return QueryMatcher.matches(new Document("v", item), new Document("v", condition));
+            }
+            return item instanceof Map<?, ?> && matchesArrayFilter(item, new Document(castMap(map)));
+        }
+        return MongoValueComparator.equals(item, condition);
+    }
+
+    private static boolean applyPush(final Document document, final String path, final PushSpec spec) {
+        final Map<String, Object> parent = getOrCreateParent(document, path);
+        final String leaf = leaf(path);
+        final boolean created = !parent.containsKey(leaf);
+        final List<Object> target;
+        if (created) {
+            target = new ArrayList<>();
+            parent.put(leaf, target);
+        } else {
+            target = castList((List<?>) parent.get(leaf));
+        }
+        final List<Object> before = new ArrayList<>(target);
+
+        final int size = target.size();
+        final int index = spec.position() == null
+                ? size
+                : spec.position() >= 0 ? Math.min(spec.position(), size) : Math.max(size + spec.position(), 0);
+        for (final Object value : spec.values()) {
+            target.add(index + target.size() - size, DocumentCopies.copyAny(value));
+        }
+
+        if (spec.sort() instanceof Integer direction) {
+            target.sort((a, b) -> direction * MongoValueComparator.compare(a, b));
+        } else if (spec.sort() instanceof Map<?, ?> fields) {
+            Comparator<Object> comparator = (a, b) -> 0;
+            for (final Map.Entry<?, ?> field : fields.entrySet()) {
+                final String name = (String) field.getKey();
+                final int direction = (Integer) field.getValue();
+                comparator = comparator.thenComparing((a, b) ->
+                        direction * MongoValueComparator.compare(sortKey(a, name), sortKey(b, name)));
+            }
+            target.sort(comparator);
+        }
+
+        if (spec.slice() != null) {
+            final int slice = spec.slice();
+            final int len = target.size();
+            if (slice >= 0 && slice < len) {
+                target.subList(slice, len).clear();
+            } else if (slice < 0 && -(long) slice < len) {
+                target.subList(0, len + slice).clear();
+            }
+        }
+        return created || !valueEquals(before, target);
+    }
+
+    private static Object sortKey(final Object element, final String fieldPath) {
+        if (!(element instanceof Document document)) {
+            throw new IllegalArgumentException("$push.$sort by field requires document elements");
+        }
+        final PathLookup lookup = lookupPath(document, fieldPath);
+        return lookup.exists() ? lookup.value() : null;
+    }
+
+    private static boolean applyRename(final Document document, final String source, final String target) {
+        final Map<String, Object> sourceParent = findParent(document, source);
+        final String sourceLeaf = leaf(source);
+        if (sourceParent == null || !sourceParent.containsKey(sourceLeaf)) {
+            return false;
+        }
+        final Object value = sourceParent.remove(sourceLeaf);
+        final Map<String, Object> targetParent = getOrCreateParent(document, target);
+        targetParent.put(leaf(target), value);
+        return true;
+    }
+
+    private static boolean applyMultiply(final Document document, final String path, final Number factor) {
+        final Map<String, Object> parent = getOrCreateParent(document, path);
+        final String leaf = leaf(path);
+        final Object current = parent.containsKey(leaf) ? parent.get(leaf) : multiply(factor, 0);
+        final Number product = multiply((Number) current, factor);
+        if (parent.containsKey(leaf) && valueEquals(current, product)) {
+            return false;
+        }
+        parent.put(leaf, product);
+        return true;
+    }
+
+    private static boolean applyCurrentDate(final Document document, final String path, final boolean timestamp) {
+        final long now = System.currentTimeMillis();
+        final Object value = timestamp ? new BsonTimestamp((int) (now / 1000), 1) : new Date(now);
+        getOrCreateParent(document, path).put(leaf(path), value);
+        return true;
+    }
+
+    private static Number multiply(final Number current, final Number factor) {
+        if (current instanceof BigDecimal || factor instanceof BigDecimal) {
+            return toBigDecimal(current).multiply(toBigDecimal(factor));
+        }
+        if (current instanceof BigInteger || factor instanceof BigInteger) {
+            return toBigInteger(current).multiply(toBigInteger(factor));
+        }
+        if (isFloating(current) || isFloating(factor)) {
+            if (current instanceof Float && !(factor instanceof Double)) {
+                return current.floatValue() * factor.floatValue();
+            }
+            return current.doubleValue() * factor.doubleValue();
+        }
+        try {
+            final long product = Math.multiplyExact(current.longValue(), factor.longValue());
+            final boolean narrow = !(current instanceof Long) && !(factor instanceof Long);
+            if (narrow && product >= Integer.MIN_VALUE && product <= Integer.MAX_VALUE) {
+                return (int) product;
+            }
+            return product;
+        } catch (final ArithmeticException overflow) {
+            return current.doubleValue() * factor.doubleValue();
+        }
     }
 
     private static List<Object> parseAddToSetValues(final String path, final Object rawValue) {
@@ -825,6 +1140,9 @@ final class UpdateApplier {
             return current.doubleValue() + delta.doubleValue();
         }
 
+        if (current instanceof Long || delta instanceof Long) {
+            return current.longValue() + delta.longValue();
+        }
         if (current instanceof Byte) {
             return (byte) (current.byteValue() + delta.byteValue());
         }
@@ -832,10 +1150,11 @@ final class UpdateApplier {
             return (short) (current.shortValue() + delta.shortValue());
         }
         if (current instanceof Integer) {
-            return current.intValue() + delta.intValue();
-        }
-        if (current instanceof Long) {
-            return current.longValue() + delta.longValue();
+            final long sum = (long) current.intValue() + delta.longValue();
+            if (sum >= Integer.MIN_VALUE && sum <= Integer.MAX_VALUE) {
+                return (int) sum;
+            }
+            return sum;
         }
 
         return current.doubleValue() + delta.doubleValue();
@@ -876,6 +1195,7 @@ final class UpdateApplier {
         private final List<MinMaxOperation> minMaxOperations;
         private final List<String> unsetOperations;
         private final List<AddToSetOperation> addToSetOperations;
+        private final List<ExtraOperation> extraOperations;
         private final Document replacementDocument;
         private final ArrayFilterBindings arrayFilterBindings;
 
@@ -886,6 +1206,7 @@ final class UpdateApplier {
                 final List<MinMaxOperation> minMaxOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations,
+                final List<ExtraOperation> extraOperations,
                 final Document replacementDocument,
                 final ArrayFilterBindings arrayFilterBindings) {
             this.setOperations = List.copyOf(setOperations);
@@ -894,6 +1215,7 @@ final class UpdateApplier {
             this.minMaxOperations = List.copyOf(minMaxOperations);
             this.unsetOperations = List.copyOf(unsetOperations);
             this.addToSetOperations = List.copyOf(addToSetOperations);
+            this.extraOperations = List.copyOf(extraOperations);
             this.replacementDocument = replacementDocument == null ? null : DocumentCopies.copy(replacementDocument);
             this.arrayFilterBindings = Objects.requireNonNull(arrayFilterBindings, "arrayFilterBindings");
         }
@@ -905,6 +1227,7 @@ final class UpdateApplier {
                 final List<MinMaxOperation> minMaxOperations,
                 final List<String> unsetOperations,
                 final List<AddToSetOperation> addToSetOperations,
+                final List<ExtraOperation> extraOperations,
                 final ArrayFilterBindings arrayFilterBindings) {
             return new ParsedUpdate(
                     setOperations,
@@ -913,12 +1236,14 @@ final class UpdateApplier {
                     minMaxOperations,
                     unsetOperations,
                     addToSetOperations,
+                    extraOperations,
                     null,
                     arrayFilterBindings);
         }
 
         static ParsedUpdate replacement(final Document replacementDocument) {
             return new ParsedUpdate(
+                    List.of(),
                     List.of(),
                     List.of(),
                     List.of(),
@@ -959,6 +1284,10 @@ final class UpdateApplier {
 
         List<AddToSetOperation> addToSetOperations() {
             return Collections.unmodifiableList(addToSetOperations);
+        }
+
+        List<ExtraOperation> extraOperations() {
+            return Collections.unmodifiableList(extraOperations);
         }
 
         ArrayFilterBindings arrayFilterBindings() {
@@ -1054,6 +1383,10 @@ final class UpdateApplier {
     private record MinMaxOperation(String path, Object value, boolean maximum) {}
 
     private record AddToSetOperation(String path, List<Object> values) {}
+
+    private record ExtraOperation(String operator, String path, Object spec) {}
+
+    private record PushSpec(List<Object> values, Integer position, Integer slice, Object sort) {}
 
     private record PathLookup(boolean exists, Object value) {
         static PathLookup missing() {

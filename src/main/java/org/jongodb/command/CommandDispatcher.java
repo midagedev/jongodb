@@ -35,10 +35,14 @@ public final class CommandDispatcher {
         this.transactionValidator = new TransactionCommandValidator(sessionPool);
         this.topologyProfile = Objects.requireNonNull(topologyProfile, "topologyProfile");
         final CursorRegistry cursorRegistry = new CursorRegistry();
+        final ChangeStreamCursors changeStreams = new ChangeStreamCursors(globalStore.changeEventLog());
         final CommandStore routedStore = new RoutingCommandStore(() -> {
             final CommandStore selectedStore = dispatchStore.get();
             return selectedStore == null ? globalStore : selectedStore;
         });
+
+        final ServerInfoCommandHandlers serverInfo =
+                new ServerInfoCommandHandlers(this.topologyProfile, helloPrimaryAddress, replicaSetName);
 
         final Map<String, CommandHandler> configuredHandlers = new HashMap<>();
         configuredHandlers.put("hello", new HelloCommandHandler(this.topologyProfile, helloPrimaryAddress, replicaSetName));
@@ -50,9 +54,9 @@ public final class CommandDispatcher {
         configuredHandlers.put("find", new FindCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("distinct", new DistinctCommandHandler(routedStore));
         configuredHandlers.put("listcollections", new ListCollectionsCommandHandler(routedStore, cursorRegistry));
-        configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry));
-        configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry));
-        configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry));
+        configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry, changeStreams));
+        configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry, changeStreams));
+        configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry, changeStreams));
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(routedStore));
         configuredHandlers.put("listindexes", new ListIndexesCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("drop", new DropCommandHandler(routedStore));
@@ -66,6 +70,24 @@ public final class CommandDispatcher {
         configuredHandlers.put("replaceone", new ReplaceOneCommandHandler(routedStore));
         configuredHandlers.put("findoneandupdate", new FindOneAndUpdateCommandHandler(routedStore));
         configuredHandlers.put("findoneandreplace", new FindOneAndReplaceCommandHandler(routedStore));
+        configuredHandlers.put("jongodbstate", new JongodbStateCommandHandler(globalStore.liveEngine()));
+        configuredHandlers.put("listdatabases", new ListDatabasesCommandHandler(routedStore));
+        configuredHandlers.put("create", new CreateCollectionCommandHandler(routedStore));
+        configuredHandlers.put("dropindexes", new DropIndexesCommandHandler(routedStore));
+        configuredHandlers.put("renamecollection", new RenameCollectionCommandHandler(routedStore));
+        configuredHandlers.put("collmod", new CollModCommandHandler(routedStore));
+        configuredHandlers.put("dbstats", StatsCommandHandlers.dbStats(routedStore));
+        configuredHandlers.put("collstats", StatsCommandHandlers.collStats(routedStore));
+        configuredHandlers.put("explain", new ExplainCommandHandler(routedStore, helloPrimaryAddress));
+        configuredHandlers.put("serverstatus", serverInfo.serverStatus());
+        configuredHandlers.put("hostinfo", serverInfo.hostInfo());
+        configuredHandlers.put("connectionstatus", serverInfo.connectionStatus());
+        configuredHandlers.put("replsetgetstatus", serverInfo.replSetGetStatus());
+        configuredHandlers.put("killop", ServerInfoCommandHandlers.killOp());
+        configuredHandlers.put("endsessions", SessionCommandHandlers.endSessions(sessionPool));
+        configuredHandlers.put("killsessions", SessionCommandHandlers.killSessions(sessionPool));
+        configuredHandlers.put("killallsessions", SessionCommandHandlers.killAllSessions(sessionPool));
+        configuredHandlers.put("refreshsessions", SessionCommandHandlers.refreshSessions());
         configuredHandlers.put("committransaction", new CommitTransactionCommandHandler());
         configuredHandlers.put("aborttransaction", new AbortTransactionCommandHandler());
         this.handlers = Map.copyOf(configuredHandlers);
@@ -184,6 +206,37 @@ public final class CommandDispatcher {
         }
 
         @Override
+        public java.util.List<String> listDatabaseNames() {
+            return delegate().listDatabaseNames();
+        }
+
+        @Override
+        public boolean createCollection(final String database, final String collection) {
+            return delegate().createCollection(database, collection);
+        }
+
+        @Override
+        public void dropIndexes(final String database, final String collection, final java.util.List<String> names) {
+            delegate().dropIndexes(database, collection, names);
+        }
+
+        @Override
+        public Long modifyIndexTtl(
+                final String database, final String collection, final String indexName, final Long expireAfterSeconds) {
+            return delegate().modifyIndexTtl(database, collection, indexName, expireAfterSeconds);
+        }
+
+        @Override
+        public void renameCollection(
+                final String fromDatabase,
+                final String fromCollection,
+                final String toDatabase,
+                final String toCollection,
+                final boolean dropTarget) {
+            delegate().renameCollection(fromDatabase, fromCollection, toDatabase, toCollection, dropTarget);
+        }
+
+        @Override
         public DropCollectionResult dropCollection(final String database, final String collection) {
             return delegate().dropCollection(database, collection);
         }
@@ -252,6 +305,12 @@ public final class CommandDispatcher {
         @Override
         public int delete(final String database, final String collection, final java.util.List<DeleteRequest> deletes) {
             return delegate().delete(database, collection, deletes);
+        }
+
+        @Override
+        public FindAndModifyOutcome findAndModify(
+                final String database, final String collection, final FindAndModifyRequest request) {
+            return delegate().findAndModify(database, collection, request);
         }
 
         private CommandStore delegate() {

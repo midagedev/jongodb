@@ -16,19 +16,43 @@ import java.util.concurrent.ConcurrentMap;
 public final class InMemoryEngineStore implements EngineStore {
     private final ConcurrentMap<Namespace, InMemoryCollectionStore> collections = new ConcurrentHashMap<>();
     private final Clock clock;
+    private final ChangeEventLog changeLog;
 
     public InMemoryEngineStore() {
         this(Clock.systemUTC());
     }
 
     public InMemoryEngineStore(final Clock clock) {
+        this(clock, new ChangeEventLog(clock));
+    }
+
+    private InMemoryEngineStore(final Clock clock, final ChangeEventLog changeLog) {
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.changeLog = changeLog;
+    }
+
+    /** Journal of this store's committed changes; {@code null} for snapshots. */
+    public ChangeEventLog changeEventLog() {
+        return changeLog;
     }
 
     @Override
     public CollectionStore collection(Namespace namespace) {
         Objects.requireNonNull(namespace, "namespace");
-        return collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore(clock));
+        return collections.computeIfAbsent(namespace, key -> attach(key, new InMemoryCollectionStore(clock)));
+    }
+
+    @Override
+    public CollectionStore existingCollection(final Namespace namespace) {
+        Objects.requireNonNull(namespace, "namespace");
+        return collections.get(namespace);
+    }
+
+    private InMemoryCollectionStore attach(final Namespace namespace, final InMemoryCollectionStore store) {
+        if (changeLog != null) {
+            store.attachChangeLog(namespace, changeLog);
+        }
+        return store;
     }
 
     @Override
@@ -45,6 +69,32 @@ public final class InMemoryEngineStore implements EngineStore {
                 .map(Namespace::collection)
                 .sorted()
                 .toList();
+    }
+
+    @Override
+    public synchronized List<String> listDatabaseNames() {
+        return collections.keySet().stream().map(Namespace::database).distinct().sorted().toList();
+    }
+
+    @Override
+    public synchronized void renameCollection(
+            final String fromDatabase,
+            final String fromCollection,
+            final String toDatabase,
+            final String toCollection,
+            final boolean dropTarget) {
+        final Namespace from = Namespace.of(fromDatabase, fromCollection);
+        final Namespace to = Namespace.of(toDatabase, toCollection);
+        final InMemoryCollectionStore source = collections.get(from);
+        if (source == null) {
+            throw new IllegalArgumentException("source collection does not exist: " + fromDatabase + "." + fromCollection);
+        }
+        if (collections.containsKey(to) && !dropTarget) {
+            throw new IllegalStateException("target namespace exists: " + toDatabase + "." + toCollection);
+        }
+        collections.remove(from);
+        // ponytail: the change journal does not record renames; open change streams on either namespace see nothing
+        collections.put(to, attach(to, source));
     }
 
     @Override
@@ -65,7 +115,7 @@ public final class InMemoryEngineStore implements EngineStore {
     }
 
     public synchronized InMemoryEngineStore snapshot() {
-        final InMemoryEngineStore snapshot = new InMemoryEngineStore(clock);
+        final InMemoryEngineStore snapshot = new InMemoryEngineStore(clock, null);
         for (final var entry : collections.entrySet()) {
             snapshot.collections.put(entry.getKey(), entry.getValue().snapshot());
         }
@@ -76,8 +126,35 @@ public final class InMemoryEngineStore implements EngineStore {
         Objects.requireNonNull(source, "source");
         collections.clear();
         for (final var entry : source.collections.entrySet()) {
-            collections.put(entry.getKey(), entry.getValue().snapshot());
+            collections.put(entry.getKey(), attach(entry.getKey(), entry.getValue().snapshot()));
         }
+    }
+
+    /**
+     * Replaces every collection with {@code source}'s contents. Per-document differences are written to the
+     * change log, so change-stream consumers observe a restore as ordinary inserts, updates, and deletes.
+     */
+    public void restoreFrom(final InMemoryEngineStore source) {
+        Objects.requireNonNull(source, "source");
+        restoreStates(source.collectionStatesSnapshot());
+    }
+
+    synchronized void restoreStates(final Map<Namespace, InMemoryCollectionStore.CollectionState> target) {
+        for (final Namespace namespace : List.copyOf(collections.keySet())) {
+            if (!target.containsKey(namespace)) {
+                final InMemoryCollectionStore dropped = collections.get(namespace);
+                dropped.replaceState(new InMemoryCollectionStore.CollectionState(List.of(), dropped.listIndexes()));
+                collections.remove(namespace);
+            }
+        }
+        for (final var entry : target.entrySet()) {
+            collections.computeIfAbsent(entry.getKey(), key -> attach(key, new InMemoryCollectionStore(clock)))
+                    .replaceState(entry.getValue());
+        }
+    }
+
+    Map<Namespace, InMemoryCollectionStore.CollectionState> statesForExport() {
+        return collectionStatesSnapshot();
     }
 
     public void mergeTransactionSnapshot(
@@ -89,13 +166,16 @@ public final class InMemoryEngineStore implements EngineStore {
                 baselineSnapshot.collectionStatesSnapshot();
         final Map<Namespace, InMemoryCollectionStore.CollectionState> transactionStates =
                 transactionSnapshot.collectionStatesSnapshot();
-        final Map<Namespace, InMemoryCollectionStore.CollectionState> currentStates = collectionStatesSnapshot();
 
         final Set<Namespace> touchedNamespaces = new HashSet<>();
         touchedNamespaces.addAll(baselineStates.keySet());
         touchedNamespaces.addAll(transactionStates.keySet());
 
         synchronized (this) {
+            // Snapshot under the same lock as the merge. Two commits that both copied current
+            // state before either merged would each treat the other write as still at baseline.
+            final Map<Namespace, InMemoryCollectionStore.CollectionState> currentStates =
+                    collectionStatesSnapshot();
             for (final Namespace namespace : touchedNamespaces) {
                 final InMemoryCollectionStore.CollectionState baselineState = baselineStates.get(namespace);
                 final InMemoryCollectionStore.CollectionState transactionState = transactionStates.get(namespace);
@@ -106,7 +186,7 @@ public final class InMemoryEngineStore implements EngineStore {
                 final InMemoryCollectionStore.CollectionState currentState = currentStates.get(namespace);
                 final InMemoryCollectionStore.CollectionState mergedState =
                         InMemoryCollectionStore.mergeTransactionState(baselineState, transactionState, currentState);
-                collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore(clock))
+                collections.computeIfAbsent(namespace, key -> attach(key, new InMemoryCollectionStore(clock)))
                         .replaceState(mergedState);
             }
         }

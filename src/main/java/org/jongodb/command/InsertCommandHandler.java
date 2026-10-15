@@ -57,15 +57,43 @@ public final class InsertCommandHandler implements CommandHandler {
             documents.add(document);
         }
 
-        final int insertedCount;
+        final boolean ordered = !command.containsKey("ordered") || command.getBoolean("ordered").getValue();
         try {
-            insertedCount = store.insert(database, collection, List.copyOf(documents));
-        } catch (final DuplicateKeyException exception) {
-            return CommandErrors.duplicateKey(exception.getMessage());
+            final int insertedCount = store.insert(database, collection, List.copyOf(documents));
+            return new BsonDocument()
+                    .append("n", new BsonInt32(insertedCount))
+                    .append("ok", new BsonDouble(1.0));
+        } catch (final DuplicateKeyException ignored) {
+            return insertOneByOne(database, collection, documents, ordered);
         }
-        return new BsonDocument()
-                .append("n", new BsonInt32(insertedCount))
-                .append("ok", new BsonDouble(1.0));
+    }
+
+    private BsonDocument insertOneByOne(
+            final String database,
+            final String collection,
+            final List<BsonDocument> documents,
+            final boolean ordered) {
+        int insertedCount = 0;
+        final BsonArray writeErrors = new BsonArray();
+        for (int index = 0; index < documents.size(); index++) {
+            try {
+                insertedCount += store.insert(database, collection, List.of(documents.get(index)));
+            } catch (final DuplicateKeyException exception) {
+                writeErrors.add(new BsonDocument()
+                        .append("index", new BsonInt32(index))
+                        .append("code", new BsonInt32(11000))
+                        .append("codeName", new BsonString("DuplicateKey"))
+                        .append("errmsg", new BsonString(exception.getMessage())));
+                if (ordered) {
+                    break;
+                }
+            }
+        }
+        final BsonDocument response = new BsonDocument().append("n", new BsonInt32(insertedCount));
+        if (!writeErrors.isEmpty()) {
+            response.append("writeErrors", writeErrors);
+        }
+        return response.append("ok", new BsonDouble(1.0));
     }
 
     private static String readDatabase(final BsonDocument command) {

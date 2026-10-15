@@ -30,6 +30,9 @@ final class TopologyProfileValidator {
         return validateReadConcern(commandName, command);
     }
 
+    private static final java.util.Set<String> PRIMARY_SERVABLE_MODES =
+            java.util.Set.of("primary", "primaryPreferred", "secondaryPreferred", "nearest");
+
     private static BsonDocument validatePrimaryReadPreference(final BsonDocument command) {
         final BsonValue readPreference = command.get("readPreference");
         final BsonValue dollarReadPreference = command.get("$readPreference");
@@ -47,8 +50,10 @@ final class TopologyProfileValidator {
         if (!(mode instanceof BsonString modeString)) {
             return CommandErrors.typeMismatch("readPreference.mode must be a string");
         }
-        if (!"primary".equals(modeString.getValue())) {
-            return CommandErrors.badValue("single-node replica-set profile supports readPreference mode 'primary' only");
+        // The only member is the primary, so every mode that may read from it is served; `secondary` has no eligible member.
+        if (!PRIMARY_SERVABLE_MODES.contains(modeString.getValue())) {
+            return CommandErrors.badValue(
+                    "single-node replica-set profile has no member for readPreference mode '" + modeString.getValue() + "'");
         }
         return null;
     }

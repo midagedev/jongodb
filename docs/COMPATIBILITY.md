@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Status date: 2026-07-21
+Status date: 2026-10-15
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
@@ -18,17 +18,17 @@ Certification context:
 | `ping` | Supported | Returns `{ok: 1}` |
 | `buildInfo` | Partial | Stable subset of fields |
 | `getParameter` | Partial | Only selected parameters |
-| `insert` | Partial | Single/batch insert supported; unsupported bulk modes are skipped in differential corpus |
-| `find` | Partial | Core filter support; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
+| `insert` | Partial | Single/batch insert, ordered and unordered (`ordered=false`); duplicate keys return `ok: 1` with `writeErrors` (ordered stops at the first, unordered continues). `writeErrors` carry no `keyPattern`/`keyValue` |
+| `find` | Partial | Core filter support; projection (inclusion, exclusion, dotted paths, `$slice`, `$elemMatch`, positional `$`; mixed modes fail with 31254/31253); sort ranks null and missing equally and orders arrays by their min (ascending) or max (descending) element; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
 | `aggregate` | Partial | Tier-1/Tier-2 subset plus minimal `$graphLookup`; collation subset applied to `$match`/`$sort`/`$sortByCount` |
-| `getMore` | Supported | Cursor paging |
+| `getMore` | Supported | Cursor paging; `$changeStream` cursors await new events up to `maxTimeMS` (default 1s) |
 | `killCursors` | Supported | Cursor cancellation |
-| `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
+| `createIndexes` | Partial | Key metadata accepted; an identical spec is a no-op, a conflicting spec fails with `IndexOptionsConflict` (85) or `IndexKeySpecsConflict` (86); runtime semantics partial |
 | `listIndexes` | Partial | Metadata round-trip |
 | `listCollections` | Partial | Cursor-shaped collection metadata subset for fixture discovery |
 | `drop` | Partial | Collection cleanup subset with deterministic `NamespaceNotFound` error |
 | `dropDatabase` | Partial | Database-scoped cleanup subset |
-| `update` | Partial | Supports `$min`/`$max` and core modifiers; aggregation-pipeline updates support MongoDB's update-stage allowlist with the expression subset below |
+| `update` | Partial | Supports the operator set listed under Update Semantics (including array operators `$push`/`$pull`/`$pullAll`/`$pop`); aggregation-pipeline updates support MongoDB's update-stage allowlist with the expression subset below |
 | `delete` | Supported | `limit` 0/1 behavior |
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
@@ -36,9 +36,21 @@ Certification context:
 | `countDocuments` | Partial | Filter + skip/limit + hint/readConcern; collation subset applied to filter comparison |
 | `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`, `distinct`, `drop`, `dropDatabase`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
+| `findAndModify` | Partial | Selects and writes one document atomically under the collection lock; `sort` orders like `find` |
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator and expression-based pipeline updates, `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
+| `listDatabases` | Partial | `databases`/`totalSize`/`nameOnly`; `filter` is top-level equality only; `sizeOnDisk` is the logical BSON size (no disk); admin/local/config are not synthesized |
+| `create` | Partial | Explicit creation, `NamespaceExists` (48) on duplicates. Ignored options: `validator`, `validationLevel`, `validationAction`, `storageEngine`, `indexOptionDefaults`, `autoIndexId`, `changeStreamPreAndPostImages`, `recordPreImages`. Rejected (`NotImplemented`): `capped`/`size`/`max`, `timeseries`, `clusteredIndex`, `viewOn`/`pipeline`, `collation`, `encryptedFields`, `expireAfterSeconds` |
+| `dropIndexes` | Supported | `index` as name, `"*"`, name array, or key document; `_id_` rejected (`InvalidOptions`); unknown index `IndexNotFound` (27) |
+| `renameCollection` | Partial | `dropTarget` and cross-database moves; `NamespaceExists`/`NamespaceNotFound`; open change streams do not see the rename |
+| `collMod` | Partial | `index.{name\|keyPattern}.expireAfterSeconds` changes TTL behaviour immediately (integer or `"off"`; index must already be TTL). `index.hidden`, `validator`, `validationLevel`, `validationAction`, `changeStreamPreAndPostImages`, `recordPreImages` are accepted and ignored; every other option is rejected (`NotImplemented`) |
+| `dbStats`, `collStats`, `$collStats` | Partial | Counts exact; sizes derive from the BSON size of live documents, `storageSize` mirrors `size`, index sizes are 0. `$collStats` supports `count`/`storageStats` as the only stage |
+| `serverStatus`, `hostInfo`, `connectionStatus` | Partial | `serverStatus`: host/version/process/pid/uptime/localTime/`connections` (fixed `current: 1`); `connectionStatus`: empty `authInfo` |
+| `explain` | Partial | `find`/`aggregate`/`count`/`distinct`/`update`/`delete`/`findAndModify`, any verbosity. Plans are always `COLLSCAN` (indexes are never scanned); `executionStats` runs read commands for `nReturned`/`totalDocsExamined`; write commands (and `$out`/`$merge`) are not executed and only report `nWouldModify`/`nWouldDelete` |
+| `replSetGetStatus` | Partial | Single-node replica-set profile: one `PRIMARY` member; standalone: `NoReplicationEnabled` (76) |
+| `endSessions`, `killSessions`, `killAllSessions`, `refreshSessions` | Partial | Aborts the in-flight transaction of the affected sessions; sessions are not otherwise tracked, `killAllSessionsByPattern` is unsupported |
+| `aggregate: 1` (`$currentOp`, `$listLocalSessions`, `$listSessions`), `killOp` | Partial | Always an empty result (`inprog: []`); other database-level stages are rejected; `killOp` acknowledges without effect |
 
 ## Query Operators
 
@@ -50,6 +62,9 @@ Implemented operators:
 - Regex: `$regex` + `$options`, pattern literals
 - Logical: `$and`, `$or`, `$nor`, top-level `$not`, field-level `$not`
 - Expression: top-level `$expr` subset
+- Schema: `$jsonSchema` with `required`, `properties`, `bsonType`, `enum`, `minimum`/`maximum`, `additionalProperties`
+
+Equality, `$in`/`$nin`, array membership, and `$elemMatch` compare int/long/double/decimal by numeric value. `$nin` containing `null` excludes documents missing the field. `$elemMatch` applies `$and`/`$or`/`$nor` to a single element.
 - Positional dotted paths: array-index path resolution (for example `items.0.sku`, `$expr` path `metrics.0`)
 
 `$expr` subset currently includes:
@@ -88,8 +103,11 @@ Implemented stages:
 
 Not implemented or partial:
 - unsupported stages return deterministic fail-fast
-- expression support includes field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
-- `$dateTrunc` supports second through year units, `binSize`, `startOfWeek`, and UTC timezone aliases; non-UTC timezones fail explicitly
+- expression support includes field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, `$dateTrunc`, `$dateToString` (format specifiers, `onNull`), date parts (`$year` … `$millisecond`, ISO week parts), `$concat`, `$toLower`, `$toUpper`, `$toString`, `$size`, `$substrCP`, `$split`, `$strLenCP`, `$trim`, `$$NOW`, and `$$CLUSTER_TIME`
+- date expressions accept IANA zones and `+HH`, `+HHMM`, `+HH:MM` offsets; `$isoWeekYear` returns a long, other date parts an int
+- `$dateTrunc` supports millisecond through year units, `binSize`, and `startOfWeek` in any timezone
+- `$$NOW` and `$$CLUSTER_TIME` hold one value per command, including every document of a pipeline update; `$$CLUSTER_TIME` is a `Timestamp` derived from that value
+- `$group` keys compare numbers by value and keep the first value's BSON type
 - `$percentile`/`$median` accept `method: "approximate"` and use deterministic exact interpolation internally
 - window accumulators and range/time windows beyond the listed `$setWindowFields` subset are not implemented
 - `$merge` options beyond the terminal string / `{into: <collection>}` subset are deterministic unsupported paths
@@ -99,10 +117,10 @@ Not implemented or partial:
 ## Update Semantics
 
 Supported:
-- operator updates: `$set`, `$setOnInsert`, `$inc`, `$min`, `$max`, `$unset`, `$addToSet`
+- operator updates: `$set`, `$setOnInsert`, `$inc`, `$mul`, `$min`, `$max`, `$unset`, `$rename`, `$currentDate`, `$addToSet`, `$push` (`$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`
 - `arrayFilters` subset for `$set`/`$unset` paths using `$[identifier]` bindings
 - update pipeline stages: `$addFields`/`$set`, `$project`/`$unset`, and `$replaceRoot`/`$replaceWith`
-- update pipeline expressions: field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
+- update pipeline expressions: the aggregation expression set listed under Aggregation Stages
 - replacement updates (with `multi=false`)
 - upsert for operator and replacement forms
 - same update constraints apply to `bulkWrite` update/replace operations
@@ -120,7 +138,6 @@ Not supported:
 The R3 failure-ledger runner currently treats the following UTF cases as unsupported and excludes them from
 differential parity counts:
 
-- unordered `insertMany` (`ordered=false`)
 - unordered `bulkWrite` (`ordered=false`)
 - `clientBulkWrite` with mixed namespaces, `ordered=false`, or `verboseResults=true`
 - dot/dollar insert payload forms outside the deterministic insert subset; dollar-prefixed subfields under `_id` fail with `code=52`
@@ -148,6 +165,7 @@ Supported metadata paths:
 - `collation` metadata
 - `expireAfterSeconds` metadata
 - tier-0 TTL pruning for single-field non-partial TTL indexes
+- unique keys compare numbers by value (`1`, `1L`, `1.0` collide)
 
 Current limitations:
 - collation runtime semantics are subset-only (`locale`/`strength`/`caseLevel`)
@@ -161,11 +179,28 @@ Supported:
 - namespace-aware commit merge for transaction writes
 - expected transaction error labels for no-such-transaction cases
 - deterministic retry replay behavior for duplicate commit/abort paths (including `UnknownTransactionCommitResult` and `TransientTransactionError` label contracts by failure type)
-- deterministic conflict rule: transactional writes win when transactional and non-transactional paths touch the same `_id`
+- committing a transaction whose document changed outside its snapshot fails with `WriteConflict` (112) and the `TransientTransactionError` label, so driver `withTransaction` retries it
 
 Current scope:
 - single in-memory process semantics
 - no distributed transaction behavior
+
+## Change Streams
+
+Supported:
+- `$changeStream` as the first aggregate stage on a collection (`aggregate: "<coll>"`), a database (`aggregate: 1`), or the cluster (`admin` + `allChangesForCluster: true`)
+- events for `insert`, `update`, `replace`, `delete`, including upserts, TTL expiry deletes, and committed transactions (aborted transactions emit nothing)
+- `fullDocument`: `default`, `updateLookup`, `whenAvailable`, `required`
+- `resumeAfter`, `startAfter`, `startAtOperationTime`, and `postBatchResumeToken` on every batch
+- trailing pipeline stages run on event documents through the aggregation engine (`$match` on `ns.coll`, `$project`, ...)
+- `ChangeStreamHistoryLost` (`code=286`) when resuming from a position the bounded in-memory journal (100,000 events) has dropped
+
+Current scope:
+- `updateLookup` returns the post-image recorded with the event, not a fresh read at delivery time
+- `updateDescription.updatedFields`/`removedFields` are top-level field names, not dotted paths; `truncatedArrays` is always empty
+- no `drop`, `rename`, `dropDatabase`, or `invalidate` events
+- `fullDocumentBeforeChange` other than `off` is not supported
+- resume tokens are only meaningful to the server instance that issued them
 
 ## Deployment Profiles
 
@@ -176,7 +211,7 @@ Supported runtime profiles:
 `singleNodeReplicaSet` profile contract:
 - URI includes `replicaSet=<name>`
 - `hello`/`isMaster` include deterministic replica-set topology fields
-- primary-only read preference (`mode=primary`); non-primary modes fail deterministically
+- read preference: `primary`, `primaryPreferred`, `secondaryPreferred`, and `nearest` are served by the single primary; `secondary` fails deterministically
 - constrained concern subset:
   - writeConcern: `w=1` or `w="majority"` (with validated `wtimeout`)
   - readConcern levels: `local`, `majority`, `snapshot`
@@ -185,6 +220,18 @@ Not in scope for this profile:
 - elections/step-down
 - replication lag simulation
 - multi-node member state transitions
+
+## State Snapshots and Files
+
+`{jongodbState: <action>}` (jongodb-specific, any database):
+- `save` / `restore` / `drop` with `name` — in-memory snapshots of every database; `list` returns their names
+- `export` / `import` with `path` — the whole state as a `mongodump` directory (`<db>/<coll>.bson` + `.metadata.json`); `mongodump --gzip` output loads, and `mongorestore` accepts an export with its index options
+- restores replace all data and surface to change streams as per-document events; open transactions are not aborted
+- `admin`/`local`/`config` are skipped both ways, `system.*` on import
+
+Startup and shutdown:
+- launcher: `--load=<dir>` loads a dump at start; `--persist=<dir>` loads it when present and exports on shutdown
+- `org.jongodb.spring.embedded.JongodbEmbeddedInitializer` runs the server inside an application's own JVM on a fixed port (default `127.0.0.1:27017`, `singleNodeReplicaSet`), loading `jongodb.embedded.load-path`/`persist-path` before any bean is created and pointing each `jongodb.embedded.uri-properties` entry (`name[:database]`) at it; registered in `META-INF/spring.factories` and inert unless `jongodb.embedded.enabled=true`
 
 ## Error Contract
 

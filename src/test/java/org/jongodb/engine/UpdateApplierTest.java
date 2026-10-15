@@ -5,8 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import java.util.Date;
+import java.util.List;
+import org.bson.BsonTimestamp;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 
@@ -113,7 +114,7 @@ class UpdateApplierTest {
         IllegalArgumentException error =
                 assertThrows(
                         IllegalArgumentException.class,
-                        () -> UpdateApplier.parse(new Document("$push", new Document("a", 1))));
+                        () -> UpdateApplier.parse(new Document("$bogus", new Document("a", 1))));
         assertTrue(error.getMessage().contains("unsupported update operator"));
     }
 
@@ -240,5 +241,187 @@ class UpdateApplierTest {
         assertTrue(UpdateApplier.applyForUpsertInsert(target, parsed));
         assertEquals("Ada", target.getString("name"));
         assertEquals("inserted", target.getString("createdAt"));
+    }
+
+    private static boolean run(Document target, Document update) {
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update);
+        UpdateApplier.validateApplicable(target, parsed);
+        return UpdateApplier.apply(target, parsed);
+    }
+
+    private static void assertRejected(Document target, Document update, String message) {
+        UpdateApplier.ParsedUpdate parsed = UpdateApplier.parse(update);
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class, () -> UpdateApplier.validateApplicable(target, parsed));
+        assertTrue(error.getMessage().contains(message), error.getMessage());
+    }
+
+    @Test
+    void pushAppendsSingleValueAndCreatesMissingArray() {
+        Document target = new Document("tags", new java.util.ArrayList<>(List.of("a")));
+        assertTrue(run(target, new Document("$push", new Document("tags", "b").append("nested.list", 1))));
+        assertEquals(List.of("a", "b"), target.get("tags"));
+        assertEquals(List.of(1), target.get("nested", Document.class).get("list"));
+    }
+
+    @Test
+    void pushRejectsNonArrayTarget() {
+        assertRejected(new Document("tags", "x"), new Document("$push", new Document("tags", 1)), "$push target");
+    }
+
+    @Test
+    void pushEachWithPositionInsertsAtFrontMiddleAndFromEnd() {
+        Document target = new Document("a", new java.util.ArrayList<>(List.of(1, 2, 3)));
+        run(target, new Document("$push", new Document("a",
+                new Document("$each", List.of(8, 9)).append("$position", 1))));
+        assertEquals(List.of(1, 8, 9, 2, 3), target.get("a"));
+        run(target, new Document("$push", new Document("a",
+                new Document("$each", List.of(0)).append("$position", -1))));
+        assertEquals(List.of(1, 8, 9, 2, 0, 3), target.get("a"));
+        run(target, new Document("$push", new Document("a",
+                new Document("$each", List.of(7)).append("$position", -100))));
+        assertEquals(List.of(7, 1, 8, 9, 2, 0, 3), target.get("a"));
+    }
+
+    @Test
+    void pushEachSortThenSliceFollowsMongoOrder() {
+        Document target = new Document("scores", new java.util.ArrayList<>(List.of(5, 1)));
+        run(target, new Document("$push", new Document("scores",
+                new Document("$each", List.of(9, 3)).append("$sort", -1).append("$slice", 3))));
+        assertEquals(List.of(9, 5, 3), target.get("scores"));
+
+        run(target, new Document("$push", new Document("scores",
+                new Document("$each", List.of(2)).append("$sort", 1).append("$slice", -2))));
+        assertEquals(List.of(5, 9), target.get("scores"));
+
+        run(target, new Document("$push", new Document("scores",
+                new Document("$each", List.of()).append("$slice", 0))));
+        assertEquals(List.of(), target.get("scores"));
+    }
+
+    @Test
+    void pushEachSortsDocumentsByField() {
+        Document target = new Document("q", new java.util.ArrayList<>(List.of(new Document("n", 2))));
+        run(target, new Document("$push", new Document("q",
+                new Document("$each", List.of(new Document("n", 3), new Document("n", 1)))
+                        .append("$sort", new Document("n", 1)))));
+        assertEquals(
+                List.of(new Document("n", 1), new Document("n", 2), new Document("n", 3)), target.get("q"));
+    }
+
+    @Test
+    void pushWithEmptyEachDoesNotModifyExistingArray() {
+        Document target = new Document("a", new java.util.ArrayList<>(List.of(1)));
+        assertFalse(run(target, new Document("$push", new Document("a", new Document("$each", List.of())))));
+    }
+
+    @Test
+    void pushRejectsModifiersWithoutEach() {
+        assertThrows(IllegalArgumentException.class, () -> UpdateApplier.parse(
+                new Document("$push", new Document("a", new Document("$slice", 1)))));
+    }
+
+    @Test
+    void pullRemovesEqualValuesOperatorMatchesAndDocumentConditions() {
+        Document target = new Document("n", new java.util.ArrayList<>(List.of(1, 2, 2.0d, 7, 9)))
+                .append("docs", new java.util.ArrayList<>(List.of(
+                        new Document("score", 8).append("item", "A"),
+                        new Document("score", 8).append("item", "B"),
+                        new Document("score", 1).append("item", "B"))));
+        assertTrue(run(target, new Document("$pull", new Document("n", 2))));
+        assertEquals(List.of(1, 7, 9), target.get("n"));
+        assertTrue(run(target, new Document("$pull", new Document("n", new Document("$gte", 7)))));
+        assertEquals(List.of(1), target.get("n"));
+        assertTrue(run(target, new Document("$pull", new Document("docs", new Document("score", 8).append("item", "B")))));
+        assertEquals(2, target.getList("docs", Document.class).size());
+        assertTrue(run(target, new Document("$pull", new Document("n", new Document("$in", List.of(1, 5))))));
+        assertEquals(List.of(), target.get("n"));
+    }
+
+    @Test
+    void pullIsNoOpForMissingFieldAndRejectsNonArray() {
+        assertFalse(run(new Document(), new Document("$pull", new Document("a", 1))));
+        assertRejected(new Document("a", 1), new Document("$pull", new Document("a", 1)), "$pull target");
+    }
+
+    @Test
+    void pullAllRemovesEveryListedValue() {
+        Document target = new Document("a", new java.util.ArrayList<>(List.of(1, 2, 3, 1, 4)));
+        assertTrue(run(target, new Document("$pullAll", new Document("a", List.of(1, 4)))));
+        assertEquals(List.of(2, 3), target.get("a"));
+        assertFalse(run(target, new Document("$pullAll", new Document("a", List.of(9)))));
+        assertFalse(run(new Document(), new Document("$pullAll", new Document("a", List.of(1)))));
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$pullAll", new Document("a", 1))));
+        assertRejected(new Document("a", "x"), new Document("$pullAll", new Document("a", List.of(1))), "$pullAll target");
+    }
+
+    @Test
+    void popRemovesFirstOrLastAndRejectsOtherArguments() {
+        Document target = new Document("a", new java.util.ArrayList<>(List.of(1, 2, 3)));
+        assertTrue(run(target, new Document("$pop", new Document("a", 1))));
+        assertEquals(List.of(1, 2), target.get("a"));
+        assertTrue(run(target, new Document("$pop", new Document("a", -1))));
+        assertEquals(List.of(2), target.get("a"));
+        assertFalse(run(new Document("a", new java.util.ArrayList<>()), new Document("$pop", new Document("a", 1))));
+        assertFalse(run(new Document(), new Document("$pop", new Document("a", 1))));
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$pop", new Document("a", 2))));
+        assertRejected(new Document("a", 1), new Document("$pop", new Document("a", 1)), "$pop target");
+    }
+
+    @Test
+    void mulMultipliesPromotesAndCreatesZeroOfSameType() {
+        Document target = new Document("i", 3).append("big", Integer.MAX_VALUE).append("d", 1.5d);
+        assertTrue(run(target, new Document("$mul",
+                new Document("i", 4).append("big", 2).append("d", 2).append("missingInt", 5)
+                        .append("missingLong", 5L).append("missingDouble", 2.5d))));
+        assertEquals(12, target.get("i"));
+        assertEquals(Integer.MAX_VALUE * 2L, target.get("big"));
+        assertEquals(3.0d, target.get("d"));
+        assertEquals(0, target.get("missingInt"));
+        assertEquals(0L, target.get("missingLong"));
+        assertEquals(0.0d, target.get("missingDouble"));
+        assertFalse(run(target, new Document("$mul", new Document("i", 1))));
+        assertRejected(new Document("a", "x"), new Document("$mul", new Document("a", 2)), "$mul target");
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$mul", new Document("a", "2"))));
+    }
+
+    @Test
+    void renameMovesFieldsIncludingDottedPaths() {
+        Document target = new Document("old", 1).append("a", new Document("b", 2));
+        assertTrue(run(target, new Document("$rename", new Document("old", "fresh").append("a.b", "c.d"))));
+        assertFalse(target.containsKey("old"));
+        assertEquals(1, target.get("fresh"));
+        assertEquals(2, target.get("c", Document.class).get("d"));
+        assertFalse(target.get("a", Document.class).containsKey("b"));
+        assertFalse(run(target, new Document("$rename", new Document("missing", "x"))));
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$rename", new Document("a", "a.b"))));
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$rename", new Document("a.b", "a"))));
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$rename", new Document("a", 1))));
+    }
+
+    @Test
+    void currentDateSetsDateOrTimestamp() {
+        Document target = new Document();
+        assertTrue(run(target, new Document("$currentDate", new Document("d", true)
+                .append("d2", new Document("$type", "date"))
+                .append("t", new Document("$type", "timestamp")))));
+        assertTrue(target.get("d") instanceof Date);
+        assertTrue(target.get("d2") instanceof Date);
+        assertTrue(target.get("t") instanceof BsonTimestamp);
+        assertThrows(IllegalArgumentException.class,
+                () -> UpdateApplier.parse(new Document("$currentDate", new Document("a", new Document("$type", "x")))));
+    }
+
+    @Test
+    void newOperatorsRejectArrayFilterPaths() {
+        assertThrows(IllegalArgumentException.class, () -> UpdateApplier.parse(
+                new Document("$push", new Document("a.$[x].b", 1)),
+                List.of(new Document("x.k", 1))));
     }
 }
