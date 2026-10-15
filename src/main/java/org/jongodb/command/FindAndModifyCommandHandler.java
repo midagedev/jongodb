@@ -1,6 +1,5 @@
 package org.jongodb.command;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -11,7 +10,6 @@ import org.bson.BsonDouble;
 import org.bson.BsonInt32;
 import org.bson.BsonNull;
 import org.bson.BsonString;
-import org.bson.BsonType;
 import org.bson.BsonValue;
 import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.DuplicateKeyException;
@@ -168,124 +166,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             return matches.get(0);
         }
 
-        final List<SortKey> sortKeys = readSortKeys(sort);
-        final List<BsonDocument> sorted = new ArrayList<>(matches);
-        sorted.sort((left, right) -> compareBySort(left, right, sortKeys, collation));
-        return sorted.get(0);
-    }
-
-    private static List<SortKey> readSortKeys(final BsonDocument sort) {
-        final List<SortKey> sortKeys = new ArrayList<>(sort.size());
-        for (final String field : sort.keySet()) {
-            final Long parsedDirection = readIntegralLong(sort.get(field));
-            if (parsedDirection == null || (parsedDirection != 1L && parsedDirection != -1L)) {
-                throw new IllegalArgumentException("sort directions must be 1 or -1");
-            }
-            sortKeys.add(new SortKey(field, parsedDirection.intValue()));
-        }
-        return List.copyOf(sortKeys);
-    }
-
-    private static int compareBySort(
-            final BsonDocument left,
-            final BsonDocument right,
-            final List<SortKey> sortKeys,
-            final CollationSupport.Config collation) {
-        for (final SortKey sortKey : sortKeys) {
-            final int compared =
-                    compareSortValues(resolvePath(left, sortKey.field()), resolvePath(right, sortKey.field()), collation);
-            if (compared != 0) {
-                return sortKey.direction() == 1 ? compared : -compared;
-            }
-        }
-        return 0;
-    }
-
-    private static BsonValue resolvePath(final BsonDocument document, final String path) {
-        if (path == null || path.isEmpty()) {
-            return null;
-        }
-
-        final String[] segments = path.split("\\.");
-        BsonValue current = document;
-        for (final String segment : segments) {
-            if (current == null) {
-                return null;
-            }
-            if (current.isDocument()) {
-                current = current.asDocument().get(segment);
-                continue;
-            }
-            if (current.isArray()) {
-                final var array = current.asArray();
-                if (array.isEmpty()) {
-                    return null;
-                }
-                current = array.get(0);
-                if (current.isDocument()) {
-                    current = current.asDocument().get(segment);
-                    continue;
-                }
-            }
-            return null;
-        }
-        return current;
-    }
-
-    private static int compareSortValues(
-            final BsonValue left, final BsonValue right, final CollationSupport.Config collation) {
-        if (left == right) {
-            return 0;
-        }
-        if (left == null) {
-            return -1;
-        }
-        if (right == null) {
-            return 1;
-        }
-        if (left.isNumber() && right.isNumber()) {
-            return Double.compare(left.asNumber().doubleValue(), right.asNumber().doubleValue());
-        }
-        if (left.isString() && right.isString()) {
-            return collation.compareStrings(left.asString().getValue(), right.asString().getValue());
-        }
-        if (left.isBoolean() && right.isBoolean()) {
-            return Boolean.compare(left.asBoolean().getValue(), right.asBoolean().getValue());
-        }
-        if (left.isDateTime() && right.isDateTime()) {
-            return Long.compare(left.asDateTime().getValue(), right.asDateTime().getValue());
-        }
-        if (left.isObjectId() && right.isObjectId()) {
-            return left.asObjectId().getValue().toHexString().compareTo(right.asObjectId().getValue().toHexString());
-        }
-        if (left.getBsonType() == right.getBsonType()) {
-            return left.toString().compareTo(right.toString());
-        }
-
-        final int leftRank = sortTypeRank(left.getBsonType());
-        final int rightRank = sortTypeRank(right.getBsonType());
-        if (leftRank != rightRank) {
-            return Integer.compare(leftRank, rightRank);
-        }
-        return left.toString().compareTo(right.toString());
-    }
-
-    private static int sortTypeRank(final BsonType type) {
-        if (type == null) {
-            return 0;
-        }
-        return switch (type) {
-            case NULL -> 0;
-            case INT32, INT64, DOUBLE, DECIMAL128 -> 1;
-            case STRING, SYMBOL -> 2;
-            case DOCUMENT -> 3;
-            case ARRAY -> 4;
-            case BINARY -> 5;
-            case OBJECT_ID -> 6;
-            case BOOLEAN -> 7;
-            case DATE_TIME, TIMESTAMP -> 8;
-            default -> 9;
-        };
+        return FindCommandHandler.sorted(matches, sort, collation).get(0);
     }
 
     private static BsonDocument successResponse(
@@ -520,5 +401,4 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         }
     }
 
-    private record SortKey(String field, int direction) {}
 }

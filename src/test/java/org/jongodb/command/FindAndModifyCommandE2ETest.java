@@ -34,6 +34,18 @@ class FindAndModifyCommandE2ETest {
     }
 
     @Test
+    void sortPicksTheSameDocumentAsFind() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"jobs\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"rank\":3},{\"_id\":2,\"rank\":[5,1]}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                "{\"findAndModify\":\"jobs\",\"$db\":\"app\",\"query\":{},\"sort\":{\"rank\":1},\"remove\":true}"));
+
+        assertEquals(2, response.getDocument("value").getInt32("_id").getValue());
+    }
+
+    @Test
     void removeModeDeletesSingleMatchedDocument() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 

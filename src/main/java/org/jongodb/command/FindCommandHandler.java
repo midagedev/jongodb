@@ -220,6 +220,11 @@ public final class FindCommandHandler implements CommandHandler {
         return List.copyOf(sortKeys);
     }
 
+    static List<BsonDocument> sorted(
+            final List<BsonDocument> documents, final BsonDocument sort, final CollationSupport.Config collation) {
+        return applySortSkipLimit(documents, parseSortKeys(sort), 0, null, collation);
+    }
+
     private static List<BsonDocument> applySortSkipLimit(
             final List<BsonDocument> source,
             final List<SortKey> sortKeys,
