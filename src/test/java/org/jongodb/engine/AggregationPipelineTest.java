@@ -106,6 +106,22 @@ class AggregationPipelineTest {
     }
 
     @Test
+    void sumKeepsWidestInputTypeLikeMongo() {
+        final java.util.function.Function<List<Object>, Object> sum = values -> AggregationPipeline.execute(
+                        values.stream().map(v -> new Document("v", v)).toList(),
+                        List.of(new Document("$group", new Document("_id", null).append("s", new Document("$sum", "$v")))))
+                .get(0)
+                .get("s");
+
+        assertEquals(3, sum.apply(List.of(1, 2)));
+        assertEquals(0, sum.apply(List.of("x")));
+        assertEquals(3L, sum.apply(List.of(1, 2L)));
+        assertEquals((long) Integer.MAX_VALUE + 1, sum.apply(List.of(Integer.MAX_VALUE, 1)));
+        assertEquals(3.5d, sum.apply(List.of(1, 2.5d)));
+        assertEquals((double) Long.MAX_VALUE + 1, sum.apply(List.of(Long.MAX_VALUE, 1L)));
+    }
+
+    @Test
     void groupSupportsCompoundIdsCoreAccumulatorsAndMergeObjects() {
         final List<Document> source = List.of(
                 new Document("event", "run").append("tenant", "crown").append("duration", 10).append("labels", new Document("a", 1)),
@@ -126,8 +142,8 @@ class AggregationPipelineTest {
         final Document result = AggregationPipeline.execute(source, List.of(new Document("$group", group))).get(0);
 
         assertEquals(new Document("event", "run").append("tenant", "crown"), result.get("_id"));
-        assertEquals(3L, result.get("count"));
-        assertEquals(40L, result.get("total"));
+        assertEquals(3, result.get("count"));
+        assertEquals(40.0d, result.get("total"));
         assertEquals(20.0d, result.get("average"));
         assertEquals(10, result.get("minimum"));
         assertEquals(30.0d, result.get("maximum"));

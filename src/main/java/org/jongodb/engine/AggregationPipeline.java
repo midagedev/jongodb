@@ -355,13 +355,6 @@ public final class AggregationPipeline {
         return AggregationExpressions.nullIfMissing(evaluateExpression(source, expression));
     }
 
-    private static Number addNumbers(final Object currentValue, final Number increment) {
-        if (!(currentValue instanceof Number currentNumber)) {
-            return normalizeNumber(increment.doubleValue());
-        }
-        return normalizeNumber(currentNumber.doubleValue() + increment.doubleValue());
-    }
-
     private static boolean containsByMongoEquality(final List<Object> values, final Object candidate) {
         for (final Object value : values) {
             if (MongoValueComparator.equals(value, candidate)) {
@@ -398,15 +391,52 @@ public final class AggregationPipeline {
         };
     }
 
+    // MongoDB keeps the widest input type: int stays int until it overflows to long, long overflows to double.
     private static Object accumulatorSum(final List<Document> sources, final Object expression) {
-        Number sum = 0L;
+        long exact = 0L;
+        boolean sawLong = false;
+        boolean exactOverflowed = false;
+        double floating = 0d;
+        boolean sawDouble = false;
+        java.math.BigDecimal decimal = java.math.BigDecimal.ZERO;
+        boolean sawDecimal = false;
         for (final Document source : sources) {
             final Object value = evaluateGroupExpression(source, expression);
-            if (value instanceof Number number) {
-                sum = addNumbers(sum, number);
+            if (value instanceof org.bson.types.Decimal128 decimal128) {
+                decimal = decimal.add(decimal128.bigDecimalValue());
+                sawDecimal = true;
+            } else if (value instanceof java.math.BigDecimal bigDecimal) {
+                decimal = decimal.add(bigDecimal);
+                sawDecimal = true;
+            } else if (value instanceof Double || value instanceof Float) {
+                floating += ((Number) value).doubleValue();
+                sawDouble = true;
+            } else if (value instanceof Number number) {
+                sawLong |= !(number instanceof Integer || number instanceof Short || number instanceof Byte);
+                if (!exactOverflowed) {
+                    try {
+                        exact = Math.addExact(exact, number.longValue());
+                    } catch (final ArithmeticException overflow) {
+                        exactOverflowed = true;
+                        floating += (double) exact;
+                    }
+                }
+                if (exactOverflowed) {
+                    floating += number.doubleValue();
+                }
             }
         }
-        return sum;
+        if (sawDecimal) {
+            return new org.bson.types.Decimal128(
+                    decimal.add(java.math.BigDecimal.valueOf(floating)).add(java.math.BigDecimal.valueOf(exactOverflowed ? 0L : exact)));
+        }
+        if (sawDouble || exactOverflowed) {
+            return floating + (exactOverflowed ? 0d : (double) exact);
+        }
+        if (!sawLong && exact >= Integer.MIN_VALUE && exact <= Integer.MAX_VALUE) {
+            return (int) exact;
+        }
+        return exact;
     }
 
     private static Object accumulatorAverage(final List<Document> sources, final Object expression) {
