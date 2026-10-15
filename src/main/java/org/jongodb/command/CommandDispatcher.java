@@ -67,6 +67,7 @@ public final class CommandDispatcher {
         configuredHandlers.put("replaceone", new ReplaceOneCommandHandler(routedStore));
         configuredHandlers.put("findoneandupdate", new FindOneAndUpdateCommandHandler(routedStore));
         configuredHandlers.put("findoneandreplace", new FindOneAndReplaceCommandHandler(routedStore));
+        configuredHandlers.put("jongodbstate", new JongodbStateCommandHandler(globalStore.liveEngine()));
         configuredHandlers.put("committransaction", new CommitTransactionCommandHandler());
         configuredHandlers.put("aborttransaction", new AbortTransactionCommandHandler());
         this.handlers = Map.copyOf(configuredHandlers);

@@ -203,6 +203,18 @@ Not in scope for this profile:
 - replication lag simulation
 - multi-node member state transitions
 
+## State Snapshots and Files
+
+`{jongodbState: <action>}` (jongodb-specific, any database):
+- `save` / `restore` / `drop` with `name` — in-memory snapshots of every database; `list` returns their names
+- `export` / `import` with `path` — the whole state as a `mongodump` directory (`<db>/<coll>.bson` + `.metadata.json`); `mongodump --gzip` output loads, and `mongorestore` accepts an export with its index options
+- restores replace all data and surface to change streams as per-document events; open transactions are not aborted
+- `admin`/`local`/`config` are skipped both ways, `system.*` on import
+
+Startup and shutdown:
+- launcher: `--load=<dir>` loads a dump at start; `--persist=<dir>` loads it when present and exports on shutdown
+- `org.jongodb.spring.embedded.JongodbEmbeddedInitializer` runs the server inside an application's own JVM on a fixed port (default `127.0.0.1:27017`, `singleNodeReplicaSet`), loading `jongodb.embedded.load-path`/`persist-path` before any bean is created and pointing each `jongodb.embedded.uri-properties` entry (`name[:database]`) at it; activate with `context.initializer.classes`
+
 ## Error Contract
 
 Known deterministic error classes:

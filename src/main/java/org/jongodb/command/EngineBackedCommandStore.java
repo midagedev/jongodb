@@ -56,6 +56,13 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public InMemoryEngineStore liveEngine() {
+        return transactionBaselineSnapshot == null && engineStore instanceof InMemoryEngineStore inMemoryEngineStore
+                ? inMemoryEngineStore
+                : null;
+    }
+
+    @Override
     public org.jongodb.engine.ChangeEventLog changeEventLog() {
         return engineStore instanceof InMemoryEngineStore inMemoryEngineStore
                 ? inMemoryEngineStore.changeEventLog()

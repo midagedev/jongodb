@@ -98,6 +98,33 @@ public final class InMemoryEngineStore implements EngineStore {
         }
     }
 
+    /**
+     * Replaces every collection with {@code source}'s contents. Per-document differences are written to the
+     * change log, so change-stream consumers observe a restore as ordinary inserts, updates, and deletes.
+     */
+    public void restoreFrom(final InMemoryEngineStore source) {
+        Objects.requireNonNull(source, "source");
+        restoreStates(source.collectionStatesSnapshot());
+    }
+
+    synchronized void restoreStates(final Map<Namespace, InMemoryCollectionStore.CollectionState> target) {
+        for (final Namespace namespace : List.copyOf(collections.keySet())) {
+            if (!target.containsKey(namespace)) {
+                final InMemoryCollectionStore dropped = collections.get(namespace);
+                dropped.replaceState(new InMemoryCollectionStore.CollectionState(List.of(), dropped.listIndexes()));
+                collections.remove(namespace);
+            }
+        }
+        for (final var entry : target.entrySet()) {
+            collections.computeIfAbsent(entry.getKey(), key -> attach(key, new InMemoryCollectionStore(clock)))
+                    .replaceState(entry.getValue());
+        }
+    }
+
+    Map<Namespace, InMemoryCollectionStore.CollectionState> statesForExport() {
+        return collectionStatesSnapshot();
+    }
+
     public void mergeTransactionSnapshot(
             final InMemoryEngineStore baselineSnapshot, final InMemoryEngineStore transactionSnapshot) {
         Objects.requireNonNull(baselineSnapshot, "baselineSnapshot");

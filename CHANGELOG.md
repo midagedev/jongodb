@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Added
 - Added `$changeStream` cursors (collection, database, and cluster scope) with resume tokens, `fullDocument: updateLookup`, `getMore` await, and events for transactional commits and TTL deletes.
 - Added `$push` (with `$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`, `$mul`, `$rename`, and `$currentDate` update operators.
+- Added `jongodbState` (named snapshots, `mongodump`-layout export/import), launcher `--load`/`--persist`, and `JongodbEmbeddedInitializer` for running jongodb inside an application's JVM with persisted state.
 
 ### Changed
 - Default local project version moved to `0.1.10-SNAPSHOT`.
