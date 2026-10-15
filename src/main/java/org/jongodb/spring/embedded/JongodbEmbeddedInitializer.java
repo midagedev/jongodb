@@ -19,9 +19,9 @@ import org.springframework.core.env.MapPropertySource;
 /**
  * Runs jongodb inside an application's own JVM as its MongoDB, for local environments rather than tests.
  *
- * <p>Activate without code changes by putting the jongodb jar on the classpath and setting
- * {@code context.initializer.classes=org.jongodb.spring.embedded.JongodbEmbeddedInitializer}. The server starts,
- * and loads its initial state, before any bean is created, so startup code already sees the data.
+ * <p>Spring Boot picks it up from {@code META-INF/spring.factories}, so an application needs no code change: put the
+ * jongodb jar on its classpath and set {@code jongodb.embedded.enabled=true}; without that property it does nothing.
+ * The server starts, and loads its initial state, before any bean is created, so startup code already sees the data.
  *
  * <p>Properties:
  * <ul>
@@ -43,6 +43,9 @@ public final class JongodbEmbeddedInitializer implements ApplicationContextIniti
     public void initialize(final ConfigurableApplicationContext context) {
         Objects.requireNonNull(context, "context");
         final ConfigurableEnvironment environment = context.getEnvironment();
+        if (!environment.getProperty(PREFIX + "enabled", Boolean.class, false)) {
+            return;
+        }
         final String host = environment.getProperty(PREFIX + "host", "127.0.0.1");
         final int port = environment.getProperty(PREFIX + "port", Integer.class, 27017);
         final TopologyProfile topology =

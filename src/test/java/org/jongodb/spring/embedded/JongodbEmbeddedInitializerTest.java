@@ -81,9 +81,19 @@ final class JongodbEmbeddedInitializerTest {
         }
     }
 
+    @Test
+    void staysInertUnlessEnabled() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            new JongodbEmbeddedInitializer().initialize(context);
+            context.refresh();
+            assertFalse(context.containsBean(JongodbEmbeddedInitializer.SERVER_BEAN_NAME));
+        }
+    }
+
     private static AnnotationConfigApplicationContext context(final Path state) {
         final AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
         context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("props", Map.of(
+                "jongodb.embedded.enabled", "true",
                 "jongodb.embedded.port", "0",
                 "jongodb.embedded.persist-path", state.toString(),
                 "jongodb.embedded.uri-properties", "spring.data.mongodb.uri:app, OTHER_URI:other")));

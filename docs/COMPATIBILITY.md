@@ -193,7 +193,7 @@ Supported runtime profiles:
 `singleNodeReplicaSet` profile contract:
 - URI includes `replicaSet=<name>`
 - `hello`/`isMaster` include deterministic replica-set topology fields
-- primary-only read preference (`mode=primary`); non-primary modes fail deterministically
+- read preference: `primary`, `primaryPreferred`, `secondaryPreferred`, and `nearest` are served by the single primary; `secondary` fails deterministically
 - constrained concern subset:
   - writeConcern: `w=1` or `w="majority"` (with validated `wtimeout`)
   - readConcern levels: `local`, `majority`, `snapshot`
@@ -213,7 +213,7 @@ Not in scope for this profile:
 
 Startup and shutdown:
 - launcher: `--load=<dir>` loads a dump at start; `--persist=<dir>` loads it when present and exports on shutdown
-- `org.jongodb.spring.embedded.JongodbEmbeddedInitializer` runs the server inside an application's own JVM on a fixed port (default `127.0.0.1:27017`, `singleNodeReplicaSet`), loading `jongodb.embedded.load-path`/`persist-path` before any bean is created and pointing each `jongodb.embedded.uri-properties` entry (`name[:database]`) at it; activate with `context.initializer.classes`
+- `org.jongodb.spring.embedded.JongodbEmbeddedInitializer` runs the server inside an application's own JVM on a fixed port (default `127.0.0.1:27017`, `singleNodeReplicaSet`), loading `jongodb.embedded.load-path`/`persist-path` before any bean is created and pointing each `jongodb.embedded.uri-properties` entry (`name[:database]`) at it; registered in `META-INF/spring.factories` and inert unless `jongodb.embedded.enabled=true`
 
 ## Error Contract
 

@@ -64,6 +64,11 @@ class CommandDispatcherE2ETest {
         final BsonDocument badReadPreference = dispatcher.dispatch(BsonDocument.parse(
                 "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"readPreference\":{\"mode\":\"secondary\"}}"));
         assertCommandError(badReadPreference, "BadValue");
+        for (final String servedMode : java.util.List.of("primaryPreferred", "secondaryPreferred", "nearest")) {
+            assertEquals(1.0, dispatcher.dispatch(BsonDocument.parse(
+                    "{\"find\":\"users\",\"$db\":\"app\",\"filter\":{},\"readPreference\":{\"mode\":\"" + servedMode + "\"}}"))
+                    .getNumber("ok").doubleValue(), servedMode);
+        }
 
         final BsonDocument badWriteConcern = dispatcher.dispatch(BsonDocument.parse(
                 "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1}],\"writeConcern\":{\"w\":2}}"));
