@@ -847,6 +847,35 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
+    void updateCommandSupportsPushAndPullOperators() {
+        final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
+        dispatcher.dispatch(BsonDocument.parse(
+                "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":1,\"tags\":[\"a\",\"b\"],\"scores\":[3]}]}"));
+
+        final BsonDocument response = dispatcher.dispatch(BsonDocument.parse(
+                """
+                {
+                  "update": "users",
+                  "$db": "app",
+                  "updates": [
+                    {"q": {"_id": 1}, "u": {"$push": {"scores": {"$each": [9, 5], "$sort": -1}}, "$pull": {"tags": "a"}}}
+                  ]
+                }
+                """));
+        assertEquals(1.0, response.get("ok").asNumber().doubleValue());
+        assertEquals(1, response.getInt32("nModified").getValue());
+
+        final BsonDocument updated = dispatcher
+                .dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"))
+                .getDocument("cursor").getArray("firstBatch").get(0).asDocument();
+        assertEquals(1, updated.getArray("tags").size());
+        assertEquals("b", updated.getArray("tags").get(0).asString().getValue());
+        assertEquals(3, updated.getArray("scores").size());
+        assertEquals(9, updated.getArray("scores").get(0).asNumber().intValue());
+        assertEquals(3, updated.getArray("scores").get(2).asNumber().intValue());
+    }
+
+    @Test
     void updateCommandSupportsPipelineSetUnsetSubset() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
         dispatcher.dispatch(BsonDocument.parse(

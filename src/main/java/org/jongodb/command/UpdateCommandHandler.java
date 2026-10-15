@@ -13,7 +13,9 @@ import org.jongodb.engine.DuplicateKeyException;
 
 public final class UpdateCommandHandler implements CommandHandler {
     private static final Set<String> SUPPORTED_OPERATORS =
-            Set.of("$set", "$setOnInsert", "$inc", "$min", "$max", "$unset", "$addToSet");
+            Set.of(
+                    "$set", "$setOnInsert", "$inc", "$min", "$max", "$unset", "$addToSet", "$push", "$pull",
+                    "$pullAll", "$pop", "$mul", "$rename", "$currentDate");
 
     private final CommandStore store;
 
