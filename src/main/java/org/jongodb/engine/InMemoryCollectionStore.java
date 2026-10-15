@@ -23,6 +23,9 @@ public final class InMemoryCollectionStore implements CollectionStore {
     private final List<Document> documents = new ArrayList<>();
     private final Map<String, IndexMetadata> indexesByName = new LinkedHashMap<>();
     private final Clock clock;
+    // Only the live store of an engine records changes; snapshots (transaction copies) stay silent.
+    private Namespace changeNamespace;
+    private ChangeEventLog changeLog;
 
     InMemoryCollectionStore() {
         this(Clock.systemUTC());
@@ -59,6 +62,11 @@ public final class InMemoryCollectionStore implements CollectionStore {
         }
     }
 
+    synchronized void attachChangeLog(final Namespace namespace, final ChangeEventLog log) {
+        this.changeNamespace = Objects.requireNonNull(namespace, "namespace");
+        this.changeLog = Objects.requireNonNull(log, "log");
+    }
+
     synchronized InMemoryCollectionStore snapshot() {
         pruneExpiredDocuments();
         return new InMemoryCollectionStore(this);
@@ -76,6 +84,9 @@ public final class InMemoryCollectionStore implements CollectionStore {
         final Map<String, IndexMetadata> copiedIndexes = toIndexMetadataMap(state.indexes());
         validateUniqueConstraints(copiedDocuments, copiedIndexes.values());
 
+        if (changeLog != null) {
+            changeLog.recordStateChange(changeNamespace, documents, copiedDocuments);
+        }
         documents.clear();
         documents.addAll(copiedDocuments);
         indexesByName.clear();
@@ -152,6 +163,9 @@ public final class InMemoryCollectionStore implements CollectionStore {
         validateUniqueConstraints(candidateDocuments, indexesByName.values());
 
         this.documents.addAll(copiedDocuments);
+        for (final Document inserted : copiedDocuments) {
+            recordInsert(inserted);
+        }
     }
 
     @Override
@@ -344,8 +358,10 @@ public final class InMemoryCollectionStore implements CollectionStore {
             if (preview == null || !preview.modified()) {
                 continue;
             }
+            final Document before = changeLog == null ? null : DocumentCopies.copy(document);
             document.clear();
             document.putAll(preview.updatedDocument());
+            recordUpdate(before, document, parsedUpdate.replacementStyle());
         }
 
         return new UpdateManyResult(matchedDocuments.size(), modifiedCount);
@@ -412,8 +428,10 @@ public final class InMemoryCollectionStore implements CollectionStore {
             if (preview == null || !preview.modified()) {
                 continue;
             }
+            final Document before = changeLog == null ? null : DocumentCopies.copy(document);
             document.clear();
             document.putAll(preview.updatedDocument());
+            recordUpdate(before, document, false);
         }
         return new UpdateManyResult(matchedDocuments.size(), modifiedCount);
     }
@@ -445,6 +463,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
         candidateDocuments.add(upsertedDocument);
         validateUniqueConstraints(candidateDocuments, indexesByName.values());
         documents.add(upsertedDocument);
+        recordInsert(upsertedDocument);
         return new UpdateManyResult(0, 0, DocumentCopies.copyAny(upsertedDocument.get("_id")));
     }
 
@@ -471,6 +490,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             if (QueryMatcher.matches(document, effectiveFilter)) {
                 iterator.remove();
                 deletedCount++;
+                recordDelete(document);
             }
         }
 
@@ -500,9 +520,28 @@ public final class InMemoryCollectionStore implements CollectionStore {
             for (final TtlRule ttlRule : ttlRules) {
                 if (ttlRule.isExpired(document, nowMillis)) {
                     iterator.remove();
+                    recordDelete(document);
                     break;
                 }
             }
+        }
+    }
+
+    private void recordInsert(final Document document) {
+        if (changeLog != null) {
+            changeLog.recordInsert(changeNamespace, document);
+        }
+    }
+
+    private void recordUpdate(final Document before, final Document after, final boolean replacement) {
+        if (changeLog != null) {
+            changeLog.recordUpdate(changeNamespace, before, after, replacement);
+        }
+    }
+
+    private void recordDelete(final Document document) {
+        if (changeLog != null) {
+            changeLog.recordDelete(changeNamespace, document);
         }
     }
 
@@ -550,6 +589,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
         validateUniqueConstraints(candidateDocuments, indexesByName.values());
 
         documents.add(upsertedDocument);
+        recordInsert(upsertedDocument);
         return new UpdateManyResult(0, 0, DocumentCopies.copyAny(upsertedDocument.get("_id")));
     }
 

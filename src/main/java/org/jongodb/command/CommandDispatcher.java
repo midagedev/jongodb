@@ -35,6 +35,7 @@ public final class CommandDispatcher {
         this.transactionValidator = new TransactionCommandValidator(sessionPool);
         this.topologyProfile = Objects.requireNonNull(topologyProfile, "topologyProfile");
         final CursorRegistry cursorRegistry = new CursorRegistry();
+        final ChangeStreamCursors changeStreams = new ChangeStreamCursors(globalStore.changeEventLog());
         final CommandStore routedStore = new RoutingCommandStore(() -> {
             final CommandStore selectedStore = dispatchStore.get();
             return selectedStore == null ? globalStore : selectedStore;
@@ -50,9 +51,9 @@ public final class CommandDispatcher {
         configuredHandlers.put("find", new FindCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("distinct", new DistinctCommandHandler(routedStore));
         configuredHandlers.put("listcollections", new ListCollectionsCommandHandler(routedStore, cursorRegistry));
-        configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry));
-        configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry));
-        configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry));
+        configuredHandlers.put("aggregate", new AggregateCommandHandler(routedStore, cursorRegistry, changeStreams));
+        configuredHandlers.put("getmore", new GetMoreCommandHandler(cursorRegistry, changeStreams));
+        configuredHandlers.put("killcursors", new KillCursorsCommandHandler(cursorRegistry, changeStreams));
         configuredHandlers.put("createindexes", new CreateIndexesCommandHandler(routedStore));
         configuredHandlers.put("listindexes", new ListIndexesCommandHandler(routedStore, cursorRegistry));
         configuredHandlers.put("drop", new DropCommandHandler(routedStore));

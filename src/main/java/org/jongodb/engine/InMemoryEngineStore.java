@@ -16,19 +16,37 @@ import java.util.concurrent.ConcurrentMap;
 public final class InMemoryEngineStore implements EngineStore {
     private final ConcurrentMap<Namespace, InMemoryCollectionStore> collections = new ConcurrentHashMap<>();
     private final Clock clock;
+    private final ChangeEventLog changeLog;
 
     public InMemoryEngineStore() {
         this(Clock.systemUTC());
     }
 
     public InMemoryEngineStore(final Clock clock) {
+        this(clock, new ChangeEventLog(clock));
+    }
+
+    private InMemoryEngineStore(final Clock clock, final ChangeEventLog changeLog) {
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.changeLog = changeLog;
+    }
+
+    /** Journal of this store's committed changes; {@code null} for snapshots. */
+    public ChangeEventLog changeEventLog() {
+        return changeLog;
     }
 
     @Override
     public CollectionStore collection(Namespace namespace) {
         Objects.requireNonNull(namespace, "namespace");
-        return collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore(clock));
+        return collections.computeIfAbsent(namespace, key -> attach(key, new InMemoryCollectionStore(clock)));
+    }
+
+    private InMemoryCollectionStore attach(final Namespace namespace, final InMemoryCollectionStore store) {
+        if (changeLog != null) {
+            store.attachChangeLog(namespace, changeLog);
+        }
+        return store;
     }
 
     @Override
@@ -65,7 +83,7 @@ public final class InMemoryEngineStore implements EngineStore {
     }
 
     public synchronized InMemoryEngineStore snapshot() {
-        final InMemoryEngineStore snapshot = new InMemoryEngineStore(clock);
+        final InMemoryEngineStore snapshot = new InMemoryEngineStore(clock, null);
         for (final var entry : collections.entrySet()) {
             snapshot.collections.put(entry.getKey(), entry.getValue().snapshot());
         }
@@ -76,7 +94,7 @@ public final class InMemoryEngineStore implements EngineStore {
         Objects.requireNonNull(source, "source");
         collections.clear();
         for (final var entry : source.collections.entrySet()) {
-            collections.put(entry.getKey(), entry.getValue().snapshot());
+            collections.put(entry.getKey(), attach(entry.getKey(), entry.getValue().snapshot()));
         }
     }
 
@@ -106,7 +124,7 @@ public final class InMemoryEngineStore implements EngineStore {
                 final InMemoryCollectionStore.CollectionState currentState = currentStates.get(namespace);
                 final InMemoryCollectionStore.CollectionState mergedState =
                         InMemoryCollectionStore.mergeTransactionState(baselineState, transactionState, currentState);
-                collections.computeIfAbsent(namespace, key -> new InMemoryCollectionStore(clock))
+                collections.computeIfAbsent(namespace, key -> attach(key, new InMemoryCollectionStore(clock)))
                         .replaceState(mergedState);
             }
         }

@@ -21,7 +21,7 @@ Certification context:
 | `insert` | Partial | Single/batch insert supported; unsupported bulk modes are skipped in differential corpus |
 | `find` | Partial | Core filter support; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
 | `aggregate` | Partial | Tier-1/Tier-2 subset plus minimal `$graphLookup`; collation subset applied to `$match`/`$sort`/`$sortByCount` |
-| `getMore` | Supported | Cursor paging |
+| `getMore` | Supported | Cursor paging; `$changeStream` cursors await new events up to `maxTimeMS` (default 1s) |
 | `killCursors` | Supported | Cursor cancellation |
 | `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
 | `listIndexes` | Partial | Metadata round-trip |
@@ -166,6 +166,23 @@ Supported:
 Current scope:
 - single in-memory process semantics
 - no distributed transaction behavior
+
+## Change Streams
+
+Supported:
+- `$changeStream` as the first aggregate stage on a collection (`aggregate: "<coll>"`), a database (`aggregate: 1`), or the cluster (`admin` + `allChangesForCluster: true`)
+- events for `insert`, `update`, `replace`, `delete`, including upserts, TTL expiry deletes, and committed transactions (aborted transactions emit nothing)
+- `fullDocument`: `default`, `updateLookup`, `whenAvailable`, `required`
+- `resumeAfter`, `startAfter`, `startAtOperationTime`, and `postBatchResumeToken` on every batch
+- trailing pipeline stages run on event documents through the aggregation engine (`$match` on `ns.coll`, `$project`, ...)
+- `ChangeStreamHistoryLost` (`code=286`) when resuming from a position the bounded in-memory journal (100,000 events) has dropped
+
+Current scope:
+- `updateLookup` returns the post-image recorded with the event, not a fresh read at delivery time
+- `updateDescription.updatedFields`/`removedFields` are top-level field names, not dotted paths; `truncatedArrays` is always empty
+- no `drop`, `rename`, `dropDatabase`, or `invalidate` events
+- `fullDocumentBeforeChange` other than `off` is not supported
+- resume tokens are only meaningful to the server instance that issued them
 
 ## Deployment Profiles
 

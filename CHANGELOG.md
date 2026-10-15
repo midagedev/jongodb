@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added `$changeStream` cursors (collection, database, and cluster scope) with resume tokens, `fullDocument: updateLookup`, `getMore` await, and events for transactional commits and TTL deletes.
+
 ### Changed
 - Default local project version moved to `0.1.10-SNAPSHOT`.
 

@@ -52,6 +52,11 @@ public interface CommandStore {
      * <p>The default implementation returns this store, which preserves backward compatibility for lightweight
      * test doubles that do not model transactional isolation.
      */
+    /** Change journal backing {@code $changeStream}; {@code null} when this store does not record changes. */
+    default org.jongodb.engine.ChangeEventLog changeEventLog() {
+        return null;
+    }
+
     default CommandStore snapshotForTransaction() {
         return this;
     }

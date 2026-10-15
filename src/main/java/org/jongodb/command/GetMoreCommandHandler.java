@@ -9,9 +9,15 @@ import org.bson.BsonValue;
 
 public final class GetMoreCommandHandler implements CommandHandler {
     private final CursorRegistry cursorRegistry;
+    private final ChangeStreamCursors changeStreams;
 
     public GetMoreCommandHandler(final CursorRegistry cursorRegistry) {
+        this(cursorRegistry, null);
+    }
+
+    GetMoreCommandHandler(final CursorRegistry cursorRegistry, final ChangeStreamCursors changeStreams) {
         this.cursorRegistry = cursorRegistry;
+        this.changeStreams = changeStreams;
     }
 
     @Override
@@ -29,6 +35,9 @@ public final class GetMoreCommandHandler implements CommandHandler {
         }
         if (cursorId < 0) {
             return CommandErrors.badValue("getMore must be a non-negative integer");
+        }
+        if (changeStreams != null && changeStreams.owns(cursorId)) {
+            return changeStreams.getMore(cursorId, database + "." + collection, command);
         }
 
         final BsonValue batchSizeValue = command.get("batchSize");

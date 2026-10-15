@@ -11,9 +11,15 @@ import org.bson.BsonValue;
 
 public final class KillCursorsCommandHandler implements CommandHandler {
     private final CursorRegistry cursorRegistry;
+    private final ChangeStreamCursors changeStreams;
 
     public KillCursorsCommandHandler(final CursorRegistry cursorRegistry) {
+        this(cursorRegistry, null);
+    }
+
+    KillCursorsCommandHandler(final CursorRegistry cursorRegistry, final ChangeStreamCursors changeStreams) {
         this.cursorRegistry = cursorRegistry;
+        this.changeStreams = changeStreams;
     }
 
     @Override
@@ -41,11 +47,18 @@ public final class KillCursorsCommandHandler implements CommandHandler {
             cursorIds.add(cursorId);
         }
 
+        final List<Long> killedChangeStreams = new ArrayList<>();
+        if (changeStreams != null) {
+            cursorIds.removeIf(cursorId -> changeStreams.kill(cursorId) && killedChangeStreams.add(cursorId));
+        }
+
         final String namespace = database + "." + collection;
         final CursorRegistry.KillResult killResult = cursorRegistry.killCursors(namespace, List.copyOf(cursorIds));
+        final List<Long> killed = new ArrayList<>(killResult.killedCursorIds());
+        killed.addAll(killedChangeStreams);
 
         return new BsonDocument()
-                .append("cursorsKilled", toInt64Array(killResult.killedCursorIds()))
+                .append("cursorsKilled", toInt64Array(killed))
                 .append("cursorsNotFound", toInt64Array(killResult.notFoundCursorIds()))
                 .append("cursorsAlive", new BsonArray())
                 .append("cursorsUnknown", new BsonArray())

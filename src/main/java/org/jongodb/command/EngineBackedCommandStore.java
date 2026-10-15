@@ -56,6 +56,13 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public org.jongodb.engine.ChangeEventLog changeEventLog() {
+        return engineStore instanceof InMemoryEngineStore inMemoryEngineStore
+                ? inMemoryEngineStore.changeEventLog()
+                : null;
+    }
+
+    @Override
     public CommandStore snapshotForTransaction() {
         if (!(engineStore instanceof InMemoryEngineStore inMemoryEngineStore)) {
             throw new IllegalStateException("transaction snapshots require InMemoryEngineStore");

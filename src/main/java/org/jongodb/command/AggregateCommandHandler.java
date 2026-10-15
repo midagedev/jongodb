@@ -13,15 +13,25 @@ import org.jongodb.engine.CollationSupport;
 public final class AggregateCommandHandler implements CommandHandler {
     private final CommandStore store;
     private final CursorRegistry cursorRegistry;
+    private final ChangeStreamCursors changeStreams;
 
     public AggregateCommandHandler(final CommandStore store, final CursorRegistry cursorRegistry) {
+        this(store, cursorRegistry, null);
+    }
+
+    AggregateCommandHandler(
+            final CommandStore store, final CursorRegistry cursorRegistry, final ChangeStreamCursors changeStreams) {
         this.store = store;
         this.cursorRegistry = cursorRegistry;
+        this.changeStreams = changeStreams;
     }
 
     @Override
     public BsonDocument handle(final BsonDocument command) {
         final String database = readDatabase(command);
+        if (changeStreams != null && ChangeStreamCursors.isChangeStream(command)) {
+            return changeStreams.open(database, command);
+        }
         final String collection = readRequiredString(command, "aggregate");
         if (collection == null) {
             return CommandErrors.typeMismatch("aggregate must be a string");
