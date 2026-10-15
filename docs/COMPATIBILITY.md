@@ -39,6 +39,17 @@ Certification context:
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator and expression-based pipeline updates, `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
+| `listDatabases` | Partial | `databases`/`totalSize`/`nameOnly`; `filter` is top-level equality only; `sizeOnDisk` is the logical BSON size (no disk); admin/local/config are not synthesized |
+| `create` | Partial | Explicit creation, `NamespaceExists` (48) on duplicates. Ignored options: `validator`, `validationLevel`, `validationAction`, `storageEngine`, `indexOptionDefaults`, `autoIndexId`, `changeStreamPreAndPostImages`, `recordPreImages`. Rejected (`NotImplemented`): `capped`/`size`/`max`, `timeseries`, `clusteredIndex`, `viewOn`/`pipeline`, `collation`, `encryptedFields`, `expireAfterSeconds` |
+| `dropIndexes` | Supported | `index` as name, `"*"`, name array, or key document; `_id_` rejected (`InvalidOptions`); unknown index `IndexNotFound` (27) |
+| `renameCollection` | Partial | `dropTarget` and cross-database moves; `NamespaceExists`/`NamespaceNotFound`; open change streams do not see the rename |
+| `collMod` | Partial | `index.{name\|keyPattern}.expireAfterSeconds` changes TTL behaviour immediately (integer or `"off"`; index must already be TTL). `index.hidden`, `validator`, `validationLevel`, `validationAction`, `changeStreamPreAndPostImages`, `recordPreImages` are accepted and ignored; every other option is rejected (`NotImplemented`) |
+| `dbStats`, `collStats`, `$collStats` | Partial | Counts exact; sizes derive from the BSON size of live documents, `storageSize` mirrors `size`, index sizes are 0. `$collStats` supports `count`/`storageStats` as the only stage |
+| `serverStatus`, `hostInfo`, `connectionStatus` | Partial | `serverStatus`: host/version/process/pid/uptime/localTime/`connections` (fixed `current: 1`); `connectionStatus`: empty `authInfo` |
+| `explain` | Partial | `find`/`aggregate`/`count`/`distinct`/`update`/`delete`/`findAndModify`, any verbosity. Plans are always `COLLSCAN` (indexes are never scanned); `executionStats` runs read commands for `nReturned`/`totalDocsExamined`; write commands (and `$out`/`$merge`) are not executed and only report `nWouldModify`/`nWouldDelete` |
+| `replSetGetStatus` | Partial | Single-node replica-set profile: one `PRIMARY` member; standalone: `NoReplicationEnabled` (76) |
+| `endSessions`, `killSessions`, `killAllSessions`, `refreshSessions` | Partial | Aborts the in-flight transaction of the affected sessions; sessions are not otherwise tracked, `killAllSessionsByPattern` is unsupported |
+| `aggregate: 1` (`$currentOp`, `$listLocalSessions`, `$listSessions`), `killOp` | Partial | Always an empty result (`inprog: []`); other database-level stages are rejected; `killOp` acknowledges without effect |
 
 ## Query Operators
 

@@ -12,6 +12,14 @@ public interface EngineStore {
         return false;
     }
 
+    /**
+     * Read-path lookup that must not materialize a missing collection; returns {@code null} when it does not exist.
+     * Stores that cannot tell fall back to {@link #collection(Namespace)}.
+     */
+    default CollectionStore existingCollection(final Namespace namespace) {
+        return collection(namespace);
+    }
+
     default CollectionStore collection(String database, String collection) {
         return collection(Namespace.of(database, collection));
     }
@@ -30,5 +38,27 @@ public interface EngineStore {
 
     default int dropDatabase(final String database) {
         return 0;
+    }
+
+    default List<String> listDatabaseNames() {
+        return List.of();
+    }
+
+    /** Creates an empty collection; returns false when it already exists. */
+    default boolean createCollection(final String database, final String collection) {
+        if (collectionExists(database, collection)) {
+            return false;
+        }
+        collection(database, collection);
+        return true;
+    }
+
+    default void renameCollection(
+            final String fromDatabase,
+            final String fromCollection,
+            final String toDatabase,
+            final String toCollection,
+            final boolean dropTarget) {
+        throw new UnsupportedOperationException("renameCollection is not supported");
     }
 }

@@ -42,6 +42,12 @@ public final class InMemoryEngineStore implements EngineStore {
         return collections.computeIfAbsent(namespace, key -> attach(key, new InMemoryCollectionStore(clock)));
     }
 
+    @Override
+    public CollectionStore existingCollection(final Namespace namespace) {
+        Objects.requireNonNull(namespace, "namespace");
+        return collections.get(namespace);
+    }
+
     private InMemoryCollectionStore attach(final Namespace namespace, final InMemoryCollectionStore store) {
         if (changeLog != null) {
             store.attachChangeLog(namespace, changeLog);
@@ -63,6 +69,32 @@ public final class InMemoryEngineStore implements EngineStore {
                 .map(Namespace::collection)
                 .sorted()
                 .toList();
+    }
+
+    @Override
+    public synchronized List<String> listDatabaseNames() {
+        return collections.keySet().stream().map(Namespace::database).distinct().sorted().toList();
+    }
+
+    @Override
+    public synchronized void renameCollection(
+            final String fromDatabase,
+            final String fromCollection,
+            final String toDatabase,
+            final String toCollection,
+            final boolean dropTarget) {
+        final Namespace from = Namespace.of(fromDatabase, fromCollection);
+        final Namespace to = Namespace.of(toDatabase, toCollection);
+        final InMemoryCollectionStore source = collections.get(from);
+        if (source == null) {
+            throw new IllegalArgumentException("source collection does not exist: " + fromDatabase + "." + fromCollection);
+        }
+        if (collections.containsKey(to) && !dropTarget) {
+            throw new IllegalStateException("target namespace exists: " + toDatabase + "." + toCollection);
+        }
+        collections.remove(from);
+        // ponytail: the change journal does not record renames; open change streams on either namespace see nothing
+        collections.put(to, attach(to, source));
     }
 
     @Override

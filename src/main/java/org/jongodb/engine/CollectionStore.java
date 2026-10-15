@@ -13,6 +13,16 @@ public interface CollectionStore {
 
     List<IndexDefinition> listIndexes();
 
+    /** Removes the named indexes; the {@code _id_} index is never removed. */
+    default void dropIndexes(final List<String> names) {
+        throw new UnsupportedOperationException("dropIndexes is not supported");
+    }
+
+    /** Changes the TTL of an index in place and returns the previous value ({@code null} when it had none). */
+    default Long modifyIndexTtl(final String name, final Long expireAfterSeconds) {
+        throw new UnsupportedOperationException("modifyIndexTtl is not supported");
+    }
+
     List<Document> findAll();
 
     /**
