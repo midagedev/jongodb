@@ -9,9 +9,13 @@ import org.bson.BsonInt32;
 import org.bson.BsonInt64;
 import org.bson.BsonObjectId;
 import org.bson.BsonString;
+import org.bson.BsonValue;
 import org.bson.types.ObjectId;
 
 public final class HelloCommandHandler implements CommandHandler {
+    // Upper bound for one awaitable hello, in case a client asks for an unreasonable wait.
+    private static final long MAX_AWAIT_MILLIS = 10_000L;
+
     private final TopologyProfile topologyProfile;
     private final String primaryAddress;
     private final String replicaSetName;
@@ -35,6 +39,7 @@ public final class HelloCommandHandler implements CommandHandler {
 
     @Override
     public BsonDocument handle(final BsonDocument command) {
+        awaitTopologyChange(command);
         final BsonDocument response = new BsonDocument()
                 .append("isWritablePrimary", BsonBoolean.TRUE)
                 .append("ismaster", BsonBoolean.TRUE)
@@ -57,6 +62,35 @@ public final class HelloCommandHandler implements CommandHandler {
             response.append("topologyVersion", topologyVersion.clone());
         }
         return response;
+    }
+
+    /**
+     * Streaming SDAM monitors send hello with the last seen topologyVersion and maxAwaitTimeMS, and expect the
+     * server to hold the reply until the topology changes or the wait elapses. Answering at once makes every
+     * monitor thread re-send immediately, so an idle client burns whole cores. This topology never changes,
+     * so the wait always runs to its end.
+     */
+    private void awaitTopologyChange(final BsonDocument command) {
+        if (!topologyProfile.replicaSetSemanticsEnabled()) {
+            return;
+        }
+        final BsonValue seen = command.get("topologyVersion");
+        final BsonValue maxAwait = command.get("maxAwaitTimeMS");
+        if (seen == null || !seen.isDocument() || maxAwait == null || !maxAwait.isNumber()) {
+            return;
+        }
+        if (!topologyVersion.get("processId").equals(seen.asDocument().get("processId"))) {
+            return;
+        }
+        final long millis = Math.min(maxAwait.asNumber().longValue(), MAX_AWAIT_MILLIS);
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static String requireText(final String value, final String fieldName) {
