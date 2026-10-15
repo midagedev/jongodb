@@ -103,8 +103,11 @@ Implemented stages:
 
 Not implemented or partial:
 - unsupported stages return deterministic fail-fast
-- expression support includes field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
-- `$dateTrunc` supports second through year units, `binSize`, `startOfWeek`, and UTC timezone aliases; non-UTC timezones fail explicitly
+- expression support includes field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, `$dateTrunc`, `$dateToString` (format specifiers, `onNull`), date parts (`$year` … `$millisecond`, ISO week parts), `$concat`, `$toLower`, `$toUpper`, `$toString`, `$size`, `$substrCP`, `$split`, `$strLenCP`, `$trim`, `$$NOW`, and `$$CLUSTER_TIME`
+- date expressions accept IANA zones and `+HH`, `+HHMM`, `+HH:MM` offsets; `$isoWeekYear` returns a long, other date parts an int
+- `$dateTrunc` supports millisecond through year units, `binSize`, and `startOfWeek` in any timezone
+- `$$NOW` and `$$CLUSTER_TIME` hold one value per command, including every document of a pipeline update; `$$CLUSTER_TIME` is a `Timestamp` derived from that value
+- `$group` keys compare numbers by value and keep the first value's BSON type
 - `$percentile`/`$median` accept `method: "approximate"` and use deterministic exact interpolation internally
 - window accumulators and range/time windows beyond the listed `$setWindowFields` subset are not implemented
 - `$merge` options beyond the terminal string / `{into: <collection>}` subset are deterministic unsupported paths
@@ -117,7 +120,7 @@ Supported:
 - operator updates: `$set`, `$setOnInsert`, `$inc`, `$mul`, `$min`, `$max`, `$unset`, `$rename`, `$currentDate`, `$addToSet`, `$push` (`$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`
 - `arrayFilters` subset for `$set`/`$unset` paths using `$[identifier]` bindings
 - update pipeline stages: `$addFields`/`$set`, `$project`/`$unset`, and `$replaceRoot`/`$replaceWith`
-- update pipeline expressions: field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
+- update pipeline expressions: the aggregation expression set listed under Aggregation Stages
 - replacement updates (with `multi=false`)
 - upsert for operator and replacement forms
 - same update constraints apply to `bulkWrite` update/replace operations
