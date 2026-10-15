@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added `$push` (with `$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`, `$mul`, `$rename`, and `$currentDate` update operators.
+
 ### Changed
 - Default local project version moved to `0.1.10-SNAPSHOT`.
 

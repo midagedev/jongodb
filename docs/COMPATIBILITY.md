@@ -28,7 +28,7 @@ Certification context:
 | `listCollections` | Partial | Cursor-shaped collection metadata subset for fixture discovery |
 | `drop` | Partial | Collection cleanup subset with deterministic `NamespaceNotFound` error |
 | `dropDatabase` | Partial | Database-scoped cleanup subset |
-| `update` | Partial | Supports `$min`/`$max` and core modifiers; aggregation-pipeline updates support MongoDB's update-stage allowlist with the expression subset below |
+| `update` | Partial | Supports the operator set listed under Update Semantics (including array operators `$push`/`$pull`/`$pullAll`/`$pop`); aggregation-pipeline updates support MongoDB's update-stage allowlist with the expression subset below |
 | `delete` | Supported | `limit` 0/1 behavior |
 | `bulkWrite` | Partial | Ordered mode only (`ordered=true`); supports `insertOne/updateOne/updateMany/deleteOne/deleteMany/replaceOne` and stops on first write error |
 | `clientBulkWrite` | Partial | UTF importer subset rewrites ordered single-namespace models to `bulkWrite`; mixed namespaces, `ordered=false`, and `verboseResults=true` are deterministic unsupported paths |
@@ -99,7 +99,7 @@ Not implemented or partial:
 ## Update Semantics
 
 Supported:
-- operator updates: `$set`, `$setOnInsert`, `$inc`, `$min`, `$max`, `$unset`, `$addToSet`
+- operator updates: `$set`, `$setOnInsert`, `$inc`, `$mul`, `$min`, `$max`, `$unset`, `$rename`, `$currentDate`, `$addToSet`, `$push` (`$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`
 - `arrayFilters` subset for `$set`/`$unset` paths using `$[identifier]` bindings
 - update pipeline stages: `$addFields`/`$set`, `$project`/`$unset`, and `$replaceRoot`/`$replaceWith`
 - update pipeline expressions: field references, `$literal`, `$cond`, `$ifNull`, `$type`, comparisons, logical operators, `$min`/`$max`, basic arithmetic, `$mergeObjects`, and `$dateTrunc`
