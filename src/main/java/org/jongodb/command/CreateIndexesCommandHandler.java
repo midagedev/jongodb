@@ -10,6 +10,7 @@ import org.bson.BsonInt32;
 import org.bson.BsonString;
 import org.bson.BsonValue;
 import org.jongodb.engine.DuplicateKeyException;
+import org.jongodb.engine.InMemoryCollectionStore;
 
 public final class CreateIndexesCommandHandler implements CommandHandler {
     private final CommandStore store;
@@ -117,6 +118,11 @@ public final class CreateIndexesCommandHandler implements CommandHandler {
             result = store.createIndexes(database, collection, List.copyOf(indexes));
         } catch (final DuplicateKeyException exception) {
             return CommandErrors.duplicateKey(exception.getMessage());
+        } catch (final InMemoryCollectionStore.IndexConflictException exception) {
+            if (exception.code() == 86) {
+                return CommandErrors.indexKeySpecsConflict(exception.getMessage());
+            }
+            return CommandErrors.indexOptionsConflict(exception.getMessage());
         }
 
         final BsonDocument response = new BsonDocument()

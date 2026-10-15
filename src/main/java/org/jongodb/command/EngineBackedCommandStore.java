@@ -30,6 +30,7 @@ import org.jongodb.engine.CollectionStore;
 import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.DeleteManyResult;
 import org.jongodb.engine.EngineStore;
+import org.jongodb.engine.InMemoryCollectionStore;
 import org.jongodb.engine.InMemoryEngineStore;
 import org.jongodb.engine.Namespace;
 import org.jongodb.engine.UnsupportedFeatureException;
@@ -266,8 +267,15 @@ public final class EngineBackedCommandStore implements CommandStore {
                     index.expireAfterSeconds()));
         }
 
-        final CollectionStore.CreateIndexesResult result = collectionStore.createIndexes(List.copyOf(converted));
-        return new CreateIndexesResult(result.numIndexesBefore(), result.numIndexesAfter(), !existedBefore);
+        try {
+            final CollectionStore.CreateIndexesResult result = collectionStore.createIndexes(List.copyOf(converted));
+            return new CreateIndexesResult(result.numIndexesBefore(), result.numIndexesAfter(), !existedBefore);
+        } catch (final InMemoryCollectionStore.IndexConflictException exception) {
+            if (!existedBefore) {
+                engineStore.dropCollection(database, collection);
+            }
+            throw exception;
+        }
     }
 
     @Override
@@ -289,6 +297,33 @@ public final class EngineBackedCommandStore implements CommandStore {
                     index.expireAfterSeconds()));
         }
         return List.copyOf(converted);
+    }
+
+    @Override
+    public FindAndModifyOutcome findAndModify(
+            final String database, final String collection, final FindAndModifyRequest request) {
+        Objects.requireNonNull(request, "request");
+        if (request.remove()) {
+            final CollectionStore existing = engineStore.existingCollection(Namespace.of(database, collection));
+            if (existing == null) {
+                return FindAndModifyOutcome.removed(null);
+            }
+            if (existing instanceof InMemoryCollectionStore memory) {
+                return findAndModifyRemove(memory, request);
+            }
+            return CommandStore.super.findAndModify(database, collection, request);
+        }
+
+        final CollectionStore target = request.upsert()
+                ? engineStore.collection(database, collection)
+                : engineStore.existingCollection(Namespace.of(database, collection));
+        if (target == null) {
+            return FindAndModifyOutcome.miss();
+        }
+        if (target instanceof InMemoryCollectionStore memory) {
+            return findAndModifyUpdate(memory, request);
+        }
+        return CommandStore.super.findAndModify(database, collection, request);
     }
 
     @Override
@@ -352,6 +387,87 @@ public final class EngineBackedCommandStore implements CommandStore {
             deletedCount += Math.min(1, toBoundedInt(oneResult.deletedCount()));
         }
         return deletedCount;
+    }
+
+    private FindAndModifyOutcome findAndModifyUpdate(
+            final InMemoryCollectionStore memory, final FindAndModifyRequest request) {
+        return memory.inLock(() -> {
+            final CollationSupport.Config collation = request.collation();
+            final Document query = toDocument(Objects.requireNonNull(request.query(), "query"));
+            final List<BsonDocument> matches = toBsonDocuments(memory.find(query, collation));
+            final BsonDocument selected =
+                    FindAndModifyCommandHandler.firstMatched(matches, request.sort(), collation);
+            if (selected == null) {
+                if (!request.upsert()) {
+                    return FindAndModifyOutcome.miss();
+                }
+                final UpdateManyResult upserted = applyStoredUpdate(memory, request, query, true);
+                final BsonValue upsertedId = upserted.upserted() ? toBsonValue(upserted.upsertedId()) : null;
+                final BsonDocument after = upserted.upserted()
+                        ? firstBson(memory.find(new Document("_id", upserted.upsertedId()), collation))
+                        : firstBson(memory.find(query, collation));
+                return new FindAndModifyOutcome(null, after, upsertedId == null ? 0 : 1, false, upsertedId);
+            }
+
+            final Document oneFilter = oneDocumentFilter(toDocument(selected));
+            final UpdateManyResult updated = applyStoredUpdate(memory, request, oneFilter, false);
+            final BsonDocument after = firstBson(memory.find(oneFilter, CollationSupport.Config.simple()));
+            final int matched = updated.matchedCount() > 0 ? 1 : 0;
+            return new FindAndModifyOutcome(selected, after, matched, matched > 0, null);
+        });
+    }
+
+    private FindAndModifyOutcome findAndModifyRemove(
+            final InMemoryCollectionStore memory, final FindAndModifyRequest request) {
+        return memory.inLock(() -> {
+            final CollationSupport.Config collation = request.collation();
+            final Document query = toDocumentOrEmpty(Objects.requireNonNull(request.query(), "query"));
+            final List<BsonDocument> matches = toBsonDocuments(memory.find(query, collation));
+            final BsonDocument selected =
+                    FindAndModifyCommandHandler.firstMatched(matches, request.sort(), collation);
+            if (selected == null) {
+                return FindAndModifyOutcome.removed(null);
+            }
+            final Document oneFilter = oneDocumentFilter(toDocument(selected));
+            final DeleteManyResult result = memory.deleteMany(oneFilter);
+            final int deleted = result.deletedCount() > 0 ? 1 : 0;
+            return FindAndModifyOutcome.removed(deleted == 1 ? selected : null);
+        });
+    }
+
+    private static UpdateManyResult applyStoredUpdate(
+            final InMemoryCollectionStore memory,
+            final FindAndModifyRequest request,
+            final Document filter,
+            final boolean upsert) {
+        if (request.updatePipeline() != null) {
+            final List<Document> pipeline = new ArrayList<>(request.updatePipeline().size());
+            for (final BsonValue stageValue : request.updatePipeline()) {
+                pipeline.add(toDocument(stageValue.asDocument()));
+            }
+            return memory.updatePipeline(filter, List.copyOf(pipeline), false, upsert);
+        }
+        final List<Document> arrayFilters = new ArrayList<>(request.arrayFilters().size());
+        for (final BsonDocument arrayFilter : request.arrayFilters()) {
+            arrayFilters.add(toDocument(Objects.requireNonNull(arrayFilter, "arrayFilters entries must not be null")));
+        }
+        final Document update = toDocument(Objects.requireNonNull(request.update(), "update"));
+        return memory.update(filter, update, false, upsert, List.copyOf(arrayFilters));
+    }
+
+    private static List<BsonDocument> toBsonDocuments(final List<Document> documents) {
+        final List<BsonDocument> converted = new ArrayList<>(documents.size());
+        for (final Document document : documents) {
+            converted.add(toBsonDocument(document));
+        }
+        return converted;
+    }
+
+    private static BsonDocument firstBson(final List<Document> documents) {
+        if (documents.isEmpty()) {
+            return null;
+        }
+        return toBsonDocument(documents.get(0));
     }
 
     private static Document toDocumentOrEmpty(final BsonDocument source) {
@@ -742,6 +858,12 @@ public final class EngineBackedCommandStore implements CommandStore {
         @Override
         public int delete(final String database, final String collection, final List<DeleteRequest> deletes) {
             return materializeWriteDelegate().delete(database, collection, deletes);
+        }
+
+        @Override
+        public FindAndModifyOutcome findAndModify(
+                final String database, final String collection, final FindAndModifyRequest request) {
+            return materializeWriteDelegate().findAndModify(database, collection, request);
         }
     }
 
