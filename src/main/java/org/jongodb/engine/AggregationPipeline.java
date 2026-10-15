@@ -75,49 +75,54 @@ public final class AggregationPipeline {
         Objects.requireNonNull(collectionResolver, "collectionResolver");
         Objects.requireNonNull(collation, "collation");
 
-        List<Document> working = materializeDocuments(source, "source documents must not contain null");
+        final boolean openedNow = AggregationExpressions.openCommandNow();
+        try {
+            List<Document> working = materializeDocuments(source, "source documents must not contain null");
 
-        for (final Document stage : pipeline) {
-            if (stage == null) {
-                throw new IllegalArgumentException("pipeline stages must not contain null");
+            for (final Document stage : pipeline) {
+                if (stage == null) {
+                    throw new IllegalArgumentException("pipeline stages must not contain null");
+                }
+                if (stage.size() != 1) {
+                    throw new IllegalArgumentException("each pipeline stage must contain exactly one field");
+                }
+
+                final String stageName = stage.keySet().iterator().next();
+                final Object stageDefinition = stage.get(stageName);
+                working = switch (stageName) {
+                    case "$match" -> applyMatch(working, stageDefinition, collation);
+                    case "$project" -> applyProject(working, stageDefinition);
+                    case "$group" -> applyGroup(working, stageDefinition);
+                    case "$sort" -> applySort(working, stageDefinition, collation);
+                    case "$limit" -> applyLimit(working, stageDefinition);
+                    case "$skip" -> applySkip(working, stageDefinition);
+                    case "$unwind" -> applyUnwind(working, stageDefinition);
+                    case "$count" -> applyCount(working, stageDefinition);
+                    case "$addFields" -> applyAddFields(working, stageDefinition);
+                    case "$set" -> applySet(working, stageDefinition);
+                    case "$unset" -> applyUnset(working, stageDefinition);
+                    case "$sortByCount" -> applySortByCount(working, stageDefinition, collation);
+                    case "$replaceRoot" -> applyReplaceRoot(working, stageDefinition);
+                    case "$replaceWith" -> applyReplaceWith(working, stageDefinition);
+                    case "$facet" -> applyFacet(working, stageDefinition, collectionResolver, collation);
+                    case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver, collation);
+                    case "$graphLookup" -> applyGraphLookup(working, stageDefinition, collectionResolver);
+                    case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver, collation);
+                    case "$setWindowFields" -> applySetWindowFields(working, stageDefinition, collation);
+                    default -> throw new UnsupportedFeatureException(
+                            "aggregation.stage." + stageName,
+                            "unsupported aggregation stage: " + stageName);
+                };
             }
-            if (stage.size() != 1) {
-                throw new IllegalArgumentException("each pipeline stage must contain exactly one field");
+
+            final List<Document> output = new ArrayList<>(working.size());
+            for (final Document document : working) {
+                output.add(DocumentCopies.copy(document));
             }
-
-            final String stageName = stage.keySet().iterator().next();
-            final Object stageDefinition = stage.get(stageName);
-            working = switch (stageName) {
-                case "$match" -> applyMatch(working, stageDefinition, collation);
-                case "$project" -> applyProject(working, stageDefinition);
-                case "$group" -> applyGroup(working, stageDefinition);
-                case "$sort" -> applySort(working, stageDefinition, collation);
-                case "$limit" -> applyLimit(working, stageDefinition);
-                case "$skip" -> applySkip(working, stageDefinition);
-                case "$unwind" -> applyUnwind(working, stageDefinition);
-                case "$count" -> applyCount(working, stageDefinition);
-                case "$addFields" -> applyAddFields(working, stageDefinition);
-                case "$set" -> applySet(working, stageDefinition);
-                case "$unset" -> applyUnset(working, stageDefinition);
-                case "$sortByCount" -> applySortByCount(working, stageDefinition, collation);
-                case "$replaceRoot" -> applyReplaceRoot(working, stageDefinition);
-                case "$replaceWith" -> applyReplaceWith(working, stageDefinition);
-                case "$facet" -> applyFacet(working, stageDefinition, collectionResolver, collation);
-                case "$lookup" -> applyLookup(working, stageDefinition, collectionResolver, collation);
-                case "$graphLookup" -> applyGraphLookup(working, stageDefinition, collectionResolver);
-                case "$unionWith" -> applyUnionWith(working, stageDefinition, collectionResolver, collation);
-                case "$setWindowFields" -> applySetWindowFields(working, stageDefinition, collation);
-                default -> throw new UnsupportedFeatureException(
-                        "aggregation.stage." + stageName,
-                        "unsupported aggregation stage: " + stageName);
-            };
+            return List.copyOf(output);
+        } finally {
+            AggregationExpressions.closeCommandNow(openedNow);
         }
-
-        final List<Document> output = new ArrayList<>(working.size());
-        for (final Document document : working) {
-            output.add(DocumentCopies.copy(document));
-        }
-        return List.copyOf(output);
     }
 
     private static List<Document> applyMatch(

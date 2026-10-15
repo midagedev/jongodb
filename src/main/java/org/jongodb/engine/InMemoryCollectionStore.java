@@ -415,6 +415,19 @@ public final class InMemoryCollectionStore implements CollectionStore {
             final List<Document> pipeline,
             final boolean multi,
             final boolean upsert) {
+        final boolean openedNow = AggregationExpressions.openCommandNow();
+        try {
+            return updatePipelineInScope(filter, pipeline, multi, upsert);
+        } finally {
+            AggregationExpressions.closeCommandNow(openedNow);
+        }
+    }
+
+    private UpdateManyResult updatePipelineInScope(
+            final Document filter,
+            final List<Document> pipeline,
+            final boolean multi,
+            final boolean upsert) {
         pruneExpiredDocuments();
         final Document effectiveFilter = filter == null ? new Document() : DocumentCopies.copy(filter);
         final List<Document> effectivePipeline = new ArrayList<>();
