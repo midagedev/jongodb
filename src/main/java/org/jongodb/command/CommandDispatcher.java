@@ -307,6 +307,12 @@ public final class CommandDispatcher {
             return delegate().delete(database, collection, deletes);
         }
 
+        @Override
+        public FindAndModifyOutcome findAndModify(
+                final String database, final String collection, final FindAndModifyRequest request) {
+            return delegate().findAndModify(database, collection, request);
+        }
+
         private CommandStore delegate() {
             final CommandStore delegate = supplier.get();
             return Objects.requireNonNull(delegate, "resolved command store");

@@ -1140,6 +1140,9 @@ final class UpdateApplier {
             return current.doubleValue() + delta.doubleValue();
         }
 
+        if (current instanceof Long || delta instanceof Long) {
+            return current.longValue() + delta.longValue();
+        }
         if (current instanceof Byte) {
             return (byte) (current.byteValue() + delta.byteValue());
         }
@@ -1147,10 +1150,11 @@ final class UpdateApplier {
             return (short) (current.shortValue() + delta.shortValue());
         }
         if (current instanceof Integer) {
-            return current.intValue() + delta.intValue();
-        }
-        if (current instanceof Long) {
-            return current.longValue() + delta.longValue();
+            final long sum = (long) current.intValue() + delta.longValue();
+            if (sum >= Integer.MIN_VALUE && sum <= Integer.MAX_VALUE) {
+                return (int) sum;
+            }
+            return sum;
         }
 
         return current.doubleValue() + delta.doubleValue();

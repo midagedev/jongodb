@@ -20,6 +20,8 @@ final class CommandErrors {
     private static final int CODE_CURSOR_NOT_FOUND = 43;
     private static final int CODE_NO_SUCH_TRANSACTION = 251;
     private static final int CODE_TRANSACTION_COMMITTED = 256;
+    private static final int CODE_INDEX_OPTIONS_CONFLICT = 85;
+    private static final int CODE_INDEX_KEY_SPECS_CONFLICT = 86;
     private static final int CODE_WRITE_CONFLICT = 112;
     private static final int CODE_DUPLICATE_KEY = 11000;
     private static final int CODE_NAMESPACE_EXISTS = 48;
@@ -83,7 +85,16 @@ final class CommandErrors {
     }
 
     static BsonDocument writeConflict(final String message) {
-        return error(message, CODE_WRITE_CONFLICT, "WriteConflict");
+        return errorWithLabels(
+                message, CODE_WRITE_CONFLICT, "WriteConflict", List.of("TransientTransactionError"));
+    }
+
+    static BsonDocument indexOptionsConflict(final String message) {
+        return error(message, CODE_INDEX_OPTIONS_CONFLICT, "IndexOptionsConflict");
+    }
+
+    static BsonDocument indexKeySpecsConflict(final String message) {
+        return error(message, CODE_INDEX_KEY_SPECS_CONFLICT, "IndexKeySpecsConflict");
     }
 
     static BsonDocument duplicateKey(final String message) {

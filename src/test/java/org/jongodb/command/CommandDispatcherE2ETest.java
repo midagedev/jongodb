@@ -798,7 +798,12 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument duplicateInsert = dispatcher.dispatch(BsonDocument.parse(
                 "{\"insert\":\"users\",\"$db\":\"app\",\"documents\":[{\"_id\":2,\"email\":\"ada@example.com\"}]}"));
-        assertDuplicateKeyError(duplicateInsert);
+        assertEquals(1.0, duplicateInsert.get("ok").asNumber().doubleValue());
+        assertEquals(0, duplicateInsert.getInt32("n").getValue());
+        assertEquals(11000, duplicateInsert.getArray("writeErrors").get(0).asDocument().getInt32("code").getValue());
+        assertEquals(
+                "DuplicateKey",
+                duplicateInsert.getArray("writeErrors").get(0).asDocument().getString("codeName").getValue());
 
         final BsonDocument findResponse =
                 dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{}}"));
@@ -2022,7 +2027,7 @@ class CommandDispatcherE2ETest {
     }
 
     @Test
-    void commitTransactionUsesTransactionalVersionWhenSameIdIsChangedOutsideTransaction() {
+    void commitOfTransactionThatUpdatesADocumentChangedOutsideReturnsWriteConflict() {
         final CommandDispatcher dispatcher = new CommandDispatcher(new EngineBackedCommandStore(new InMemoryEngineStore()));
 
         final BsonDocument seedResponse = dispatcher.dispatch(BsonDocument.parse(
@@ -2039,12 +2044,15 @@ class CommandDispatcherE2ETest {
 
         final BsonDocument commitResponse = dispatcher.dispatch(BsonDocument.parse(
                 "{\"commitTransaction\":1,\"$db\":\"app\",\"lsid\":{\"id\":\"session-3\"},\"txnNumber\":1,\"autocommit\":false}"));
-        assertEquals(1.0, commitResponse.get("ok").asNumber().doubleValue());
+        assertCommandError(commitResponse, 112, "WriteConflict");
+        assertEquals(
+                "TransientTransactionError",
+                commitResponse.getArray("errorLabels").get(0).asString().getValue());
 
         final BsonDocument usersFind =
                 dispatcher.dispatch(BsonDocument.parse("{\"find\":\"users\",\"$db\":\"app\",\"filter\":{\"_id\":1}}"));
         assertEquals(
-                "txn",
+                "outside",
                 usersFind.getDocument("cursor")
                         .getArray("firstBatch")
                         .get(0)

@@ -301,18 +301,25 @@ public final class BulkWriteCommandHandler implements CommandHandler {
     }
 
     private static BsonDocument writeError(final int index, final BsonDocument response) {
+        BsonDocument source = response;
+        if (response.get("code") == null) {
+            final BsonValue nested = response.get("writeErrors");
+            if (nested != null && nested.isArray() && !nested.asArray().isEmpty() && nested.asArray().get(0).isDocument()) {
+                source = nested.asArray().get(0).asDocument();
+            }
+        }
         final BsonDocument writeError = new BsonDocument()
                 .append("index", new BsonInt32(index));
 
-        final BsonValue code = response.get("code");
+        final BsonValue code = source.get("code");
         if (code instanceof BsonNumber numberValue) {
             writeError.append("code", new BsonInt32(numberValue.intValue()));
         }
-        final BsonValue codeName = response.get("codeName");
+        final BsonValue codeName = source.get("codeName");
         if (codeName != null && codeName.isString()) {
             writeError.append("codeName", codeName.asString());
         }
-        final BsonValue message = response.get("errmsg");
+        final BsonValue message = source.get("errmsg");
         if (message != null && message.isString()) {
             writeError.append("errmsg", message.asString());
         }
@@ -329,9 +336,11 @@ public final class BulkWriteCommandHandler implements CommandHandler {
 
     private static boolean isSuccessful(final BsonDocument response) {
         final BsonValue okValue = response.get("ok");
-        return okValue != null
-                && okValue.isNumber()
-                && okValue.asNumber().doubleValue() == 1.0d;
+        if (okValue == null || !okValue.isNumber() || okValue.asNumber().doubleValue() != 1.0d) {
+            return false;
+        }
+        final BsonValue writeErrors = response.get("writeErrors");
+        return writeErrors == null || !writeErrors.isArray() || writeErrors.asArray().isEmpty();
     }
 
     private static void appendIfPresent(final BsonDocument source, final BsonDocument target, final String key) {

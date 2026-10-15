@@ -166,13 +166,16 @@ public final class InMemoryEngineStore implements EngineStore {
                 baselineSnapshot.collectionStatesSnapshot();
         final Map<Namespace, InMemoryCollectionStore.CollectionState> transactionStates =
                 transactionSnapshot.collectionStatesSnapshot();
-        final Map<Namespace, InMemoryCollectionStore.CollectionState> currentStates = collectionStatesSnapshot();
 
         final Set<Namespace> touchedNamespaces = new HashSet<>();
         touchedNamespaces.addAll(baselineStates.keySet());
         touchedNamespaces.addAll(transactionStates.keySet());
 
         synchronized (this) {
+            // Snapshot under the same lock as the merge. Two commits that both copied current
+            // state before either merged would each treat the other write as still at baseline.
+            final Map<Namespace, InMemoryCollectionStore.CollectionState> currentStates =
+                    collectionStatesSnapshot();
             for (final Namespace namespace : touchedNamespaces) {
                 final InMemoryCollectionStore.CollectionState baselineState = baselineStates.get(namespace);
                 final InMemoryCollectionStore.CollectionState transactionState = transactionStates.get(namespace);

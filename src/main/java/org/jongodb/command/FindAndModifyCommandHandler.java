@@ -128,31 +128,30 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             return CommandErrors.badValue("arrayFilters is not allowed with pipeline updates");
         }
 
-        final List<BsonDocument> matches;
         try {
-            matches = store.find(database, collection, query, collation);
-        } catch (final IllegalArgumentException exception) {
-            return CommandExceptionMapper.fromIllegalArgument(exception);
-        }
-
-        final BsonDocument selected = firstMatched(matches, sort, collation);
-
-        try {
-            if (remove) {
-                return handleRemove(database, collection, selected, projectionSpec);
-            }
-            return handleUpdate(
+            final CommandStore.FindAndModifyOutcome outcome = store.findAndModify(
                     database,
                     collection,
-                    query,
-                    update,
-                    updatePipeline,
-                    selected,
-                    upsert,
-                    returnNew,
-                    projectionSpec,
-                    collation,
-                    parsedArrayFilters.parsed().filters());
+                    new CommandStore.FindAndModifyRequest(
+                            query,
+                            sort,
+                            collation,
+                            remove,
+                            update,
+                            updatePipeline,
+                            upsert,
+                            parsedArrayFilters.parsed().filters()));
+            if (remove) {
+                final BsonDocument value =
+                        outcome.before() == null ? null : applyProjection(outcome.before(), projectionSpec);
+                return removeSuccessResponse(outcome.matched(), value);
+            }
+            final BsonDocument raw = returnNew ? outcome.after() : outcome.before();
+            return successResponse(
+                    outcome.matched(),
+                    outcome.updatedExisting(),
+                    outcome.upsertedId(),
+                    applyProjection(raw, projectionSpec));
         } catch (final DuplicateKeyException exception) {
             return CommandErrors.duplicateKey(exception.getMessage());
         } catch (final IllegalArgumentException exception) {
@@ -160,75 +159,7 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
         }
     }
 
-    private BsonDocument handleRemove(
-            final String database,
-            final String collection,
-            final BsonDocument selected,
-            final ProjectionSpec projectionSpec) {
-        if (selected == null) {
-            return removeSuccessResponse(0, null);
-        }
-
-        final int deleted = store.delete(
-                database,
-                collection,
-                List.of(new CommandStore.DeleteRequest(singleDocumentFilter(selected), 1)));
-        final BsonDocument value = deleted > 0 ? applyProjection(selected, projectionSpec) : null;
-        return removeSuccessResponse(deleted > 0 ? 1 : 0, value);
-    }
-
-    private BsonDocument handleUpdate(
-            final String database,
-            final String collection,
-            final BsonDocument query,
-            final BsonDocument update,
-            final BsonArray updatePipeline,
-            final BsonDocument selected,
-            final boolean upsert,
-            final boolean returnNew,
-            final ProjectionSpec projectionSpec,
-            final CollationSupport.Config collation,
-            final List<BsonDocument> arrayFilters) {
-        if (selected != null) {
-            final BsonDocument oneFilter = singleDocumentFilter(selected);
-            final CommandStore.UpdateResult result = store.update(
-                    database,
-                    collection,
-                    List.of(updatePipeline == null
-                            ? new CommandStore.UpdateRequest(oneFilter, update, false, false, arrayFilters)
-                            : new CommandStore.UpdateRequest(oneFilter, updatePipeline, false, false)));
-            final BsonDocument selectedValue = returnNew ? firstMatch(database, collection, oneFilter, collation) : selected;
-            final BsonDocument value = applyProjection(selectedValue, projectionSpec);
-            return successResponse(result.matchedCount() > 0 ? 1 : 0, result.matchedCount() > 0, null, value);
-        }
-
-        if (!upsert) {
-            return successResponse(0, false, null, null);
-        }
-
-        final CommandStore.UpdateResult result = store.update(
-                database,
-                collection,
-                List.of(updatePipeline == null
-                        ? new CommandStore.UpdateRequest(query, update, false, true, arrayFilters)
-                        : new CommandStore.UpdateRequest(query, updatePipeline, false, true)));
-        final BsonValue upsertedId =
-                result.upserted().isEmpty() ? null : result.upserted().get(0).id();
-
-        BsonDocument value = null;
-        if (returnNew) {
-            if (upsertedId != null) {
-                value = firstMatch(database, collection, new BsonDocument("_id", upsertedId), collation);
-            } else {
-                value = firstMatch(database, collection, query, collation);
-            }
-            value = applyProjection(value, projectionSpec);
-        }
-
-        return successResponse(upsertedId == null ? 0 : 1, false, upsertedId, value);
-    }
-
-    private BsonDocument firstMatched(
+    static BsonDocument firstMatched(
             final List<BsonDocument> matches, final BsonDocument sort, final CollationSupport.Config collation) {
         if (matches.isEmpty()) {
             return null;
@@ -355,26 +286,6 @@ public final class FindAndModifyCommandHandler implements CommandHandler {
             case DATE_TIME, TIMESTAMP -> 8;
             default -> 9;
         };
-    }
-
-    private BsonDocument firstMatch(
-            final String database,
-            final String collection,
-            final BsonDocument filter,
-            final CollationSupport.Config collation) {
-        final List<BsonDocument> matched = store.find(database, collection, filter, collation);
-        if (matched.isEmpty()) {
-            return null;
-        }
-        return matched.get(0);
-    }
-
-    private static BsonDocument singleDocumentFilter(final BsonDocument document) {
-        final BsonValue id = document.get("_id");
-        if (id != null) {
-            return new BsonDocument("_id", id);
-        }
-        return document.clone();
     }
 
     private static BsonDocument successResponse(
