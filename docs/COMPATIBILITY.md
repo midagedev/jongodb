@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Status date: 2026-07-21
+Status date: 2026-10-15
 
 This page describes implemented behavior in this repository. It is a code-level matrix, not a MongoDB claim.
 
@@ -18,12 +18,12 @@ Certification context:
 | `ping` | Supported | Returns `{ok: 1}` |
 | `buildInfo` | Partial | Stable subset of fields |
 | `getParameter` | Partial | Only selected parameters |
-| `insert` | Partial | Single/batch insert supported; unsupported bulk modes are skipped in differential corpus |
-| `find` | Partial | Core filter support; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
+| `insert` | Partial | Single/batch insert, ordered and unordered (`ordered=false`); duplicate keys return `ok: 1` with `writeErrors` (ordered stops at the first, unordered continues). `writeErrors` carry no `keyPattern`/`keyValue` |
+| `find` | Partial | Core filter support; projection (inclusion, exclusion, dotted paths, `$slice`, `$elemMatch`, positional `$`; mixed modes fail with 31254/31253); sort ranks null and missing equally and orders arrays by their min (ascending) or max (descending) element; collation subset (`locale`/`strength`/`caseLevel`) applied to query + sort |
 | `aggregate` | Partial | Tier-1/Tier-2 subset plus minimal `$graphLookup`; collation subset applied to `$match`/`$sort`/`$sortByCount` |
 | `getMore` | Supported | Cursor paging; `$changeStream` cursors await new events up to `maxTimeMS` (default 1s) |
 | `killCursors` | Supported | Cursor cancellation |
-| `createIndexes` | Partial | Key metadata accepted; runtime semantics partial |
+| `createIndexes` | Partial | Key metadata accepted; an identical spec is a no-op, a conflicting spec fails with `IndexOptionsConflict` (85) or `IndexKeySpecsConflict` (86); runtime semantics partial |
 | `listIndexes` | Partial | Metadata round-trip |
 | `listCollections` | Partial | Cursor-shaped collection metadata subset for fixture discovery |
 | `drop` | Partial | Collection cleanup subset with deterministic `NamespaceNotFound` error |
@@ -36,6 +36,7 @@ Certification context:
 | `countDocuments` | Partial | Filter + skip/limit + hint/readConcern; collation subset applied to filter comparison |
 | `runCommand` | Partial | UTF importer subset supports `ping`, `buildInfo`, `listIndexes`, `listCollections`, `count`, `distinct`, `drop`, `dropDatabase`; other command names fail with deterministic unsupported reasons |
 | `replaceOne` | Partial | Rewrites to single replacement `update` path (`multi=false`) |
+| `findAndModify` | Partial | Selects and writes one document atomically under the collection lock; `sort` orders like `find` |
 | `findOneAndUpdate` | Partial | Rewrites to `findAndModify`; supports operator and expression-based pipeline updates, `arrayFilters` subset, and projection include/exclude subset (including `_id` override) |
 | `findOneAndReplace` | Partial | Rewrites to `findAndModify`; replacement updates only; supports projection include/exclude subset (including `_id` override) |
 | `commitTransaction`, `abortTransaction` | Supported | Session/txn envelope supported |
@@ -61,6 +62,9 @@ Implemented operators:
 - Regex: `$regex` + `$options`, pattern literals
 - Logical: `$and`, `$or`, `$nor`, top-level `$not`, field-level `$not`
 - Expression: top-level `$expr` subset
+- Schema: `$jsonSchema` with `required`, `properties`, `bsonType`, `enum`, `minimum`/`maximum`, `additionalProperties`
+
+Equality, `$in`/`$nin`, array membership, and `$elemMatch` compare int/long/double/decimal by numeric value. `$nin` containing `null` excludes documents missing the field. `$elemMatch` applies `$and`/`$or`/`$nor` to a single element.
 - Positional dotted paths: array-index path resolution (for example `items.0.sku`, `$expr` path `metrics.0`)
 
 `$expr` subset currently includes:
@@ -131,7 +135,6 @@ Not supported:
 The R3 failure-ledger runner currently treats the following UTF cases as unsupported and excludes them from
 differential parity counts:
 
-- unordered `insertMany` (`ordered=false`)
 - unordered `bulkWrite` (`ordered=false`)
 - `clientBulkWrite` with mixed namespaces, `ordered=false`, or `verboseResults=true`
 - dot/dollar insert payload forms outside the deterministic insert subset; dollar-prefixed subfields under `_id` fail with `code=52`
@@ -159,6 +162,7 @@ Supported metadata paths:
 - `collation` metadata
 - `expireAfterSeconds` metadata
 - tier-0 TTL pruning for single-field non-partial TTL indexes
+- unique keys compare numbers by value (`1`, `1L`, `1.0` collide)
 
 Current limitations:
 - collation runtime semantics are subset-only (`locale`/`strength`/`caseLevel`)
@@ -172,7 +176,7 @@ Supported:
 - namespace-aware commit merge for transaction writes
 - expected transaction error labels for no-such-transaction cases
 - deterministic retry replay behavior for duplicate commit/abort paths (including `UnknownTransactionCommitResult` and `TransientTransactionError` label contracts by failure type)
-- deterministic conflict rule: transactional writes win when transactional and non-transactional paths touch the same `_id`
+- committing a transaction whose document changed outside its snapshot fails with `WriteConflict` (112) and the `TransientTransactionError` label, so driver `withTransaction` retries it
 
 Current scope:
 - single in-memory process semantics
