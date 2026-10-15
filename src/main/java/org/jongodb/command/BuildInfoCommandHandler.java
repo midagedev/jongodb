@@ -8,10 +8,12 @@ import org.bson.BsonInt32;
 import org.bson.BsonString;
 
 public final class BuildInfoCommandHandler implements CommandHandler {
+    static final String VERSION = "8.0.0-jongodb";
+
     @Override
     public BsonDocument handle(final BsonDocument command) {
         return new BsonDocument()
-                .append("version", new BsonString("8.0.0-jongodb"))
+                .append("version", new BsonString(VERSION))
                 .append(
                         "versionArray",
                         new BsonArray(List.of(new BsonInt32(8), new BsonInt32(0), new BsonInt32(0), new BsonInt32(0))))

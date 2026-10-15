@@ -228,6 +228,35 @@ public final class InMemoryCollectionStore implements CollectionStore {
     }
 
     @Override
+    public synchronized void dropIndexes(final List<String> names) {
+        for (final String name : names) {
+            if (!"_id_".equals(name)) {
+                indexesByName.remove(name);
+            }
+        }
+    }
+
+    @Override
+    public synchronized Long modifyIndexTtl(final String name, final Long expireAfterSeconds) {
+        final IndexMetadata index = indexesByName.get(name);
+        if (index == null) {
+            throw new IllegalArgumentException("cannot find index " + name);
+        }
+        indexesByName.put(
+                name,
+                new IndexMetadata(
+                        index.name(),
+                        index.key(),
+                        index.unique(),
+                        index.sparse(),
+                        index.partialFilterExpression(),
+                        index.collation(),
+                        expireAfterSeconds,
+                        index.uniqueFieldPaths()));
+        return index.expireAfterSeconds();
+    }
+
+    @Override
     public synchronized List<Document> findAll() {
         pruneExpiredDocuments();
         return copyMatchingDocuments(new Document(), CollationSupport.Config.simple());

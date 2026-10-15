@@ -31,6 +31,7 @@ import org.jongodb.engine.CollationSupport;
 import org.jongodb.engine.DeleteManyResult;
 import org.jongodb.engine.EngineStore;
 import org.jongodb.engine.InMemoryEngineStore;
+import org.jongodb.engine.Namespace;
 import org.jongodb.engine.UnsupportedFeatureException;
 import org.jongodb.engine.UpdateManyResult;
 
@@ -140,6 +141,37 @@ public final class EngineBackedCommandStore implements CommandStore {
     }
 
     @Override
+    public List<String> listDatabaseNames() {
+        return engineStore.listDatabaseNames();
+    }
+
+    @Override
+    public boolean createCollection(final String database, final String collection) {
+        return engineStore.createCollection(database, collection);
+    }
+
+    @Override
+    public void dropIndexes(final String database, final String collection, final List<String> names) {
+        engineStore.collection(database, collection).dropIndexes(names);
+    }
+
+    @Override
+    public Long modifyIndexTtl(
+            final String database, final String collection, final String indexName, final Long expireAfterSeconds) {
+        return engineStore.collection(database, collection).modifyIndexTtl(indexName, expireAfterSeconds);
+    }
+
+    @Override
+    public void renameCollection(
+            final String fromDatabase,
+            final String fromCollection,
+            final String toDatabase,
+            final String toCollection,
+            final boolean dropTarget) {
+        engineStore.renameCollection(fromDatabase, fromCollection, toDatabase, toCollection, dropTarget);
+    }
+
+    @Override
     public List<BsonDocument> find(final String database, final String collection, final BsonDocument filter) {
         return find(database, collection, filter, CollationSupport.Config.simple());
     }
@@ -150,7 +182,10 @@ public final class EngineBackedCommandStore implements CommandStore {
             final String collection,
             final BsonDocument filter,
             final CollationSupport.Config collation) {
-        final CollectionStore collectionStore = engineStore.collection(database, collection);
+        final CollectionStore collectionStore = engineStore.existingCollection(Namespace.of(database, collection));
+        if (collectionStore == null) {
+            return List.of();
+        }
         final Document convertedFilter = toDocumentOrEmpty(filter);
         final List<Document> foundDocuments = collectionStore.find(convertedFilter, collation);
 
@@ -174,7 +209,6 @@ public final class EngineBackedCommandStore implements CommandStore {
             final List<BsonDocument> pipeline,
             final CollationSupport.Config collation) {
         Objects.requireNonNull(pipeline, "pipeline");
-        final CollectionStore collectionStore = engineStore.collection(database, collection);
 
         final List<Document> convertedPipeline = new ArrayList<>(pipeline.size());
         for (final BsonDocument stage : pipeline) {
@@ -182,11 +216,11 @@ public final class EngineBackedCommandStore implements CommandStore {
         }
         final TerminalWriteStagePlan writeStagePlan = resolveTerminalWriteStagePlan(List.copyOf(convertedPipeline));
 
-        final Iterable<Document> sourceDocuments = collectionStore.scanAll();
+        final Iterable<Document> sourceDocuments = scanIfExists(database, collection);
         final List<Document> aggregatedDocuments = AggregationPipeline.execute(
                 sourceDocuments,
                 writeStagePlan.pipelineWithoutTerminalWrite(),
-                foreignCollectionName -> engineStore.collection(database, foreignCollectionName).scanAll(),
+                foreignCollectionName -> scanIfExists(database, foreignCollectionName),
                 collation);
         if (writeStagePlan.outputCollection() != null) {
             final CollectionStore outputCollection = engineStore.collection(database, writeStagePlan.outputCollection());
@@ -198,6 +232,11 @@ public final class EngineBackedCommandStore implements CommandStore {
             converted.add(toBsonDocument(document));
         }
         return List.copyOf(converted);
+    }
+
+    private Iterable<Document> scanIfExists(final String database, final String collection) {
+        final CollectionStore existing = engineStore.existingCollection(Namespace.of(database, collection));
+        return existing == null ? List.of() : existing.scanAll();
     }
 
     @Override
@@ -226,7 +265,10 @@ public final class EngineBackedCommandStore implements CommandStore {
 
     @Override
     public List<IndexMetadata> listIndexes(final String database, final String collection) {
-        final CollectionStore collectionStore = engineStore.collection(database, collection);
+        final CollectionStore collectionStore = engineStore.existingCollection(Namespace.of(database, collection));
+        if (collectionStore == null) {
+            return List.of();
+        }
         final List<CollectionStore.IndexDefinition> indexes = collectionStore.listIndexes();
         final List<IndexMetadata> converted = new ArrayList<>(indexes.size());
         for (final CollectionStore.IndexDefinition index : indexes) {
@@ -583,6 +625,38 @@ public final class EngineBackedCommandStore implements CommandStore {
         @Override
         public List<CollectionMetadata> listCollections(final String database) {
             return activeReadDelegate().listCollections(database);
+        }
+
+        @Override
+        public List<String> listDatabaseNames() {
+            return activeReadDelegate().listDatabaseNames();
+        }
+
+        @Override
+        public boolean createCollection(final String database, final String collection) {
+            return materializeWriteDelegate().createCollection(database, collection);
+        }
+
+        @Override
+        public void dropIndexes(final String database, final String collection, final List<String> names) {
+            materializeWriteDelegate().dropIndexes(database, collection, names);
+        }
+
+        @Override
+        public Long modifyIndexTtl(
+                final String database, final String collection, final String indexName, final Long expireAfterSeconds) {
+            return materializeWriteDelegate().modifyIndexTtl(database, collection, indexName, expireAfterSeconds);
+        }
+
+        @Override
+        public void renameCollection(
+                final String fromDatabase,
+                final String fromCollection,
+                final String toDatabase,
+                final String toCollection,
+                final boolean dropTarget) {
+            materializeWriteDelegate()
+                    .renameCollection(fromDatabase, fromCollection, toDatabase, toCollection, dropTarget);
         }
 
         @Override

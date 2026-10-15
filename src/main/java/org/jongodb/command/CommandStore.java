@@ -21,6 +21,30 @@ public interface CommandStore {
         return 0;
     }
 
+    default List<String> listDatabaseNames() {
+        return List.of();
+    }
+
+    /** Creates an empty collection; returns false when it already exists. */
+    default boolean createCollection(final String database, final String collection) {
+        return false;
+    }
+
+    default void dropIndexes(final String database, final String collection, final List<String> names) {}
+
+    /** Changes the TTL of an existing index and returns the previous value ({@code null} when it had none). */
+    default Long modifyIndexTtl(
+            final String database, final String collection, final String indexName, final Long expireAfterSeconds) {
+        return null;
+    }
+
+    default void renameCollection(
+            final String fromDatabase,
+            final String fromCollection,
+            final String toDatabase,
+            final String toCollection,
+            final boolean dropTarget) {}
+
     List<BsonDocument> find(String database, String collection, BsonDocument filter);
 
     default List<BsonDocument> find(

@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added administrative and diagnostic commands for `mongosh`/GUI tools: `listDatabases`, `create`, `dropIndexes`, `renameCollection`, `collMod` (TTL), `dbStats`/`collStats`/`$collStats`, `serverStatus`, `hostInfo`, `connectionStatus`, `explain` (honest `COLLSCAN`), `replSetGetStatus`, session commands that abort open transactions, and `$currentOp`/`killOp`; reads of a missing collection no longer create it.
 - Added `$changeStream` cursors (collection, database, and cluster scope) with resume tokens, `fullDocument: updateLookup`, `getMore` await, and events for transactional commits and TTL deletes.
 - Added `$push` (with `$each`/`$position`/`$sort`/`$slice`), `$pull`, `$pullAll`, `$pop`, `$mul`, `$rename`, and `$currentDate` update operators.
 

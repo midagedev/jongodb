@@ -55,6 +55,30 @@ public final class SessionTransactionPool {
         return removed;
     }
 
+    /** Aborts the session's in-flight transaction, if any; returns whether one was aborted. */
+    public boolean abortActive(final String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId");
+        final ActiveTransaction removed = activeTransactions.remove(sessionId);
+        if (removed == null) {
+            return false;
+        }
+        terminalTransactions.put(sessionId, new TerminalTransaction(removed.txnNumber(), TerminalState.ABORTED));
+        return true;
+    }
+
+    public void abortAll() {
+        for (final String sessionId : java.util.List.copyOf(activeTransactions.keySet())) {
+            abortActive(sessionId);
+        }
+    }
+
+    /** Forgets the session entirely after aborting its in-flight transaction. */
+    public void endSession(final String sessionId) {
+        abortActive(sessionId);
+        lastSeenTxnNumbers.remove(sessionId);
+        terminalTransactions.remove(sessionId);
+    }
+
     public CommandStore transactionStore(final String sessionId, final long txnNumber) {
         Objects.requireNonNull(sessionId, "sessionId");
         final ActiveTransaction activeTransaction = activeTransactions.get(sessionId);

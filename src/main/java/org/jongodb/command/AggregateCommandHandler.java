@@ -11,6 +11,9 @@ import org.bson.BsonValue;
 import org.jongodb.engine.CollationSupport;
 
 public final class AggregateCommandHandler implements CommandHandler {
+    private static final java.util.Set<String> DATABASE_STAGES =
+            java.util.Set.of("$currentOp", "$listLocalSessions", "$listSessions");
+
     private final CommandStore store;
     private final CursorRegistry cursorRegistry;
     private final ChangeStreamCursors changeStreams;
@@ -31,6 +34,10 @@ public final class AggregateCommandHandler implements CommandHandler {
         final String database = readDatabase(command);
         if (changeStreams != null && ChangeStreamCursors.isChangeStream(command)) {
             return changeStreams.open(database, command);
+        }
+        final BsonValue target = command.get("aggregate");
+        if (target != null && target.isNumber() && target.asNumber().intValue() == 1) {
+            return databaseAggregate(database, command);
         }
         final String collection = readRequiredString(command, "aggregate");
         if (collection == null) {
@@ -85,7 +92,15 @@ public final class AggregateCommandHandler implements CommandHandler {
 
         final List<BsonDocument> aggregatedDocuments;
         try {
-            aggregatedDocuments = store.aggregate(database, collection, List.copyOf(pipeline), collation);
+            if (!pipeline.isEmpty() && pipeline.get(0).containsKey("$collStats")) {
+                final BsonDocument error = collStatsStage(database, collection, pipeline);
+                if (error != null) {
+                    return error;
+                }
+            }
+            aggregatedDocuments = !pipeline.isEmpty() && pipeline.get(0).containsKey("$collStats")
+                    ? collStatsDocuments(database, collection, pipeline.get(0).get("$collStats"))
+                    : store.aggregate(database, collection, List.copyOf(pipeline), collation);
         } catch (final IllegalArgumentException exception) {
             return CommandExceptionMapper.fromIllegalArgument(exception);
         }
@@ -111,6 +126,59 @@ public final class AggregateCommandHandler implements CommandHandler {
         return new BsonDocument()
                 .append("cursor", cursor)
                 .append("ok", new BsonDouble(1.0));
+    }
+
+    /**
+     * Database-level {@code aggregate: 1}. Only the introspection stages are known; none of them has anything to
+     * report because operations finish synchronously and sessions are not tracked beyond transactions.
+     */
+    private BsonDocument databaseAggregate(final String database, final BsonDocument command) {
+        final BsonValue pipelineValue = command.get("pipeline");
+        if (pipelineValue == null || !pipelineValue.isArray()) {
+            return CommandErrors.typeMismatch("pipeline must be an array");
+        }
+        final BsonValue first = pipelineValue.asArray().isEmpty() ? null : pipelineValue.asArray().get(0);
+        if (first == null || !first.isDocument() || !DATABASE_STAGES.contains(first.asDocument().getFirstKey())) {
+            return CommandErrors.badValue("aggregate: 1 requires a $currentOp, $listLocalSessions or $listSessions stage");
+        }
+        final String namespace = database + ".$cmd.aggregate";
+        final CursorRegistry.FindRegistration registration = cursorRegistry.openCursor(namespace, List.of(), 0);
+        return new BsonDocument()
+                .append("cursor", new BsonDocument()
+                        .append("id", new BsonInt64(registration.cursorId()))
+                        .append("ns", new BsonString(namespace))
+                        .append("firstBatch", new BsonArray()))
+                .append("ok", new BsonDouble(1.0));
+    }
+
+    private BsonDocument collStatsStage(final String database, final String collection, final List<BsonDocument> pipeline) {
+        if (pipeline.size() > 1) {
+            return CommandErrors.notImplemented("stages after $collStats are not supported");
+        }
+        if (!AdminCommandSupport.collectionExists(store, database, collection)) {
+            return CommandErrors.namespaceNotFound(database + "." + collection);
+        }
+        return null;
+    }
+
+    private List<BsonDocument> collStatsDocuments(final String database, final String collection, final BsonValue options) {
+        final BsonDocument spec = options.isDocument() ? options.asDocument() : new BsonDocument();
+        final BsonDocument stats = AdminCommandSupport.collectionStats(store, database, collection, 1.0);
+        final BsonDocument result = new BsonDocument()
+                .append("ns", new BsonString(database + "." + collection))
+                .append("localTime", new org.bson.BsonDateTime(System.currentTimeMillis()));
+        if (spec.containsKey("count")) {
+            result.append("count", stats.get("count"));
+        }
+        if (spec.containsKey("storageStats")) {
+            final double scale = spec.get("storageStats").isDocument()
+                    ? AdminCommandSupport.scale(spec.getDocument("storageStats").get("scale"))
+                    : 1.0;
+            final BsonDocument storage = AdminCommandSupport.collectionStats(store, database, collection, scale);
+            storage.remove("ns");
+            result.append("storageStats", storage);
+        }
+        return List.of(result);
     }
 
     private static String readDatabase(final BsonDocument command) {
