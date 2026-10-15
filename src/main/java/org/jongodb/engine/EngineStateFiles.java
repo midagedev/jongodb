@@ -94,7 +94,8 @@ public final class EngineStateFiles {
         try (Stream<Path> databases = Files.list(root)) {
             for (final Path dbDir : databases.filter(Files::isDirectory).sorted().toList()) {
                 final String database = dbDir.getFileName().toString();
-                if (SKIPPED_DATABASES.contains(database)) {
+                // Hidden entries are never mongodump output; macOS tar and Finder add `._*` metadata twins of every file.
+                if (SKIPPED_DATABASES.contains(database) || database.startsWith(".")) {
                     continue;
                 }
                 try (Stream<Path> files = Files.list(dbDir)) {
@@ -103,7 +104,7 @@ public final class EngineStateFiles {
                         final String collection = name.endsWith(".bson")
                                 ? name.substring(0, name.length() - ".bson".length())
                                 : name.endsWith(".bson.gz") ? name.substring(0, name.length() - ".bson.gz".length()) : null;
-                        if (collection == null || collection.startsWith("system.")) {
+                        if (collection == null || collection.startsWith("system.") || name.startsWith(".")) {
                             continue;
                         }
                         states.put(

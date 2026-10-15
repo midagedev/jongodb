@@ -82,6 +82,23 @@ final class JongodbEmbeddedInitializerTest {
     }
 
     @Test
+    void loadIgnoresHiddenMetadataFilesNextToTheDump() throws java.io.IOException {
+        final Path state = tempDir.resolve("world");
+        try (AnnotationConfigApplicationContext context = context(state);
+                MongoClient client = MongoClients.create(context.getEnvironment().getProperty("spring.data.mongodb.uri"))) {
+            client.getDatabase("app").getCollection("Account").insertOne(new Document("_id", 1));
+        }
+        Files.write(state.resolve("app/._Account.bson"), new byte[] {0, 5, 22, 7});
+        Files.createDirectories(state.resolve(".Trashes"));
+
+        try (AnnotationConfigApplicationContext context = context(state);
+                MongoClient client = MongoClients.create(context.getEnvironment().getProperty("spring.data.mongodb.uri"))) {
+            assertEquals(1, client.getDatabase("app").getCollection("Account").countDocuments());
+            assertEquals(List.of("Account"), client.getDatabase("app").listCollectionNames().into(new java.util.ArrayList<>()));
+        }
+    }
+
+    @Test
     void staysInertUnlessEnabled() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             new JongodbEmbeddedInitializer().initialize(context);
