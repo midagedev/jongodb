@@ -1,6 +1,6 @@
 # Release Checklist
 
-Status date: 2026-07-21
+Status date: 2026-11-12
 
 ## R3 Certification Sign-Off
 
@@ -28,7 +28,8 @@ Status date: 2026-07-21
 - Latest Java release tag: `v0.1.9` (run `25603328584`, commit `46ddb9b`).
 - Latest Node adapter tag: `node-v0.1.4` (run `22379340586`, commit `868bbc7`).
 - Latest compatibility certification snapshot: commit `b44be73` (runs `25603109902`, `25603109886`, `25603109905`, `25603109900`).
-- Next Java tag candidate: `v0.1.10`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
+- `v0.1.11` release-candidate gates (2026-11-12, commit `51951e0`): CI Test Suite `43211389832`, Official Suite Sharded `43211405860`, R3 Failure Ledger `43211412878`, Complex Query Certification `43211384876`, R3 External Canary `43212987277` — all green.
+- Next Java tag candidate: `v0.1.12`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate
 
