@@ -7,6 +7,9 @@ All notable changes to this project are documented in this file.
 ### Changed
 - Default local project version moved to `0.1.12-SNAPSHOT`.
 
+### Fixed
+- `$elemMatch` criteria that combine field predicates with `$and`/`$or`/`$nor` (for example `{type: "PAID", $or: [...]}`) match the field predicates against each element instead of failing with `unsupported query operator`.
+
 ## [0.1.12] - 2026-11-27
 
 ### Changed

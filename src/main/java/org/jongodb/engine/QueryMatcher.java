@@ -878,8 +878,18 @@ final class QueryMatcher {
                 }
                 yield true;
             }
-            default -> matchesOperatorDocument(
-                    PathResolution.existing(Collections.singletonList(element)), singleOperator(operator, operand));
+            default -> {
+                if (operator.startsWith("$")) {
+                    yield matchesOperatorDocument(
+                            PathResolution.existing(Collections.singletonList(element)),
+                            singleOperator(operator, operand));
+                }
+                // A field predicate beside $and/$or/$nor applies to the element document, like in a query.
+                yield element instanceof Map<?, ?> elementMap
+                        && matches(
+                                toDocument("$elemMatch element", elementMap),
+                                new Document(operator, operand));
+            }
         };
     }
 
