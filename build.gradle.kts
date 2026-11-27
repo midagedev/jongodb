@@ -8,7 +8,7 @@ plugins {
 }
 
 group = providers.gradleProperty("publishGroup").orElse("io.github.midagedev").get()
-version = providers.gradleProperty("publishVersion").orElse("0.1.11-SNAPSHOT").get()
+version = providers.gradleProperty("publishVersion").orElse("0.1.12-SNAPSHOT").get()
 
 repositories {
     mavenCentral()
