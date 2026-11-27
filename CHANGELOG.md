@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - Default local project version moved to `0.1.11-SNAPSHOT`.
+- Unique index checks on insert, upsert, and update compare only the written documents against hashed index keys, so a single write is linear in collection size instead of quadratic (one insert into 20k documents: ~2.5s → ~4ms). Duplicate detection and the reported duplicate key are unchanged.
 
 ## [0.1.11] - 2026-11-12
 

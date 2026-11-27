@@ -94,6 +94,11 @@ public final class CollationSupport {
             return 0;
         }
 
+        /** Hash consistent with {@link #compareStrings}: strings that compare equal hash equally. */
+        public int equalityHash(final String value) {
+            return simpleBinary ? value.hashCode() : collator.getCollationKey(value).hashCode();
+        }
+
         public boolean valuesEqual(final Object left, final Object right) {
             if (left == right) {
                 return true;

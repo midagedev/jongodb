@@ -3,7 +3,6 @@ package org.jongodb.engine;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -141,10 +140,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             copiedDocuments.add(copiedDocument);
         }
 
-        List<Document> candidateDocuments = new ArrayList<>(this.documents.size() + copiedDocuments.size());
-        candidateDocuments.addAll(this.documents);
-        candidateDocuments.addAll(copiedDocuments);
-        validateUniqueConstraints(candidateDocuments, indexesByName.values());
+        validateUniqueAdditions(this.documents, copiedDocuments, indexesByName.values());
 
         this.documents.addAll(copiedDocuments);
         for (final Document inserted : copiedDocuments) {
@@ -383,16 +379,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
         }
 
         if (modifiedCount > 0) {
-            final List<Document> candidateDocuments = new ArrayList<>(documents.size());
-            for (final Document document : documents) {
-                final UpdatePreview preview = previewsByDocument.get(document);
-                if (preview == null || !preview.modified()) {
-                    candidateDocuments.add(document);
-                } else {
-                    candidateDocuments.add(preview.updatedDocument());
-                }
-            }
-            validateUniqueConstraints(candidateDocuments, indexesByName.values());
+            validateUniqueAfterUpdate(documents, previewsByDocument, indexesByName.values());
         }
 
         for (final Document document : matchedDocuments) {
@@ -468,14 +455,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
         }
 
         if (modifiedCount > 0) {
-            final List<Document> candidateDocuments = new ArrayList<>(documents.size());
-            for (final Document document : documents) {
-                final UpdatePreview preview = previewsByDocument.get(document);
-                candidateDocuments.add(preview == null || !preview.modified()
-                        ? document
-                        : preview.updatedDocument());
-            }
-            validateUniqueConstraints(candidateDocuments, indexesByName.values());
+            validateUniqueAfterUpdate(documents, previewsByDocument, indexesByName.values());
         }
 
         for (final Document document : matchedDocuments) {
@@ -513,10 +493,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             upsertedDocument.put("_id", new ObjectId());
         }
 
-        final List<Document> candidateDocuments = new ArrayList<>(documents.size() + 1);
-        candidateDocuments.addAll(documents);
-        candidateDocuments.add(upsertedDocument);
-        validateUniqueConstraints(candidateDocuments, indexesByName.values());
+        validateUniqueAdditions(documents, List.of(upsertedDocument), indexesByName.values());
         documents.add(upsertedDocument);
         recordInsert(upsertedDocument);
         return new UpdateManyResult(0, 0, DocumentCopies.copyAny(upsertedDocument.get("_id")));
@@ -638,10 +615,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             upsertedDocument.put("_id", new ObjectId());
         }
 
-        final List<Document> candidateDocuments = new ArrayList<>(documents.size() + 1);
-        candidateDocuments.addAll(documents);
-        candidateDocuments.add(upsertedDocument);
-        validateUniqueConstraints(candidateDocuments, indexesByName.values());
+        validateUniqueAdditions(documents, List.of(upsertedDocument), indexesByName.values());
 
         documents.add(upsertedDocument);
         recordInsert(upsertedDocument);
@@ -857,34 +831,155 @@ public final class InMemoryCollectionStore implements CollectionStore {
         return List.copyOf(fieldPaths);
     }
 
+    /** Checks every unique index over the whole candidate collection; used where no prior state can be trusted. */
     private static void validateUniqueConstraints(
             final List<Document> candidateDocuments, final Iterable<IndexMetadata> indexes) {
-        for (IndexMetadata index : indexes) {
-            if (!index.unique() || index.uniqueFieldPaths().isEmpty()) {
+        for (final IndexMetadata index : indexes) {
+            if (!enforcesUniqueness(index)) {
                 continue;
             }
-
-            final CollationSupport.Config indexCollation = index.collation() == null
-                    ? CollationSupport.Config.simple()
-                    : CollationSupport.Config.fromDocument(index.collation());
-            final List<UniqueValueKey> seenValues = new ArrayList<>();
-            for (Document document : candidateDocuments) {
-                if (index.partialFilterExpression() != null
-                        && !QueryMatcher.matches(document, index.partialFilterExpression(), indexCollation)) {
+            final CollationSupport.Config collation = indexCollation(index);
+            final UniqueKeyBuckets seen = new UniqueKeyBuckets();
+            for (final Document document : candidateDocuments) {
+                final UniqueValueKey key = uniqueKeyOf(document, index, collation, -1);
+                if (key == null) {
                     continue;
                 }
-                if (index.sparse() && isSparseExcluded(document, index.uniqueFieldPaths())) {
-                    continue;
+                if (seen.containsEqual(key)) {
+                    throw new DuplicateKeyException(duplicateKeyMessage(index, key.values));
                 }
-
-                final Object[] values = resolvePathValues(document, index.uniqueFieldPaths());
-                final UniqueValueKey candidateKey = new UniqueValueKey(values, indexCollation);
-                if (seenValues.contains(candidateKey)) {
-                    throw new DuplicateKeyException(duplicateKeyMessage(index, values));
-                }
-                seenValues.add(candidateKey);
+                seen.add(key);
             }
         }
+    }
+
+    /**
+     * Stored documents already satisfy every unique index, so only the additions are checked: against the stored
+     * documents and against each other. The violation reported is the one a full scan of stored-then-added documents
+     * would hit first — the earliest addition equal to something before it.
+     */
+    private static void validateUniqueAdditions(
+            final List<Document> stored, final List<Document> additions, final Iterable<IndexMetadata> indexes) {
+        for (final IndexMetadata index : indexes) {
+            if (!enforcesUniqueness(index)) {
+                continue;
+            }
+            final CollationSupport.Config collation = indexCollation(index);
+            final UniqueKeyBuckets added = new UniqueKeyBuckets();
+            final UniqueValueKey[] additionKeys = new UniqueValueKey[additions.size()];
+            int violation = Integer.MAX_VALUE;
+            for (int position = 0; position < additions.size(); position++) {
+                final UniqueValueKey key = uniqueKeyOf(additions.get(position), index, collation, position);
+                if (key == null) {
+                    continue;
+                }
+                if (violation == Integer.MAX_VALUE && added.containsEqual(key)) {
+                    violation = position;
+                }
+                added.add(key);
+                additionKeys[position] = key;
+            }
+            if (!added.isEmpty()) {
+                for (final Document document : stored) {
+                    final UniqueValueKey key = uniqueKeyOf(document, index, collation, -1);
+                    if (key == null) {
+                        continue;
+                    }
+                    for (final UniqueValueKey addition : added.sameHash(key)) {
+                        if (addition.position < violation && addition.equals(key)) {
+                            violation = addition.position;
+                        }
+                    }
+                }
+            }
+            if (violation != Integer.MAX_VALUE) {
+                throw new DuplicateKeyException(duplicateKeyMessage(index, additionKeys[violation].values));
+            }
+        }
+    }
+
+    /**
+     * Unmodified documents already satisfy every unique index, so only the modified documents are checked. The
+     * violation reported is the one a full scan of the updated collection would hit first — the earliest document,
+     * in collection order, equal to one before it — which may be an unmodified document after a modified one.
+     */
+    private static void validateUniqueAfterUpdate(
+            final List<Document> documents,
+            final Map<Document, UpdatePreview> previewsByDocument,
+            final Iterable<IndexMetadata> indexes) {
+        for (final IndexMetadata index : indexes) {
+            if (!enforcesUniqueness(index)) {
+                continue;
+            }
+            final CollationSupport.Config collation = indexCollation(index);
+            final UniqueKeyBuckets modified = new UniqueKeyBuckets();
+            UniqueValueKey violation = null;
+            int violationPosition = Integer.MAX_VALUE;
+            for (int position = 0; position < documents.size(); position++) {
+                final UpdatePreview preview = previewsByDocument.get(documents.get(position));
+                if (preview == null || !preview.modified()) {
+                    continue;
+                }
+                final UniqueValueKey key = uniqueKeyOf(preview.updatedDocument(), index, collation, position);
+                if (key == null) {
+                    continue;
+                }
+                if (violation == null && modified.containsEqual(key)) {
+                    violation = key;
+                    violationPosition = position;
+                }
+                modified.add(key);
+            }
+            if (!modified.isEmpty()) {
+                for (int position = 0; position < violationPosition && position < documents.size(); position++) {
+                    final Document document = documents.get(position);
+                    final UpdatePreview preview = previewsByDocument.get(document);
+                    if (preview != null && preview.modified()) {
+                        continue;
+                    }
+                    final UniqueValueKey key = uniqueKeyOf(document, index, collation, position);
+                    if (key == null) {
+                        continue;
+                    }
+                    for (final UniqueValueKey changed : modified.sameHash(key)) {
+                        final int later = Math.max(position, changed.position);
+                        if (later < violationPosition && changed.equals(key)) {
+                            violation = later == position ? key : changed;
+                            violationPosition = later;
+                        }
+                    }
+                }
+            }
+            if (violation != null) {
+                throw new DuplicateKeyException(duplicateKeyMessage(index, violation.values));
+            }
+        }
+    }
+
+    private static boolean enforcesUniqueness(final IndexMetadata index) {
+        return index.unique() && !index.uniqueFieldPaths().isEmpty();
+    }
+
+    private static CollationSupport.Config indexCollation(final IndexMetadata index) {
+        return index.collation() == null
+                ? CollationSupport.Config.simple()
+                : CollationSupport.Config.fromDocument(index.collation());
+    }
+
+    /** Returns null when the document is outside the index (partial filter, or sparse with every key field missing). */
+    private static UniqueValueKey uniqueKeyOf(
+            final Document document,
+            final IndexMetadata index,
+            final CollationSupport.Config collation,
+            final int position) {
+        if (index.partialFilterExpression() != null
+                && !QueryMatcher.matches(document, index.partialFilterExpression(), collation)) {
+            return null;
+        }
+        if (index.sparse() && isSparseExcluded(document, index.uniqueFieldPaths())) {
+            return null;
+        }
+        return new UniqueValueKey(resolvePathValues(document, index.uniqueFieldPaths()), collation, position);
     }
 
     private static String duplicateKeyMessage(final IndexMetadata index, final Object[] duplicateValues) {
@@ -1232,10 +1327,18 @@ public final class InMemoryCollectionStore implements CollectionStore {
     private static final class UniqueValueKey {
         private final Object[] values;
         private final CollationSupport.Config collation;
+        private final int position;
+        private final int hash;
 
-        private UniqueValueKey(final Object[] values, final CollationSupport.Config collation) {
-            this.values = values == null ? new Object[0] : Arrays.copyOf(values, values.length);
+        private UniqueValueKey(final Object[] values, final CollationSupport.Config collation, final int position) {
+            this.values = values == null ? new Object[0] : values;
             this.collation = Objects.requireNonNull(collation, "collation");
+            this.position = position;
+            int combined = 1;
+            for (final Object value : this.values) {
+                combined = 31 * combined + uniqueHash(value, collation);
+            }
+            this.hash = combined;
         }
 
         @Override
@@ -1246,7 +1349,7 @@ public final class InMemoryCollectionStore implements CollectionStore {
             if (!(other instanceof UniqueValueKey that)) {
                 return false;
             }
-            if (values.length != that.values.length) {
+            if (hash != that.hash || values.length != that.values.length) {
                 return false;
             }
             for (int i = 0; i < values.length; i++) {
@@ -1259,8 +1362,77 @@ public final class InMemoryCollectionStore implements CollectionStore {
 
         @Override
         public int hashCode() {
+            return hash;
+        }
+    }
+
+    /**
+     * Keys grouped by hash; a lookup compares against every key in the bucket with {@link UniqueValueKey#equals},
+     * so the result matches a pairwise scan without relying on that equality being transitive.
+     */
+    private static final class UniqueKeyBuckets {
+        private final Map<Integer, List<UniqueValueKey>> byHash = new HashMap<>();
+
+        void add(final UniqueValueKey key) {
+            byHash.computeIfAbsent(key.hash, ignored -> new ArrayList<>(1)).add(key);
+        }
+
+        List<UniqueValueKey> sameHash(final UniqueValueKey key) {
+            return byHash.getOrDefault(key.hash, List.of());
+        }
+
+        boolean containsEqual(final UniqueValueKey key) {
+            for (final UniqueValueKey candidate : sameHash(key)) {
+                if (candidate.equals(key)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        boolean isEmpty() {
+            return byHash.isEmpty();
+        }
+    }
+
+    /**
+     * Hash consistent with {@link #uniqueValuesEqual}: values it treats as equal hash equally. Numbers hash by value
+     * across types (1, 1L, 1.0 and Decimal128 1 collide), every zero — including Decimal128 negative zero, which has
+     * no BigDecimal form — hashes to 0, maps hash independently of entry order, and strings follow the index collation.
+     */
+    private static int uniqueHash(final Object value, final CollationSupport.Config collation) {
+        if (value == null) {
             return 0;
         }
+        if (value instanceof Number number) {
+            return number.doubleValue() == 0.0 ? 0 : MongoValueComparator.hash(number);
+        }
+        if (value instanceof String string) {
+            return collation.equalityHash(string);
+        }
+        if (value instanceof Map<?, ?> map) {
+            int hash = 0;
+            for (final Map.Entry<?, ?> entry : map.entrySet()) {
+                hash += Objects.hashCode(entry.getKey()) ^ uniqueHash(entry.getValue(), collation);
+            }
+            return hash;
+        }
+        if (value instanceof List<?> list) {
+            int hash = 1;
+            for (final Object item : list) {
+                hash = 31 * hash + uniqueHash(item, collation);
+            }
+            return hash;
+        }
+        if (value.getClass().isArray()) {
+            int hash = 1;
+            final int length = java.lang.reflect.Array.getLength(value);
+            for (int index = 0; index < length; index++) {
+                hash = 31 * hash + uniqueHash(java.lang.reflect.Array.get(value, index), collation);
+            }
+            return hash;
+        }
+        return Objects.hashCode(value);
     }
 
     private static boolean uniqueValuesEqual(
