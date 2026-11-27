@@ -30,7 +30,8 @@ Status date: 2026-11-27
 - Latest compatibility certification snapshot: commit `b44be73` (runs `25603109902`, `25603109886`, `25603109905`, `25603109900`).
 - `v0.1.11` release-candidate gates (2026-11-12, commit `51951e0`): CI Test Suite `43211389832`, Official Suite Sharded `43211405860`, R3 Failure Ledger `43211412878`, Complex Query Certification `43211384876`, R3 External Canary `43212987277` — all green.
 - `v0.1.12` release-candidate gates (2026-11-27, commit `5312333`): CI Test Suite `45926398512`, Official Suite Sharded `45938088753`, R3 Failure Ledger `45938092111`, Complex Query Certification `45926398463`, R3 External Canary `45938095464` — all green.
-- Next Java tag candidate: `v0.1.13`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
+- `v0.1.13` release-candidate gates (2026-11-27, commit `beebf96`): CI Test Suite `45940646635`, Official Suite Sharded `45940659093`, R3 Failure Ledger `45940661934`, Complex Query Certification `45940646653`, R3 External Canary `45940664997` — all green.
+- Next Java tag candidate: `v0.1.14`; regenerate certification artifacts against the release-candidate commit, not reuse historical tag evidence.
 
 ## Tagging Gate
 
