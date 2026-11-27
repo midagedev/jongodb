@@ -246,6 +246,39 @@ class QueryMatcherTest {
     }
 
     @Test
+    void elemMatchAppliesFieldPredicatesBesideLogicalOperatorsToTheElement() {
+        Document document =
+                new Document(
+                        "wallets",
+                        List.of(
+                                new Document("type", "FREE").append("tenant", "a"),
+                                new Document("type", "PAID").append("tenant", "b")));
+
+        assertTrue(
+                QueryMatcher.matches(
+                        document,
+                        new Document(
+                                "wallets",
+                                new Document(
+                                        "$elemMatch",
+                                        new Document("type", "PAID")
+                                                .append(
+                                                        "$or",
+                                                        List.of(
+                                                                new Document("tenant", "b"),
+                                                                new Document("tenant", "c")))))));
+        assertFalse(
+                QueryMatcher.matches(
+                        document,
+                        new Document(
+                                "wallets",
+                                new Document(
+                                        "$elemMatch",
+                                        new Document("type", "FREE")
+                                                .append("$or", List.of(new Document("tenant", "b")))))));
+    }
+
+    @Test
     void supportsElemMatchForArrayOfDocuments() {
         Document document =
                 new Document(
